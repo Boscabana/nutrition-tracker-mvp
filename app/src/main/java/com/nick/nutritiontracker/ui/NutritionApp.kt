@@ -14,7 +14,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nick.nutritiontracker.data.FoodEntryWithFood
-import com.nick.nutritiontracker.data.FoodItemEntity
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
 
 private val ProteinGreen = Color(0xFF2E7D32)

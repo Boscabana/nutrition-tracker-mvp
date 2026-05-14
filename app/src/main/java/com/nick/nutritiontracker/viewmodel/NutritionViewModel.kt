@@ -2,9 +2,7 @@ package com.nick.nutritiontracker.viewmodel
 
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
-import com.nick.nutritiontracker.data.FoodEntryEntity
 import com.nick.nutritiontracker.data.FoodEntryWithFood
-import com.nick.nutritiontracker.data.FoodItemEntity
 import java.time.LocalDate
 
 class NutritionViewModel : ViewModel() {
