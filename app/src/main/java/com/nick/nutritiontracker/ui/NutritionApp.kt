@@ -16,6 +16,8 @@ import androidx.compose.ui.unit.dp
 import com.nick.nutritiontracker.data.FoodEntryWithFood
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
 
+import com.nick.nutritiontracker.data.FoodItemEntity
+
 private val ProteinGreen = Color(0xFF2E7D32)
 private val CarbOrange = Color(0xFFFF9800)
 private val SugarRed = Color(0xFFD32F2F)
@@ -34,8 +36,8 @@ fun NutritionApp(vm: NutritionViewModel) {
             topBar = { TopAppBar(title = { Text("Nutrition MVP") }) },
             bottomBar = {
                 NavigationBar {
-                    NavigationBarItem(selected = tab == 0, onClick = { tab = 0 }, label = { Text("Heute") }, icon = {})
-                    NavigationBarItem(selected = tab == 1, onClick = { tab = 1 }, label = { Text("Lebensmittel") }, icon = {})
+                    NavigationBarItem(selected = tab == 0, onClick = { tab = 0 }, label = { Text("Heute") }, icon = { Box(Modifier.size(24.dp)) })
+                    NavigationBarItem(selected = tab == 1, onClick = { tab = 1 }, label = { Text("Lebensmittel") }, icon = { Box(Modifier.size(24.dp)) })
                 }
             }
         ) { padding ->
@@ -157,7 +159,7 @@ private fun AddEntryCard(foods: List<FoodItemEntity>, onAddEntry: (FoodItemEntit
             OutlinedTextField(
                 value = selected?.name ?: "Noch kein Lebensmittel",
                 onValueChange = {}, readOnly = true, label = { Text("Lebensmittel") },
-                modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth()
+                modifier = Modifier.menuAnchor().fillMaxWidth()
             )
             ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 foods.forEach { food -> DropdownMenuItem(text = { Text(food.name) }, onClick = { selected = food; expanded = false }) }

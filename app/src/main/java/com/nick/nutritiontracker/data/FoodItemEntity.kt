@@ -1,10 +1,11 @@
 package com.nick.nutritiontracker.data
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class FoodItemEntity(
     val id: Long = 0,
     val name: String,
-    val barcode: String? = null,
-    val brand: String? = null,
     val kcalPer100g: Double,
     val proteinPer100g: Double,
     val carbsPer100g: Double,
@@ -12,8 +13,10 @@ data class FoodItemEntity(
     val fatPer100g: Double,
     val saturatedFatPer100g: Double,
     val defaultPortionName: String? = null,
-    val defaultPortionGrams: Double? = null
+    val defaultPortionGrams: Double? = null,
+    val barcode: String? = null
 ) {
-    val complexCarbsPer100g: Double get() = (carbsPer100g - sugarPer100g).coerceAtLeast(0.0)
-    val unsaturatedFatPer100g: Double get() = (fatPer100g - saturatedFatPer100g).coerceAtLeast(0.0)
+    // These are "calculated fields" that your UI uses
+    val complexCarbsPer100g: Double get() = carbsPer100g - sugarPer100g
+    val unsaturatedFatPer100g: Double get() = fatPer100g - saturatedFatPer100g
 }
