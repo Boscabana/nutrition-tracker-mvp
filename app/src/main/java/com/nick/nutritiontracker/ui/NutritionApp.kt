@@ -13,10 +13,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.nick.nutritiontracker.data.FoodEntryWithFood
-import com.nick.nutritiontracker.viewmodel.NutritionViewModel
-
+import com.nick.nutritiontracker.data.FoodEntryEntity
 import com.nick.nutritiontracker.data.FoodItemEntity
+import com.nick.nutritiontracker.viewmodel.NutritionViewModel
 
 private val ProteinGreen = Color(0xFF2E7D32)
 private val CarbOrange = Color(0xFFFF9800)
@@ -36,13 +35,27 @@ fun NutritionApp(vm: NutritionViewModel) {
             topBar = { TopAppBar(title = { Text("Nutrition MVP") }) },
             bottomBar = {
                 NavigationBar {
-                    NavigationBarItem(selected = tab == 0, onClick = { tab = 0 }, label = { Text("Heute") }, icon = { Box(Modifier.size(24.dp)) })
-                    NavigationBarItem(selected = tab == 1, onClick = { tab = 1 }, label = { Text("Lebensmittel") }, icon = { Box(Modifier.size(24.dp)) })
+                    NavigationBarItem(
+                        selected = tab == 0,
+                        onClick = { tab = 0 },
+                        label = { Text("Heute") },
+                        icon = { Box(Modifier.size(24.dp)) }
+                    )
+                    NavigationBarItem(
+                        selected = tab == 1,
+                        onClick = { tab = 1 },
+                        label = { Text("Lebensmittel") },
+                        icon = { Box(Modifier.size(24.dp)) }
+                    )
                 }
             }
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
-                if (tab == 0) TodayScreen(foods, entries, vm::addEntry, vm::deleteEntry) else FoodsScreen(foods, vm::addFood)
+                if (tab == 0) {
+                    TodayScreen(foods, entries, vm::addEntry, vm::deleteEntry)
+                } else {
+                    FoodsScreen(foods, vm::addFood)
+                }
             }
         }
     }
@@ -51,7 +64,7 @@ fun NutritionApp(vm: NutritionViewModel) {
 @Composable
 private fun TodayScreen(
     foods: List<FoodItemEntity>,
-    entries: List<FoodEntryWithFood>,
+    entries: List<FoodEntryEntity>,
     onAddEntry: (FoodItemEntity, Double, String, String) -> Unit,
     onDelete: (Long) -> Unit
 ) {
@@ -62,17 +75,29 @@ private fun TodayScreen(
     val saturatedFat = entries.sumOf { it.saturatedFat }
     val unsaturatedFat = entries.sumOf { it.unsaturatedFat }
 
-    LazyColumn(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyColumn(
+        Modifier.fillMaxSize().padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
         item {
             Card {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Heute", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text("${kcal.round0()} kcal")
                     MacroLegendRow()
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         MacroNumber(protein, ProteinGreen)
-                        MacroGroup { MacroNumber(complexCarbs, CarbOrange); MacroNumber(sugar, SugarRed) }
-                        MacroGroup { MacroNumber(saturatedFat, SaturatedGrey); MacroNumber(unsaturatedFat, UnsaturatedYellow) }
+                        MacroGroup {
+                            MacroNumber(complexCarbs, CarbOrange)
+                            MacroNumber(sugar, SugarRed)
+                        }
+                        MacroGroup {
+                            MacroNumber(saturatedFat, SaturatedGrey)
+                            MacroNumber(unsaturatedFat, UnsaturatedYellow)
+                        }
                     }
                     Text("Alle Makrowerte in g", style = MaterialTheme.typography.labelSmall)
                 }
@@ -84,9 +109,9 @@ private fun TodayScreen(
 }
 
 @Composable
-private fun CompactEntryRow(entry: FoodEntryWithFood, onDelete: (Long) -> Unit) {
+private fun CompactEntryRow(entry: FoodEntryEntity, onDelete: (Long) -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth().clickable { onDelete(entry.entryId) },
+        modifier = Modifier.fillMaxWidth().clickable { onDelete(entry.id) },
         shape = RoundedCornerShape(12.dp)
     ) {
         Row(
@@ -146,40 +171,78 @@ private fun Separator() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddEntryCard(foods: List<FoodItemEntity>, onAddEntry: (FoodItemEntity, Double, String, String) -> Unit) {
+private fun AddEntryCard(
+    foods: List<FoodItemEntity>,
+    onAddEntry: (FoodItemEntity, Double, String, String) -> Unit
+) {
     var selected by remember(foods) { mutableStateOf(foods.firstOrNull()) }
     var expanded by remember { mutableStateOf(false) }
     var amount by remember { mutableStateOf("1") }
     var unit by remember { mutableStateOf("g") }
     var mealSlot by remember { mutableStateOf("Snack") }
 
-    Card { Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Eintragen", fontWeight = FontWeight.Bold)
-        ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
-            OutlinedTextField(
-                value = selected?.name ?: "Noch kein Lebensmittel",
-                onValueChange = {}, readOnly = true, label = { Text("Lebensmittel") },
-                modifier = Modifier.menuAnchor().fillMaxWidth()
-            )
-            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                foods.forEach { food -> DropdownMenuItem(text = { Text(food.name) }, onClick = { selected = food; expanded = false }) }
+    Card {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Eintragen", fontWeight = FontWeight.Bold)
+            ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
+                OutlinedTextField(
+                    value = selected?.name ?: "Noch kein Lebensmittel",
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Lebensmittel") },
+                    modifier = Modifier.menuAnchor().fillMaxWidth()
+                )
+                ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    foods.forEach { food ->
+                        DropdownMenuItem(
+                            text = { Text(food.name) },
+                            onClick = {
+                                selected = food
+                                expanded = false
+                            }
+                        )
+                    }
+                }
             }
+            OutlinedTextField(
+                value = amount,
+                onValueChange = { amount = it },
+                label = { Text("Menge") },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = unit == "g", onClick = { unit = "g" }, label = { Text("Gramm") })
+                val portionLabel = selected?.defaultPortionName ?: "Stück"
+                FilterChip(
+                    selected = unit == "portion",
+                    enabled = selected?.defaultPortionGrams != null,
+                    onClick = { unit = "portion" },
+                    label = { Text(portionLabel) }
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("Frühstück", "Mittag", "Abend", "Snack").forEach { slot ->
+                    FilterChip(
+                        selected = mealSlot == slot,
+                        onClick = { mealSlot = slot },
+                        label = { Text(slot) }
+                    )
+                }
+            }
+            Button(
+                enabled = selected != null,
+                onClick = { selected?.let { onAddEntry(it, amount.num(), unit, mealSlot) } },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Hinzufügen") }
         }
-        OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Menge") }, modifier = Modifier.fillMaxWidth())
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = unit == "g", onClick = { unit = "g" }, label = { Text("Gramm") })
-            val portionLabel = selected?.defaultPortionName ?: "Stück"
-            FilterChip(selected = unit == "portion", enabled = selected?.defaultPortionGrams != null, onClick = { unit = "portion" }, label = { Text(portionLabel) })
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("Frühstück", "Mittag", "Abend", "Snack").forEach { slot -> FilterChip(selected = mealSlot == slot, onClick = { mealSlot = slot }, label = { Text(slot) }) }
-        }
-        Button(enabled = selected != null, onClick = { selected?.let { onAddEntry(it, amount.num(), unit, mealSlot) } }, modifier = Modifier.fillMaxWidth()) { Text("Hinzufügen") }
-    } }
+    }
 }
 
 @Composable
-private fun FoodsScreen(foods: List<FoodItemEntity>, onAddFood: (String, Double, Double, Double, Double, Double, Double, String?, Double?, String?) -> Unit) {
+private fun FoodsScreen(
+    foods: List<FoodItemEntity>,
+    onAddFood: (String, Double, Double, Double, Double, Double, Double, String?, Double?, String?) -> Unit
+) {
     var name by remember { mutableStateOf("") }
     var kcal by remember { mutableStateOf("") }
     var protein by remember { mutableStateOf("") }
@@ -190,46 +253,60 @@ private fun FoodsScreen(foods: List<FoodItemEntity>, onAddFood: (String, Double,
     var portionName by remember { mutableStateOf("Stück") }
     var portionGrams by remember { mutableStateOf("") }
 
-    LazyColumn(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        item { Card { Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Lebensmittel anlegen", fontWeight = FontWeight.Bold)
-            OutlinedTextField(name, { name = it }, label = { Text("Name, z.B. Ei M") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(kcal, { kcal = it }, label = { Text("kcal pro 100g") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(protein, { protein = it }, label = { Text("Protein pro 100g") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(carbs, { carbs = it }, label = { Text("Kohlenhydrate gesamt pro 100g") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(sugar, { sugar = it }, label = { Text("davon Zucker pro 100g") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(fat, { fat = it }, label = { Text("Fett gesamt pro 100g") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(saturatedFat, { saturatedFat = it }, label = { Text("davon gesättigt pro 100g") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(portionName, { portionName = it }, label = { Text("Portionsname, z.B. Stück/Riegel") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(portionGrams, { portionGrams = it }, label = { Text("Gramm pro Portion, z.B. 53") }, modifier = Modifier.fillMaxWidth())
-            Button(enabled = name.isNotBlank(), onClick = {
-                onAddFood(name, kcal.num(), protein.num(), carbs.num(), sugar.num(), fat.num(), saturatedFat.num(), portionName, portionGrams.num().takeIf { it > 0.0 }, null)
-                name = ""; kcal = ""; protein = ""; carbs = ""; sugar = ""; fat = ""; saturatedFat = ""; portionGrams = ""
-            }, modifier = Modifier.fillMaxWidth()) { Text("Speichern") }
-        } } }
-        items(foods) { food -> Card { Column(Modifier.padding(12.dp)) {
-            Text(food.name, fontWeight = FontWeight.Bold)
-            Text("${food.kcalPer100g.round0()} kcal / 100g")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MacroNumber(food.proteinPer100g, ProteinGreen)
-                Separator()
-                MacroNumber(food.complexCarbsPer100g, CarbOrange)
-                MacroNumber(food.sugarPer100g, SugarRed)
-                Separator()
-                MacroNumber(food.saturatedFatPer100g, SaturatedGrey)
-                MacroNumber(food.unsaturatedFatPer100g, UnsaturatedYellow)
+    LazyColumn(
+        Modifier.fillMaxSize().padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item {
+            Card {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Lebensmittel anlegen", fontWeight = FontWeight.Bold)
+                    OutlinedTextField(name, { name = it }, label = { Text("Name, z.B. Ei M") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(kcal, { kcal = it }, label = { Text("kcal pro 100g") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(protein, { protein = it }, label = { Text("Protein pro 100g") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(carbs, { carbs = it }, label = { Text("Kohlenhydrate gesamt pro 100g") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(sugar, { sugar = it }, label = { Text("davon Zucker pro 100g") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(fat, { fat = it }, label = { Text("Fett gesamt pro 100g") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(saturatedFat, { saturatedFat = it }, label = { Text("davon gesättigt pro 100g") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(portionName, { portionName = it }, label = { Text("Portionsname, z.B. Stück/Riegel") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(portionGrams, { portionGrams = it }, label = { Text("Gramm pro Portion, z.B. 53") }, modifier = Modifier.fillMaxWidth())
+                    Button(
+                        enabled = name.isNotBlank(),
+                        onClick = {
+                            onAddFood(
+                                name, kcal.num(), protein.num(), carbs.num(), sugar.num(),
+                                fat.num(), saturatedFat.num(), portionName,
+                                portionGrams.num().takeIf { it > 0.0 }, null
+                            )
+                            name = ""; kcal = ""; protein = ""; carbs = ""; sugar = ""; fat = ""; saturatedFat = ""; portionGrams = ""
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Speichern") }
+                }
             }
-            if (food.defaultPortionGrams != null) Text("1 ${food.defaultPortionName ?: "Portion"} = ${food.defaultPortionGrams.round0()} g")
-        } } }
+        }
+        items(foods) { food ->
+            Card {
+                Column(Modifier.padding(12.dp)) {
+                    Text(food.name, fontWeight = FontWeight.Bold)
+                    Text("${food.kcalPer100g.round0()} kcal / 100g")
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        MacroNumber(food.proteinPer100g, ProteinGreen)
+                        Separator()
+                        MacroNumber(food.complexCarbsPer100g, CarbOrange)
+                        MacroNumber(food.sugarPer100g, SugarRed)
+                        Separator()
+                        MacroNumber(food.saturatedFatPer100g, SaturatedGrey)
+                        MacroNumber(food.unsaturatedFatPer100g, UnsaturatedYellow)
+                    }
+                    if (food.defaultPortionGrams != null) {
+                        Text("1 ${food.defaultPortionName ?: "Portion"} = ${food.defaultPortionGrams.round0()} g")
+                    }
+                }
+            }
+        }
     }
-}
-
-private fun FoodEntryWithFood.displayAmount(): String = if (unit == "portion") {
-    "${amount.clean()} ${defaultPortionName ?: "Portion"}"
-} else {
-    "${grams.clean()} g"
 }
 
 private fun String.num(): Double = replace(',', '.').toDoubleOrNull() ?: 0.0
 private fun Double.round0(): String = "%.0f".format(this)
-private fun Double.clean(): String = if (this % 1.0 == 0.0) "%.0f".format(this) else "%.1f".format(this)

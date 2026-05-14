@@ -2,7 +2,8 @@ package com.nick.nutritiontracker.viewmodel
 
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.ViewModel
-import com.nick.nutritiontracker.data.FoodEntryWithFood
+import com.nick.nutritiontracker.data.FoodEntryEntity
+import com.nick.nutritiontracker.data.FoodItemEntity
 import java.time.LocalDate
 
 class NutritionViewModel : ViewModel() {
@@ -12,7 +13,7 @@ class NutritionViewModel : ViewModel() {
     private var nextEntryId = 1L
 
     val foods = mutableStateListOf<FoodItemEntity>()
-    val todayEntries = mutableStateListOf<FoodEntryWithFood>()
+    val todayEntries = mutableStateListOf<FoodEntryEntity>()
 
     init {
         addFood("Ei M", 155.0, 13.0, 1.1, 1.1, 11.0, 3.3, "Stück", 53.0)
@@ -55,36 +56,25 @@ class NutritionViewModel : ViewModel() {
         if (grams <= 0.0) return
         val entry = FoodEntryEntity(
             id = nextEntryId++,
-            foodItemId = food.id,
             dateIso = todayIso,
             mealSlot = mealSlot,
             amount = amount,
             unit = unit,
-            grams = grams
+            grams = grams,
+            foodItemId = food.id,
+            name = food.name,
+            kcalPer100g = food.kcalPer100g,
+            proteinPer100g = food.proteinPer100g,
+            carbsPer100g = food.carbsPer100g,
+            sugarPer100g = food.sugarPer100g,
+            fatPer100g = food.fatPer100g,
+            saturatedFatPer100g = food.saturatedFatPer100g,
+            defaultPortionName = food.defaultPortionName
         )
-        todayEntries.add(
-            0,
-            FoodEntryWithFood(
-                entryId = entry.id,
-                dateIso = entry.dateIso,
-                mealSlot = entry.mealSlot,
-                amount = entry.amount,
-                unit = entry.unit,
-                grams = entry.grams,
-                foodItemId = food.id,
-                name = food.name,
-                defaultPortionName = food.defaultPortionName,
-                kcalPer100g = food.kcalPer100g,
-                proteinPer100g = food.proteinPer100g,
-                carbsPer100g = food.carbsPer100g,
-                sugarPer100g = food.sugarPer100g,
-                fatPer100g = food.fatPer100g,
-                saturatedFatPer100g = food.saturatedFatPer100g
-            )
-        )
+        todayEntries.add(0, entry)
     }
 
     fun deleteEntry(id: Long) {
-        todayEntries.removeAll { it.entryId == id }
+        todayEntries.removeAll { it.id == id }
     }
 }
