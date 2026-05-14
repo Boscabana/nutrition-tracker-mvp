@@ -1,26 +1,11 @@
-# Nutrition Tracker MVP
+# Nutrition Tracker MVP No Room
 
-Native Android MVP in Kotlin + Jetpack Compose + Room.
+Diese Version ist bewusst ohne Room/KAPT gebaut, damit sie auf Windows sofort kompiliert.
+Sie speichert Daten aktuell nur im Arbeitsspeicher. Persistente Speicherung bauen wir danach sauber nach.
 
-## Was schon drin ist
-
-- Lebensmittel lokal speichern
+Funktionen:
+- Lebensmittel anlegen
 - Nährwerte pro 100g
-- optionale Stück-/Portionsmenge, z.B. 1 Riegel = 40g, 1 Ei M = 53g
-- Tagestracking für heute
-- Eintrag wahlweise in Gramm oder Portion/Stück
-- automatische Umrechnung: `Gramm = Menge * Portionsgewicht`
-- automatische Makro-/Kalorienberechnung
-
-## Öffnen
-
-1. Ordner in Android Studio öffnen.
-2. Gradle Sync ausführen.
-3. App auf Android-Gerät/Emulator starten.
-
-## Nächster Schritt
-
-Barcode-Scan integrieren:
-- ML Kit Google Code Scanner
-- EAN speichern
-- später Open Food Facts Lookup
+- Portion/Stückgewicht, z.B. Ei M = 53g
+- Tagestracking per Gramm oder Portion
+- automatische Makro-/Kalorienrechnung

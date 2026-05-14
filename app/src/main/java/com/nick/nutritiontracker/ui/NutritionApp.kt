@@ -1,24 +1,34 @@
 package com.nick.nutritiontracker.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nick.nutritiontracker.data.FoodEntryWithFood
 import com.nick.nutritiontracker.data.FoodItemEntity
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
+
+private val ProteinGreen = Color(0xFF2E7D32)
+private val CarbOrange = Color(0xFFFF9800)
+private val SugarRed = Color(0xFFD32F2F)
+private val SaturatedGrey = Color(0xFF757575)
+private val UnsaturatedYellow = Color(0xFFFBC02D)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NutritionApp(vm: NutritionViewModel) {
     var tab by remember { mutableIntStateOf(0) }
-    val foods by vm.foods.collectAsStateWithLifecycle()
-    val entries by vm.todayEntries.collectAsStateWithLifecycle()
+    val foods = vm.foods
+    val entries = vm.todayEntries
 
     MaterialTheme {
         Scaffold(
@@ -46,27 +56,91 @@ private fun TodayScreen(
 ) {
     val kcal = entries.sumOf { it.kcal }
     val protein = entries.sumOf { it.protein }
-    val carbs = entries.sumOf { it.carbs }
-    val fat = entries.sumOf { it.fat }
+    val complexCarbs = entries.sumOf { it.complexCarbs }
+    val sugar = entries.sumOf { it.sugar }
+    val saturatedFat = entries.sumOf { it.saturatedFat }
+    val unsaturatedFat = entries.sumOf { it.unsaturatedFat }
 
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
-            Card { Column(Modifier.padding(16.dp)) {
-                Text("Heute", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text("${kcal.round1()} kcal")
-                Text("Protein ${protein.round1()} g · KH ${carbs.round1()} g · Fett ${fat.round1()} g")
-            } }
+            Card {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Heute", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                    Text("${kcal.round0()} kcal")
+                    MacroLegendRow()
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        MacroNumber(protein, ProteinGreen)
+                        MacroGroup { MacroNumber(complexCarbs, CarbOrange); MacroNumber(sugar, SugarRed) }
+                        MacroGroup { MacroNumber(saturatedFat, SaturatedGrey); MacroNumber(unsaturatedFat, UnsaturatedYellow) }
+                    }
+                    Text("Alle Makrowerte in g", style = MaterialTheme.typography.labelSmall)
+                }
+            }
         }
         item { AddEntryCard(foods, onAddEntry) }
-        items(entries) { entry ->
-            Card { Column(Modifier.padding(16.dp)) {
-                Text(entry.name, fontWeight = FontWeight.Bold)
-                Text("${entry.grams.round1()} g · ${entry.kcal.round1()} kcal")
-                Text("P ${entry.protein.round1()} · KH ${entry.carbs.round1()} · F ${entry.fat.round1()}")
-                TextButton(onClick = { onDelete(entry.entryId) }) { Text("Löschen") }
-            } }
+        items(entries) { entry -> CompactEntryRow(entry, onDelete) }
+    }
+}
+
+@Composable
+private fun CompactEntryRow(entry: FoodEntryWithFood, onDelete: (Long) -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().clickable { onDelete(entry.entryId) },
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Column(Modifier.weight(1.35f)) {
+                Text(entry.name, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(entry.displayAmount(), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+            }
+            Text(entry.kcal.round0(), modifier = Modifier.width(42.dp), fontWeight = FontWeight.Bold)
+            MacroNumber(entry.protein, ProteinGreen)
+            Separator()
+            MacroNumber(entry.complexCarbs, CarbOrange)
+            MacroNumber(entry.sugar, SugarRed)
+            Separator()
+            MacroNumber(entry.saturatedFat, SaturatedGrey)
+            MacroNumber(entry.unsaturatedFat, UnsaturatedYellow)
         }
     }
+}
+
+@Composable
+private fun MacroLegendRow() {
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        LegendDot(ProteinGreen, "Protein")
+        LegendDot(CarbOrange, "KH")
+        LegendDot(SugarRed, "Zucker")
+        LegendDot(SaturatedGrey, "ges.")
+        LegendDot(UnsaturatedYellow, "unges.")
+    }
+}
+
+@Composable
+private fun LegendDot(color: Color, text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        Box(Modifier.size(8.dp).background(color, RoundedCornerShape(50)))
+        Text(text, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+@Composable
+private fun MacroGroup(content: @Composable RowScope.() -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically, content = content)
+}
+
+@Composable
+private fun MacroNumber(value: Double, color: Color) {
+    Text(value.round0(), color = color, fontWeight = FontWeight.Bold, modifier = Modifier.widthIn(min = 24.dp))
+}
+
+@Composable
+private fun Separator() {
+    Text("|", color = MaterialTheme.colorScheme.outline)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -78,7 +152,7 @@ private fun AddEntryCard(foods: List<FoodItemEntity>, onAddEntry: (FoodItemEntit
     var unit by remember { mutableStateOf("g") }
     var mealSlot by remember { mutableStateOf("Snack") }
 
-    Card { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Card { Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("Eintragen", fontWeight = FontWeight.Bold)
         ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
             OutlinedTextField(
@@ -104,38 +178,57 @@ private fun AddEntryCard(foods: List<FoodItemEntity>, onAddEntry: (FoodItemEntit
 }
 
 @Composable
-private fun FoodsScreen(foods: List<FoodItemEntity>, onAddFood: (String, Double, Double, Double, Double, String?, Double?, String?) -> Unit) {
+private fun FoodsScreen(foods: List<FoodItemEntity>, onAddFood: (String, Double, Double, Double, Double, Double, Double, String?, Double?, String?) -> Unit) {
     var name by remember { mutableStateOf("") }
     var kcal by remember { mutableStateOf("") }
     var protein by remember { mutableStateOf("") }
     var carbs by remember { mutableStateOf("") }
+    var sugar by remember { mutableStateOf("") }
     var fat by remember { mutableStateOf("") }
+    var saturatedFat by remember { mutableStateOf("") }
     var portionName by remember { mutableStateOf("Stück") }
     var portionGrams by remember { mutableStateOf("") }
 
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Card { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyColumn(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item { Card { Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Lebensmittel anlegen", fontWeight = FontWeight.Bold)
             OutlinedTextField(name, { name = it }, label = { Text("Name, z.B. Ei M") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(kcal, { kcal = it }, label = { Text("kcal pro 100g") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(protein, { protein = it }, label = { Text("Protein pro 100g") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(carbs, { carbs = it }, label = { Text("KH pro 100g") }, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(fat, { fat = it }, label = { Text("Fett pro 100g") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(carbs, { carbs = it }, label = { Text("Kohlenhydrate gesamt pro 100g") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(sugar, { sugar = it }, label = { Text("davon Zucker pro 100g") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(fat, { fat = it }, label = { Text("Fett gesamt pro 100g") }, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(saturatedFat, { saturatedFat = it }, label = { Text("davon gesättigt pro 100g") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(portionName, { portionName = it }, label = { Text("Portionsname, z.B. Stück/Riegel") }, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(portionGrams, { portionGrams = it }, label = { Text("Gramm pro Portion, z.B. 53") }, modifier = Modifier.fillMaxWidth())
             Button(enabled = name.isNotBlank(), onClick = {
-                onAddFood(name, kcal.num(), protein.num(), carbs.num(), fat.num(), portionName, portionGrams.num().takeIf { it > 0.0 }, null)
-                name = ""; kcal = ""; protein = ""; carbs = ""; fat = ""; portionGrams = ""
+                onAddFood(name, kcal.num(), protein.num(), carbs.num(), sugar.num(), fat.num(), saturatedFat.num(), portionName, portionGrams.num().takeIf { it > 0.0 }, null)
+                name = ""; kcal = ""; protein = ""; carbs = ""; sugar = ""; fat = ""; saturatedFat = ""; portionGrams = ""
             }, modifier = Modifier.fillMaxWidth()) { Text("Speichern") }
         } } }
-        items(foods) { food -> Card { Column(Modifier.padding(16.dp)) {
+        items(foods) { food -> Card { Column(Modifier.padding(12.dp)) {
             Text(food.name, fontWeight = FontWeight.Bold)
-            Text("${food.kcalPer100g.round1()} kcal / 100g")
-            Text("P ${food.proteinPer100g.round1()} · KH ${food.carbsPer100g.round1()} · F ${food.fatPer100g.round1()}")
-            if (food.defaultPortionGrams != null) Text("1 ${food.defaultPortionName ?: "Portion"} = ${food.defaultPortionGrams.round1()} g")
+            Text("${food.kcalPer100g.round0()} kcal / 100g")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MacroNumber(food.proteinPer100g, ProteinGreen)
+                Separator()
+                MacroNumber(food.complexCarbsPer100g, CarbOrange)
+                MacroNumber(food.sugarPer100g, SugarRed)
+                Separator()
+                MacroNumber(food.saturatedFatPer100g, SaturatedGrey)
+                MacroNumber(food.unsaturatedFatPer100g, UnsaturatedYellow)
+            }
+            if (food.defaultPortionGrams != null) Text("1 ${food.defaultPortionName ?: "Portion"} = ${food.defaultPortionGrams.round0()} g")
         } } }
     }
 }
 
+private fun FoodEntryWithFood.displayAmount(): String = if (unit == "portion") {
+    "${amount.clean()} ${defaultPortionName ?: "Portion"}"
+} else {
+    "${grams.clean()} g"
+}
+
 private fun String.num(): Double = replace(',', '.').toDoubleOrNull() ?: 0.0
-private fun Double.round1(): String = "%.1f".format(this)
+private fun Double.round0(): String = "%.0f".format(this)
+private fun Double.clean(): String = if (this % 1.0 == 0.0) "%.0f".format(this) else "%.1f".format(this)
