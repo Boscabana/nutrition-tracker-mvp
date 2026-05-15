@@ -106,6 +106,32 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         saveFoods()
     }
 
+    fun updateFood(updatedFood: FoodItemEntity) {
+        val index = foods.indexOfFirst { it.id == updatedFood.id }
+        if (index != -1) {
+            foods[index] = updatedFood
+            recalculateIds()
+            saveFoods()
+            
+            // Sync current entries with potentially updated food data (name/macros)
+            val updatedEntries = todayEntries.map { entry ->
+                if (entry.foodItemId == updatedFood.id) {
+                    entry.copy(
+                        name = updatedFood.name,
+                        kcalPer100g = updatedFood.kcalPer100g,
+                        proteinPer100g = updatedFood.proteinPer100g,
+                        carbsPer100g = updatedFood.carbsPer100g,
+                        sugarPer100g = updatedFood.sugarPer100g,
+                        fatPer100g = updatedFood.fatPer100g,
+                        saturatedFatPer100g = updatedFood.saturatedFatPer100g
+                    )
+                } else entry
+            }
+            todayEntries.clear()
+            todayEntries.addAll(updatedEntries)
+        }
+    }
+
     fun deleteFood(id: Long) {
         foods.removeAll { it.id == id }
         // Remove associated entries as requested
@@ -136,6 +162,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             saturatedFatPer100g = food.saturatedFatPer100g
         )
         todayEntries.add(0, entry)
+    }
+
+    fun updateEntry(updatedEntry: FoodEntryEntity) {
+        val index = todayEntries.indexOfFirst { it.id == updatedEntry.id }
+        if (index != -1) {
+            todayEntries[index] = updatedEntry
+        }
     }
 
     fun deleteEntry(id: Long) {

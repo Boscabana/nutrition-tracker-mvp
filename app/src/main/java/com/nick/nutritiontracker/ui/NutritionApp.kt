@@ -6,9 +6,13 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,6 +23,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.nick.nutritiontracker.data.FoodEntryEntity
 import com.nick.nutritiontracker.data.FoodItemEntity
 import com.nick.nutritiontracker.data.FoodPortionEntity
@@ -31,6 +36,7 @@ private val CarbOrange = Color(0xFFFF9800)
 private val SugarRed = Color(0xFFD32F2F)
 private val SaturatedGrey = Color(0xFF757575)
 private val UnsaturatedYellow = Color(0xFFFBC02D)
+private val EditBlue = Color(0xFF2196F3)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,9 +67,9 @@ fun NutritionApp(vm: NutritionViewModel) {
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
                 if (tab == 0) {
-                    TodayScreen(foods, entries, vm::addEntry, vm::deleteEntry)
+                    TodayScreen(foods, entries, vm::addEntry, vm::deleteEntry, vm::updateEntry)
                 } else {
-                    FoodsScreen(foods, vm::addFood, vm::deleteFood)
+                    FoodsScreen(foods, vm::addFood, vm::deleteFood, vm::updateFood)
                 }
             }
         }
@@ -71,70 +77,59 @@ fun NutritionApp(vm: NutritionViewModel) {
 }
 
 @Composable
-fun SwipeToDeleteContainer(
-    onDeleteConfirmed: () -> Unit,
+fun SwipeActionContainer(
+    onDeleteRequest: () -> Unit,
+    onEditRequest: () -> Unit,
     content: @Composable () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var showDialog by remember { mutableStateOf(false) }
-    
     val maxSwipePx = with(LocalDensity.current) { 72.dp.toPx() }
     val offsetX = remember { Animatable(0f) }
-
-    if (showDialog) {
-        AlertDialog(
-            onDismissRequest = { 
-                showDialog = false
-                scope.launch { offsetX.animateTo(0f) }
-            },
-            title = { Text("Eintrag löschen") },
-            text = { Text("Möchtest du diesen Eintrag wirklich löschen?") },
-            confirmButton = {
-                TextButton(onClick = {
-                    onDeleteConfirmed()
-                    showDialog = false
-                    scope.launch { offsetX.snapTo(0f) }
-                }) {
-                    Text("Löschen", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { 
-                    showDialog = false
-                    scope.launch { offsetX.animateTo(0f) }
-                }) {
-                    Text("Abbrechen")
-                }
-            }
-        )
-    }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(IntrinsicSize.Min)
     ) {
-        // Background layer with the Delete button
+        // Edit Layer (revealed on swipe right)
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color.Red, RoundedCornerShape(12.dp))
+                .background(EditBlue, RoundedCornerShape(12.dp))
+                .padding(start = 12.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            IconButton(
+                onClick = {
+                    scope.launch { offsetX.animateTo(0f) }
+                    onEditRequest()
+                },
+                modifier = Modifier.width(72.dp).fillMaxHeight()
+            ) {
+                Icon(Icons.Default.Edit, "Bearbeiten", tint = Color.White)
+            }
+        }
+
+        // Delete Layer (revealed on swipe left)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(SugarRed, RoundedCornerShape(12.dp))
                 .padding(end = 12.dp),
             contentAlignment = Alignment.CenterEnd
         ) {
             IconButton(
-                onClick = { showDialog = true },
+                onClick = {
+                    scope.launch { offsetX.animateTo(0f) }
+                    onDeleteRequest()
+                },
                 modifier = Modifier.width(72.dp).fillMaxHeight()
             ) {
-                Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = "Löschen",
-                    tint = Color.White
-                )
+                Icon(Icons.Default.Delete, "Löschen", tint = Color.White)
             }
         }
 
-        // Foreground content layer that moves
+        // Foreground Layer
         Box(
             modifier = Modifier
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
@@ -143,7 +138,7 @@ fun SwipeToDeleteContainer(
                     detectHorizontalDragGestures(
                         onHorizontalDrag = { change, dragAmount ->
                             scope.launch {
-                                val newOffset = (offsetX.value + dragAmount).coerceIn(-maxSwipePx, 0f)
+                                val newOffset = (offsetX.value + dragAmount).coerceIn(-maxSwipePx, maxSwipePx)
                                 offsetX.snapTo(newOffset)
                             }
                             change.consume()
@@ -152,6 +147,8 @@ fun SwipeToDeleteContainer(
                             scope.launch {
                                 if (offsetX.value < -maxSwipePx * 0.6f) {
                                     offsetX.animateTo(-maxSwipePx)
+                                } else if (offsetX.value > maxSwipePx * 0.6f) {
+                                    offsetX.animateTo(maxSwipePx)
                                 } else {
                                     offsetX.animateTo(0f)
                                 }
@@ -171,14 +168,47 @@ private fun TodayScreen(
     foods: List<FoodItemEntity>,
     entries: List<FoodEntryEntity>,
     onAddEntry: (FoodItemEntity, Double, FoodPortionEntity?, String) -> Unit,
-    onDelete: (Long) -> Unit
+    onDelete: (Long) -> Unit,
+    onUpdate: (FoodEntryEntity) -> Unit
 ) {
+    var entryToDelete by remember { mutableStateOf<Long?>(null) }
+    var entryToEdit by remember { mutableStateOf<FoodEntryEntity?>(null) }
+
     val kcal = entries.sumOf { it.kcal }
     val protein = entries.sumOf { it.protein }
     val complexCarbs = entries.sumOf { it.complexCarbs }
     val sugar = entries.sumOf { it.sugar }
     val saturatedFat = entries.sumOf { it.saturatedFat }
     val unsaturatedFat = entries.sumOf { it.unsaturatedFat }
+
+    if (entryToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { entryToDelete = null },
+            title = { Text("Eintrag löschen") },
+            text = { Text("Möchtest du diesen Eintrag wirklich löschen?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDelete(entryToDelete!!)
+                    entryToDelete = null
+                }) { Text("Löschen", color = SugarRed) }
+            },
+            dismissButton = {
+                TextButton(onClick = { entryToDelete = null }) { Text("Abbrechen") }
+            }
+        )
+    }
+
+    if (entryToEdit != null) {
+        EditEntryDialog(
+            entry = entryToEdit!!,
+            foods = foods,
+            onDismiss = { entryToEdit = null },
+            onSave = { updated ->
+                onUpdate(updated)
+                entryToEdit = null
+            }
+        )
+    }
 
     LazyColumn(
         Modifier.fillMaxSize().padding(12.dp),
@@ -210,11 +240,85 @@ private fun TodayScreen(
         }
         item { AddEntryCard(foods, onAddEntry) }
         items(entries, key = { it.id }) { entry ->
-            SwipeToDeleteContainer(onDeleteConfirmed = { onDelete(entry.id) }) {
+            SwipeActionContainer(
+                onDeleteRequest = { entryToDelete = entry.id },
+                onEditRequest = { entryToEdit = entry }
+            ) {
                 CompactEntryRow(entry)
             }
         }
     }
+}
+
+@Composable
+private fun EditEntryDialog(
+    entry: FoodEntryEntity,
+    foods: List<FoodItemEntity>,
+    onDismiss: () -> Unit,
+    onSave: (FoodEntryEntity) -> Unit
+) {
+    val food = foods.find { it.id == entry.foodItemId } ?: return
+    var amount by remember { mutableStateOf(entry.amount.toString().replace(".0", "")) }
+    var selectedPortion by remember { 
+        mutableStateOf(food.portions.find { it.name == entry.unitLabel }) 
+    }
+    var mealSlot by remember { mutableStateOf(entry.mealSlot) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Eintrag bearbeiten") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(food.name, fontWeight = FontWeight.Bold)
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { amount = it },
+                    label = { Text("Menge") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text("Einheit", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = selectedPortion == null,
+                        onClick = { selectedPortion = null },
+                        label = { Text("Gramm") }
+                    )
+                    food.portions.forEach { portion ->
+                        FilterChip(
+                            selected = selectedPortion == portion,
+                            onClick = { selectedPortion = portion },
+                            label = { Text("${portion.name} (${portion.grams.round0()}g)") }
+                        )
+                    }
+                }
+                Text("Mahlzeit", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Frühstück", "Mittag", "Abend", "Snack").forEach { slot ->
+                        FilterChip(
+                            selected = mealSlot == slot,
+                            onClick = { mealSlot = slot },
+                            label = { Text(slot) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val numAmount = amount.num()
+                val grams = if (selectedPortion != null) numAmount * selectedPortion!!.grams else numAmount
+                onSave(entry.copy(
+                    amount = numAmount,
+                    unitLabel = selectedPortion?.name ?: "g",
+                    grams = grams,
+                    mealSlot = mealSlot
+                ))
+            }) { Text("Speichern") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Abbrechen") }
+        }
+    )
 }
 
 @Composable
@@ -362,60 +466,75 @@ private fun AddEntryCard(
 private fun FoodsScreen(
     foods: List<FoodItemEntity>,
     onAddFood: (String, Double, Double, Double, Double, Double, Double, List<FoodPortionEntity>, String?) -> Unit,
-    onDeleteFood: (Long) -> Unit
+    onDeleteFood: (Long) -> Unit,
+    onUpdateFood: (FoodItemEntity) -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
-    var kcal by remember { mutableStateOf("") }
-    var protein by remember { mutableStateOf("") }
-    var carbs by remember { mutableStateOf("") }
-    var sugar by remember { mutableStateOf("") }
-    var fat by remember { mutableStateOf("") }
-    var saturatedFat by remember { mutableStateOf("") }
-    var portionName by remember { mutableStateOf("Portion") }
-    var portionGrams by remember { mutableStateOf("") }
+    var foodToDelete by remember { mutableStateOf<Long?>(null) }
+    var foodToEdit by remember { mutableStateOf<FoodItemEntity?>(null) }
+    var showAddDialog by remember { mutableStateOf(false) }
+
+    if (foodToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { foodToDelete = null },
+            title = { Text("Lebensmittel löschen") },
+            text = { Text("Möchtest du dieses Lebensmittel und alle zugehörigen Einträge wirklich löschen?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDeleteFood(foodToDelete!!)
+                    foodToDelete = null
+                }) { Text("Löschen", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = { foodToDelete = null }) { Text("Abbrechen") }
+            }
+        )
+    }
+
+    if (foodToEdit != null) {
+        FoodEditDialog(
+            food = foodToEdit!!,
+            onDismiss = { foodToEdit = null },
+            onSave = { updated ->
+                onUpdateFood(updated)
+                foodToEdit = null
+            }
+        )
+    }
+
+    if (showAddDialog) {
+        FoodEditDialog(
+            food = null,
+            onDismiss = { showAddDialog = false },
+            onSave = { newFood ->
+                onAddFood(
+                    newFood.name, newFood.kcalPer100g, newFood.proteinPer100g,
+                    newFood.carbsPer100g, newFood.sugarPer100g, newFood.fatPer100g,
+                    newFood.saturatedFatPer100g, newFood.portions, newFood.barcode
+                )
+                showAddDialog = false
+            }
+        )
+    }
 
     LazyColumn(
         Modifier.fillMaxSize().padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
-            Card {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Lebensmittel anlegen", fontWeight = FontWeight.Bold)
-                    OutlinedTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(kcal, { kcal = it }, label = { Text("kcal pro 100g") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(protein, { protein = it }, label = { Text("Protein pro 100g") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(carbs, { carbs = it }, label = { Text("KH pro 100g") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(sugar, { sugar = it }, label = { Text("Zucker pro 100g") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(fat, { fat = it }, label = { Text("Fett pro 100g") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(saturatedFat, { saturatedFat = it }, label = { Text("ges. Fett pro 100g") }, modifier = Modifier.fillMaxWidth())
-                    
-                    Text("Standard Portion", style = MaterialTheme.typography.labelMedium)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(portionName, { portionName = it }, label = { Text("Name (z.B. Stück)") }, modifier = Modifier.weight(1f))
-                        OutlinedTextField(portionGrams, { portionGrams = it }, label = { Text("Gramm") }, modifier = Modifier.weight(0.6f))
-                    }
-                    
-                    Button(
-                        enabled = name.isNotBlank(),
-                        onClick = {
-                            val portions = if (portionGrams.num() > 0) {
-                                listOf(FoodPortionEntity(0, portionName, portionGrams.num()))
-                            } else emptyList()
-                            
-                            onAddFood(
-                                name, kcal.num(), protein.num(), carbs.num(), sugar.num(),
-                                fat.num(), saturatedFat.num(), portions, null
-                            )
-                            name = ""; kcal = ""; protein = ""; carbs = ""; sugar = ""; fat = ""; saturatedFat = ""; portionGrams = ""
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("Speichern") }
-                }
+            Button(
+                onClick = { showAddDialog = true },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Add, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Neues Lebensmittel")
             }
         }
         items(foods, key = { it.id }) { food ->
-            SwipeToDeleteContainer(onDeleteConfirmed = { onDeleteFood(food.id) }) {
+            SwipeActionContainer(
+                onDeleteRequest = { foodToDelete = food.id },
+                onEditRequest = { foodToEdit = food }
+            ) {
                 Card {
                     Column(Modifier.padding(12.dp)) {
                         Text(food.name, fontWeight = FontWeight.Bold)
@@ -438,6 +557,116 @@ private fun FoodsScreen(
             }
         }
     }
+}
+
+@Composable
+private fun FoodEditDialog(
+    food: FoodItemEntity?,
+    onDismiss: () -> Unit,
+    onSave: (FoodItemEntity) -> Unit
+) {
+    var name by remember { mutableStateOf(food?.name ?: "") }
+    var kcal by remember { mutableStateOf(food?.kcalPer100g?.toString() ?: "") }
+    var protein by remember { mutableStateOf(food?.proteinPer100g?.toString() ?: "") }
+    var carbs by remember { mutableStateOf(food?.carbsPer100g?.toString() ?: "") }
+    var sugar by remember { mutableStateOf(food?.sugarPer100g?.toString() ?: "") }
+    var fat by remember { mutableStateOf(food?.fatPer100g?.toString() ?: "") }
+    var saturatedFat by remember { mutableStateOf(food?.saturatedFatPer100g?.toString() ?: "") }
+    var barcode by remember { mutableStateOf(food?.barcode ?: "") }
+    
+    val portions = remember { 
+        mutableStateListOf<PortionInputState>().apply {
+            food?.portions?.forEach { add(PortionInputState(it.name, it.grams.toString().replace(".0", ""))) }
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.fillMaxWidth().fillMaxHeight(0.9f)
+        ) {
+            Column(
+                Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = if (food == null) "Lebensmittel anlegen" else "Lebensmittel bearbeiten",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                
+                OutlinedTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(kcal, { kcal = it }, label = { Text("kcal pro 100g") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(protein, { protein = it }, label = { Text("Protein pro 100g") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(carbs, { carbs = it }, label = { Text("KH pro 100g") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(sugar, { sugar = it }, label = { Text("Zucker pro 100g") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(fat, { fat = it }, label = { Text("Fett pro 100g") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(saturatedFat, { saturatedFat = it }, label = { Text("ges. Fett pro 100g") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(barcode, { barcode = it }, label = { Text("Barcode") }, modifier = Modifier.fillMaxWidth())
+                
+                HorizontalDivider()
+                Text("Portionen", fontWeight = FontWeight.Bold)
+                
+                portions.forEachIndexed { index, portionState ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = portionState.name,
+                            onValueChange = { portionState.name = it },
+                            label = { Text("Name") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        OutlinedTextField(
+                            value = portionState.grams,
+                            onValueChange = { portionState.grams = it },
+                            label = { Text("g") },
+                            modifier = Modifier.weight(0.6f)
+                        )
+                        IconButton(onClick = { portions.removeAt(index) }) {
+                            Icon(Icons.Default.Delete, null, tint = Color.Red)
+                        }
+                    }
+                }
+                
+                TextButton(onClick = { portions.add(PortionInputState("", "")) }) {
+                    Icon(Icons.Default.Add, null)
+                    Spacer(Modifier.width(4.dp))
+                    Text("Portion hinzufügen")
+                }
+                
+                Spacer(Modifier.height(16.dp))
+                
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("Abbrechen") }
+                    Button(
+                        enabled = name.isNotBlank(),
+                        onClick = {
+                            onSave(FoodItemEntity(
+                                id = food?.id ?: 0,
+                                name = name,
+                                kcalPer100g = kcal.num(),
+                                proteinPer100g = protein.num(),
+                                carbsPer100g = carbs.num(),
+                                sugarPer100g = sugar.num(),
+                                fatPer100g = fat.num(),
+                                saturatedFatPer100g = saturatedFat.num(),
+                                barcode = barcode.takeIf { it.isNotBlank() },
+                                portions = portions.map { FoodPortionEntity(0, it.name, it.grams.num()) }
+                            ))
+                        }
+                    ) { Text("Speichern") }
+                }
+            }
+        }
+    }
+}
+
+class PortionInputState(nameInitial: String, gramsInitial: String) {
+    var name by mutableStateOf(nameInitial)
+    var grams by mutableStateOf(gramsInitial)
 }
 
 private fun String.num(): Double = replace(',', '.').toDoubleOrNull() ?: 0.0
