@@ -12,11 +12,15 @@ data class FoodItemEntity(
     val sugarPer100g: Double,
     val fatPer100g: Double,
     val saturatedFatPer100g: Double,
-    val defaultPortionName: String? = null,
-    val defaultPortionGrams: Double? = null,
+    val portions: List<FoodPortionEntity> = emptyList(),
     val barcode: String? = null
 ) {
-    // These are "calculated fields" that your UI uses
-    val complexCarbsPer100g: Double get() = carbsPer100g - sugarPer100g
-    val unsaturatedFatPer100g: Double get() = fatPer100g - saturatedFatPer100g
+    val complexCarbsPer100g: Double
+        get() = (carbsPer100g - sugarPer100g).coerceAtLeast(0.0)
+
+    val unsaturatedFatPer100g: Double
+        get() = (fatPer100g - saturatedFatPer100g).coerceAtLeast(0.0)
+
+    val defaultPortion: FoodPortionEntity?
+        get() = portions.firstOrNull()
 }

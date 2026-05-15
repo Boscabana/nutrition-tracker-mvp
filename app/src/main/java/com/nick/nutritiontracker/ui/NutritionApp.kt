@@ -1,11 +1,12 @@
 package com.nick.nutritiontracker.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,7 +16,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nick.nutritiontracker.data.FoodEntryEntity
 import com.nick.nutritiontracker.data.FoodItemEntity
+import com.nick.nutritiontracker.data.FoodPortionEntity
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
+import kotlinx.coroutines.launch
 
 private val ProteinGreen = Color(0xFF2E7D32)
 private val CarbOrange = Color(0xFFFF9800)
@@ -32,7 +35,7 @@ fun NutritionApp(vm: NutritionViewModel) {
 
     MaterialTheme {
         Scaffold(
-            topBar = { TopAppBar(title = { Text("Nutrition MVP") }) },
+            topBar = { TopAppBar(title = { Text("Nutrition Tracker") }) },
             bottomBar = {
                 NavigationBar {
                     NavigationBarItem(
@@ -54,10 +57,87 @@ fun NutritionApp(vm: NutritionViewModel) {
                 if (tab == 0) {
                     TodayScreen(foods, entries, vm::addEntry, vm::deleteEntry)
                 } else {
-                    FoodsScreen(foods, vm::addFood)
+                    FoodsScreen(foods, vm::addFood, vm::deleteFood)
                 }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SwipeToDeleteContainer(
+    onDeleteConfirmed: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    var showDialog by remember { mutableStateOf(false) }
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                showDialog = true
+                true // Stay swiped to show the background trash area
+            } else {
+                false
+            }
+        }
+    )
+
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { 
+                showDialog = false
+                scope.launch { dismissState.snapTo(SwipeToDismissBoxValue.Settled) }
+            },
+            title = { Text("Eintrag löschen") },
+            text = { Text("Möchtest du diesen Eintrag wirklich löschen?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onDeleteConfirmed()
+                    showDialog = false
+                    scope.launch { dismissState.snapTo(SwipeToDismissBoxValue.Settled) }
+                }) {
+                    Text("Löschen", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { 
+                    showDialog = false
+                    scope.launch { dismissState.snapTo(SwipeToDismissBoxValue.Settled) }
+                }) {
+                    Text("Abbrechen")
+                }
+            }
+        )
+    }
+
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        backgroundContent = {
+            val color = if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) {
+                Color.Red
+            } else {
+                Color.Transparent
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(color, RoundedCornerShape(12.dp))
+                    .padding(horizontal = 20.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                IconButton(onClick = { showDialog = true }) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Löschen",
+                        tint = Color.White
+                    )
+                }
+            }
+        }
+    ) {
+        content()
     }
 }
 
@@ -65,7 +145,7 @@ fun NutritionApp(vm: NutritionViewModel) {
 private fun TodayScreen(
     foods: List<FoodItemEntity>,
     entries: List<FoodEntryEntity>,
-    onAddEntry: (FoodItemEntity, Double, String, String) -> Unit,
+    onAddEntry: (FoodItemEntity, Double, FoodPortionEntity?, String) -> Unit,
     onDelete: (Long) -> Unit
 ) {
     val kcal = entries.sumOf { it.kcal }
@@ -104,14 +184,18 @@ private fun TodayScreen(
             }
         }
         item { AddEntryCard(foods, onAddEntry) }
-        items(entries) { entry -> CompactEntryRow(entry, onDelete) }
+        items(entries, key = { it.id }) { entry ->
+            SwipeToDeleteContainer(onDeleteConfirmed = { onDelete(entry.id) }) {
+                CompactEntryRow(entry)
+            }
+        }
     }
 }
 
 @Composable
-private fun CompactEntryRow(entry: FoodEntryEntity, onDelete: (Long) -> Unit) {
+private fun CompactEntryRow(entry: FoodEntryEntity) {
     Card(
-        modifier = Modifier.fillMaxWidth().clickable { onDelete(entry.id) },
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp)
     ) {
         Row(
@@ -119,11 +203,11 @@ private fun CompactEntryRow(entry: FoodEntryEntity, onDelete: (Long) -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column(Modifier.weight(1.35f)) {
+            Column(Modifier.weight(1f)) {
                 Text(entry.name, fontWeight = FontWeight.Bold, maxLines = 1)
                 Text(entry.displayAmount(), style = MaterialTheme.typography.labelSmall, maxLines = 1)
             }
-            Text(entry.kcal.round0(), modifier = Modifier.width(42.dp), fontWeight = FontWeight.Bold)
+            Text(entry.kcal.round0(), modifier = Modifier.width(36.dp), fontWeight = FontWeight.Bold)
             MacroNumber(entry.protein, ProteinGreen)
             Separator()
             MacroNumber(entry.complexCarbs, CarbOrange)
@@ -161,7 +245,7 @@ private fun MacroGroup(content: @Composable RowScope.() -> Unit) {
 
 @Composable
 private fun MacroNumber(value: Double, color: Color) {
-    Text(value.round0(), color = color, fontWeight = FontWeight.Bold, modifier = Modifier.widthIn(min = 24.dp))
+    Text(value.round0(), color = color, fontWeight = FontWeight.Bold, modifier = Modifier.widthIn(min = 20.dp))
 }
 
 @Composable
@@ -169,16 +253,16 @@ private fun Separator() {
     Text("|", color = MaterialTheme.colorScheme.outline)
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun AddEntryCard(
     foods: List<FoodItemEntity>,
-    onAddEntry: (FoodItemEntity, Double, String, String) -> Unit
+    onAddEntry: (FoodItemEntity, Double, FoodPortionEntity?, String) -> Unit
 ) {
-    var selected by remember(foods) { mutableStateOf(foods.firstOrNull()) }
+    var selectedFood by remember(foods) { mutableStateOf(foods.firstOrNull()) }
+    var selectedPortion by remember(selectedFood) { mutableStateOf(selectedFood?.portions?.firstOrNull()) }
     var expanded by remember { mutableStateOf(false) }
     var amount by remember { mutableStateOf("1") }
-    var unit by remember { mutableStateOf("g") }
     var mealSlot by remember { mutableStateOf("Snack") }
 
     Card {
@@ -186,7 +270,7 @@ private fun AddEntryCard(
             Text("Eintragen", fontWeight = FontWeight.Bold)
             ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
                 OutlinedTextField(
-                    value = selected?.name ?: "Noch kein Lebensmittel",
+                    value = selectedFood?.name ?: "Noch kein Lebensmittel",
                     onValueChange = {},
                     readOnly = true,
                     label = { Text("Lebensmittel") },
@@ -197,30 +281,39 @@ private fun AddEntryCard(
                         DropdownMenuItem(
                             text = { Text(food.name) },
                             onClick = {
-                                selected = food
+                                selectedFood = food
                                 expanded = false
                             }
                         )
                     }
                 }
             }
+            
             OutlinedTextField(
                 value = amount,
                 onValueChange = { amount = it },
                 label = { Text("Menge") },
                 modifier = Modifier.fillMaxWidth()
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = unit == "g", onClick = { unit = "g" }, label = { Text("Gramm") })
-                val portionLabel = selected?.defaultPortionName ?: "Stück"
+
+            Text("Einheit", style = MaterialTheme.typography.labelMedium)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
-                    selected = unit == "portion",
-                    enabled = selected?.defaultPortionGrams != null,
-                    onClick = { unit = "portion" },
-                    label = { Text(portionLabel) }
+                    selected = selectedPortion == null,
+                    onClick = { selectedPortion = null },
+                    label = { Text("Gramm") }
                 )
+                selectedFood?.portions?.forEach { portion ->
+                    FilterChip(
+                        selected = selectedPortion == portion,
+                        onClick = { selectedPortion = portion },
+                        label = { Text("${portion.name} (${portion.grams.round0()}g)") }
+                    )
+                }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+            Text("Mahlzeit", style = MaterialTheme.typography.labelMedium)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("Frühstück", "Mittag", "Abend", "Snack").forEach { slot ->
                     FilterChip(
                         selected = mealSlot == slot,
@@ -230,8 +323,10 @@ private fun AddEntryCard(
                 }
             }
             Button(
-                enabled = selected != null,
-                onClick = { selected?.let { onAddEntry(it, amount.num(), unit, mealSlot) } },
+                enabled = selectedFood != null,
+                onClick = { 
+                    selectedFood?.let { onAddEntry(it, amount.num(), selectedPortion, mealSlot) } 
+                },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Hinzufügen") }
         }
@@ -241,7 +336,8 @@ private fun AddEntryCard(
 @Composable
 private fun FoodsScreen(
     foods: List<FoodItemEntity>,
-    onAddFood: (String, Double, Double, Double, Double, Double, Double, String?, Double?, String?) -> Unit
+    onAddFood: (String, Double, Double, Double, Double, Double, Double, List<FoodPortionEntity>, String?) -> Unit,
+    onDeleteFood: (Long) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var kcal by remember { mutableStateOf("") }
@@ -250,7 +346,7 @@ private fun FoodsScreen(
     var sugar by remember { mutableStateOf("") }
     var fat by remember { mutableStateOf("") }
     var saturatedFat by remember { mutableStateOf("") }
-    var portionName by remember { mutableStateOf("Stück") }
+    var portionName by remember { mutableStateOf("Portion") }
     var portionGrams by remember { mutableStateOf("") }
 
     LazyColumn(
@@ -261,22 +357,30 @@ private fun FoodsScreen(
             Card {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Lebensmittel anlegen", fontWeight = FontWeight.Bold)
-                    OutlinedTextField(name, { name = it }, label = { Text("Name, z.B. Ei M") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(kcal, { kcal = it }, label = { Text("kcal pro 100g") }, modifier = Modifier.fillMaxWidth())
                     OutlinedTextField(protein, { protein = it }, label = { Text("Protein pro 100g") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(carbs, { carbs = it }, label = { Text("Kohlenhydrate gesamt pro 100g") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(sugar, { sugar = it }, label = { Text("davon Zucker pro 100g") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(fat, { fat = it }, label = { Text("Fett gesamt pro 100g") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(saturatedFat, { saturatedFat = it }, label = { Text("davon gesättigt pro 100g") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(portionName, { portionName = it }, label = { Text("Portionsname, z.B. Stück/Riegel") }, modifier = Modifier.fillMaxWidth())
-                    OutlinedTextField(portionGrams, { portionGrams = it }, label = { Text("Gramm pro Portion, z.B. 53") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(carbs, { carbs = it }, label = { Text("KH pro 100g") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(sugar, { sugar = it }, label = { Text("Zucker pro 100g") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(fat, { fat = it }, label = { Text("Fett pro 100g") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(saturatedFat, { saturatedFat = it }, label = { Text("ges. Fett pro 100g") }, modifier = Modifier.fillMaxWidth())
+                    
+                    Text("Standard Portion", style = MaterialTheme.typography.labelMedium)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(portionName, { portionName = it }, label = { Text("Name (z.B. Stück)") }, modifier = Modifier.weight(1f))
+                        OutlinedTextField(portionGrams, { portionGrams = it }, label = { Text("Gramm") }, modifier = Modifier.weight(0.6f))
+                    }
+                    
                     Button(
                         enabled = name.isNotBlank(),
                         onClick = {
+                            val portions = if (portionGrams.num() > 0) {
+                                listOf(FoodPortionEntity(0, portionName, portionGrams.num()))
+                            } else emptyList()
+                            
                             onAddFood(
                                 name, kcal.num(), protein.num(), carbs.num(), sugar.num(),
-                                fat.num(), saturatedFat.num(), portionName,
-                                portionGrams.num().takeIf { it > 0.0 }, null
+                                fat.num(), saturatedFat.num(), portions, null
                             )
                             name = ""; kcal = ""; protein = ""; carbs = ""; sugar = ""; fat = ""; saturatedFat = ""; portionGrams = ""
                         },
@@ -285,22 +389,25 @@ private fun FoodsScreen(
                 }
             }
         }
-        items(foods) { food ->
-            Card {
-                Column(Modifier.padding(12.dp)) {
-                    Text(food.name, fontWeight = FontWeight.Bold)
-                    Text("${food.kcalPer100g.round0()} kcal / 100g")
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MacroNumber(food.proteinPer100g, ProteinGreen)
-                        Separator()
-                        MacroNumber(food.complexCarbsPer100g, CarbOrange)
-                        MacroNumber(food.sugarPer100g, SugarRed)
-                        Separator()
-                        MacroNumber(food.saturatedFatPer100g, SaturatedGrey)
-                        MacroNumber(food.unsaturatedFatPer100g, UnsaturatedYellow)
-                    }
-                    if (food.defaultPortionGrams != null) {
-                        Text("1 ${food.defaultPortionName ?: "Portion"} = ${food.defaultPortionGrams.round0()} g")
+        items(foods, key = { it.id }) { food ->
+            SwipeToDeleteContainer(onDeleteConfirmed = { onDeleteFood(food.id) }) {
+                Card {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(food.name, fontWeight = FontWeight.Bold)
+                        Text("${food.kcalPer100g.round0()} kcal / 100g", style = MaterialTheme.typography.bodySmall)
+                        Spacer(Modifier.height(4.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            MacroNumber(food.proteinPer100g, ProteinGreen)
+                            Separator()
+                            MacroNumber(food.complexCarbsPer100g, CarbOrange)
+                            MacroNumber(food.sugarPer100g, SugarRed)
+                            Separator()
+                            MacroNumber(food.saturatedFatPer100g, SaturatedGrey)
+                            MacroNumber(food.unsaturatedFatPer100g, UnsaturatedYellow)
+                        }
+                        food.portions.forEach { portion ->
+                            Text("• ${portion.name}: ${portion.grams.round0()}g", style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
             }
@@ -310,3 +417,17 @@ private fun FoodsScreen(
 
 private fun String.num(): Double = replace(',', '.').toDoubleOrNull() ?: 0.0
 private fun Double.round0(): String = "%.0f".format(this)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FlowRow(
+    horizontalArrangement: Arrangement.Horizontal = Arrangement.Start,
+    verticalArrangement: Arrangement.Vertical = Arrangement.Top,
+    content: @Composable () -> Unit
+) {
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = horizontalArrangement,
+        verticalArrangement = verticalArrangement,
+        content = { content() }
+    )
+}
