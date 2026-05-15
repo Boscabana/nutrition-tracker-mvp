@@ -13,6 +13,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,7 +30,9 @@ import androidx.compose.ui.window.Dialog
 import com.nick.nutritiontracker.data.FoodEntryEntity
 import com.nick.nutritiontracker.data.FoodItemEntity
 import com.nick.nutritiontracker.data.FoodPortionEntity
+import com.nick.nutritiontracker.data.UserProfile
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
+import com.nick.nutritiontracker.viewmodel.ProfileViewModel
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -40,36 +45,51 @@ private val EditBlue = Color(0xFF2196F3)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NutritionApp(vm: NutritionViewModel) {
+fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
     var tab by remember { mutableIntStateOf(0) }
     val foods = vm.foods
     val entries = vm.todayEntries
+    val userProfile by profileVm.userProfile.collectAsState()
 
     MaterialTheme {
         Scaffold(
-            topBar = { TopAppBar(title = { Text("Nutrition Tracker") }) },
+            topBar = { 
+                TopAppBar(title = { 
+                    Text(when(tab) {
+                        0 -> "Heute"
+                        1 -> "Lebensmittel"
+                        else -> "Profil & Ziele"
+                    }) 
+                }) 
+            },
             bottomBar = {
                 NavigationBar {
                     NavigationBarItem(
                         selected = tab == 0,
                         onClick = { tab = 0 },
                         label = { Text("Heute") },
-                        icon = { Box(Modifier.size(24.dp)) }
+                        icon = { Icon(Icons.Default.Today, null) }
                     )
                     NavigationBarItem(
                         selected = tab == 1,
                         onClick = { tab = 1 },
                         label = { Text("Lebensmittel") },
-                        icon = { Box(Modifier.size(24.dp)) }
+                        icon = { Icon(Icons.Default.Restaurant, null) }
+                    )
+                    NavigationBarItem(
+                        selected = tab == 2,
+                        onClick = { tab = 2 },
+                        label = { Text("Profil") },
+                        icon = { Icon(Icons.Default.Person, null) }
                     )
                 }
             }
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
-                if (tab == 0) {
-                    TodayScreen(foods, entries, vm::addEntry, vm::deleteEntry, vm::updateEntry)
-                } else {
-                    FoodsScreen(foods, vm::addFood, vm::deleteFood, vm::updateFood)
+                when (tab) {
+                    0 -> TodayScreen(userProfile, foods, entries, vm)
+                    1 -> FoodsScreen(foods, vm::addFood, vm::deleteFood, vm::updateFood)
+                    2 -> ProfileScreen(profileVm)
                 }
             }
         }
@@ -91,7 +111,7 @@ fun SwipeActionContainer(
             .fillMaxWidth()
             .height(IntrinsicSize.Min)
     ) {
-        // Edit Layer (revealed on swipe right)
+        // Edit Layer (Links)
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -110,7 +130,7 @@ fun SwipeActionContainer(
             }
         }
 
-        // Delete Layer (revealed on swipe left)
+        // Delete Layer (Rechts)
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -129,7 +149,7 @@ fun SwipeActionContainer(
             }
         }
 
-        // Foreground Layer
+        // Vordergrund
         Box(
             modifier = Modifier
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
@@ -165,21 +185,13 @@ fun SwipeActionContainer(
 
 @Composable
 private fun TodayScreen(
+    userProfile: UserProfile,
     foods: List<FoodItemEntity>,
     entries: List<FoodEntryEntity>,
-    onAddEntry: (FoodItemEntity, Double, FoodPortionEntity?, String) -> Unit,
-    onDelete: (Long) -> Unit,
-    onUpdate: (FoodEntryEntity) -> Unit
+    vm: NutritionViewModel
 ) {
     var entryToDelete by remember { mutableStateOf<Long?>(null) }
     var entryToEdit by remember { mutableStateOf<FoodEntryEntity?>(null) }
-
-    val kcal = entries.sumOf { it.kcal }
-    val protein = entries.sumOf { it.protein }
-    val complexCarbs = entries.sumOf { it.complexCarbs }
-    val sugar = entries.sumOf { it.sugar }
-    val saturatedFat = entries.sumOf { it.saturatedFat }
-    val unsaturatedFat = entries.sumOf { it.unsaturatedFat }
 
     if (entryToDelete != null) {
         AlertDialog(
@@ -188,7 +200,7 @@ private fun TodayScreen(
             text = { Text("Möchtest du diesen Eintrag wirklich löschen?") },
             confirmButton = {
                 TextButton(onClick = {
-                    onDelete(entryToDelete!!)
+                    vm.deleteEntry(entryToDelete!!)
                     entryToDelete = null
                 }) { Text("Löschen", color = SugarRed) }
             },
@@ -204,7 +216,7 @@ private fun TodayScreen(
             foods = foods,
             onDismiss = { entryToEdit = null },
             onSave = { updated ->
-                onUpdate(updated)
+                vm.updateEntry(updated)
                 entryToEdit = null
             }
         )
@@ -215,30 +227,17 @@ private fun TodayScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
-            Card {
-                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Heute", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    Text("${kcal.round0()} kcal")
-                    MacroLegendRow()
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        MacroNumber(protein, ProteinGreen)
-                        MacroGroup {
-                            MacroNumber(complexCarbs, CarbOrange)
-                            MacroNumber(sugar, SugarRed)
-                        }
-                        MacroGroup {
-                            MacroNumber(saturatedFat, SaturatedGrey)
-                            MacroNumber(unsaturatedFat, UnsaturatedYellow)
-                        }
-                    }
-                    Text("Alle Makrowerte in g", style = MaterialTheme.typography.labelSmall)
-                }
-            }
+            MacroProgressSection(
+                userProfile = userProfile,
+                currentKcal = vm.todayTotalKcal,
+                currentProtein = vm.todayTotalProtein,
+                currentComplexCarbs = vm.todayTotalComplexCarbs,
+                currentSugar = vm.todayTotalSugar,
+                currentUnsaturatedFat = vm.todayTotalUnsaturatedFat,
+                currentSaturatedFat = vm.todayTotalSaturatedFat
+            )
         }
-        item { AddEntryCard(foods, onAddEntry) }
+        item { AddEntryCard(foods, vm::addEntry) }
         items(entries, key = { it.id }) { entry ->
             SwipeActionContainer(
                 onDeleteRequest = { entryToDelete = entry.id },
@@ -482,7 +481,7 @@ private fun FoodsScreen(
                 TextButton(onClick = {
                     onDeleteFood(foodToDelete!!)
                     foodToDelete = null
-                }) { Text("Löschen", color = Color.Red) }
+                }) { Text("Löschen", color = SugarRed) }
             },
             dismissButton = {
                 TextButton(onClick = { foodToDelete = null }) { Text("Abbrechen") }
@@ -521,10 +520,7 @@ private fun FoodsScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
-            Button(
-                onClick = { showAddDialog = true },
-                modifier = Modifier.fillMaxWidth()
-            ) {
+            Button(onClick = { showAddDialog = true }, modifier = Modifier.fillMaxWidth()) {
                 Icon(Icons.Default.Add, null)
                 Spacer(Modifier.width(8.dp))
                 Text("Neues Lebensmittel")
@@ -584,7 +580,9 @@ private fun FoodEditDialog(
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.fillMaxWidth().fillMaxHeight(0.9f)
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.9f)
         ) {
             Column(
                 Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
@@ -605,7 +603,7 @@ private fun FoodEditDialog(
                 OutlinedTextField(saturatedFat, { saturatedFat = it }, label = { Text("ges. Fett pro 100g") }, modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(barcode, { barcode = it }, label = { Text("Barcode") }, modifier = Modifier.fillMaxWidth())
                 
-                HorizontalDivider()
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 Text("Portionen", fontWeight = FontWeight.Bold)
                 
                 portions.forEachIndexed { index, portionState ->
@@ -626,7 +624,7 @@ private fun FoodEditDialog(
                             modifier = Modifier.weight(0.6f)
                         )
                         IconButton(onClick = { portions.removeAt(index) }) {
-                            Icon(Icons.Default.Delete, null, tint = Color.Red)
+                            Icon(Icons.Default.Delete, null, tint = SugarRed)
                         }
                     }
                 }

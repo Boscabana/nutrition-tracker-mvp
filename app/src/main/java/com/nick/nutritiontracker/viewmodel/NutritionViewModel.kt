@@ -2,6 +2,8 @@ package com.nick.nutritiontracker.viewmodel
 
 import android.app.Application
 import android.content.Context
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.AndroidViewModel
 import com.nick.nutritiontracker.data.FoodEntryEntity
@@ -27,6 +29,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     val foods = mutableStateListOf<FoodItemEntity>()
     val todayEntries = mutableStateListOf<FoodEntryEntity>()
 
+    // Daily totals
+    val todayTotalKcal by derivedStateOf { todayEntries.sumOf { it.kcal } }
+    val todayTotalProtein by derivedStateOf { todayEntries.sumOf { it.protein } }
+    val todayTotalComplexCarbs by derivedStateOf { todayEntries.sumOf { it.complexCarbs } }
+    val todayTotalSugar by derivedStateOf { todayEntries.sumOf { it.sugar } }
+    val todayTotalUnsaturatedFat by derivedStateOf { todayEntries.sumOf { it.unsaturatedFat } }
+    val todayTotalSaturatedFat by derivedStateOf { todayEntries.sumOf { it.saturatedFat } }
+
     init {
         loadFoods()
         if (foods.isEmpty()) {
@@ -37,7 +47,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun createDefaultFoods() {
-        // Ei mit S, M, L
         addFood(
             name = "Ei",
             kcal = 155.0,
@@ -47,12 +56,11 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             fat = 11.0,
             saturatedFat = 3.3,
             portions = listOf(
-                FoodPortionEntity(0, "Größe S", 43.0),
-                FoodPortionEntity(0, "Größe M", 53.0),
-                FoodPortionEntity(0, "Größe L", 63.0)
+                FoodPortionEntity(0, "S", 43.0),
+                FoodPortionEntity(0, "M", 53.0),
+                FoodPortionEntity(0, "L", 63.0)
             )
         )
-        // Proteinriegel
         addFood(
             name = "Proteinriegel",
             kcal = 375.0,
@@ -63,7 +71,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             saturatedFat = 4.0,
             portions = listOf(FoodPortionEntity(0, "Riegel", 40.0))
         )
-        // Skyr natur
         addFood(
             name = "Skyr natur",
             kcal = 63.0,
@@ -90,7 +97,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         if (name.isBlank()) return
         
         val newFood = FoodItemEntity(
-            id = 0, // Will be set by recalculateIds
+            id = 0,
             name = name.trim(),
             kcalPer100g = kcal,
             proteinPer100g = protein,
@@ -113,10 +120,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             recalculateIds()
             saveFoods()
             
-            // Sync current entries with potentially updated food data (name/macros)
-            val updatedEntries = todayEntries.map { entry ->
-                if (entry.foodItemId == updatedFood.id) {
-                    entry.copy(
+            for (i in todayEntries.indices) {
+                if (todayEntries[i].foodItemId == updatedFood.id) {
+                    todayEntries[i] = todayEntries[i].copy(
                         name = updatedFood.name,
                         kcalPer100g = updatedFood.kcalPer100g,
                         proteinPer100g = updatedFood.proteinPer100g,
@@ -125,16 +131,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         fatPer100g = updatedFood.fatPer100g,
                         saturatedFatPer100g = updatedFood.saturatedFatPer100g
                     )
-                } else entry
+                }
             }
-            todayEntries.clear()
-            todayEntries.addAll(updatedEntries)
         }
     }
 
     fun deleteFood(id: Long) {
         foods.removeAll { it.id == id }
-        // Remove associated entries as requested
         todayEntries.removeAll { it.foodItemId == id }
         saveFoods()
     }
