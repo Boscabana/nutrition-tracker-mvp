@@ -1,6 +1,8 @@
 package com.nick.nutritiontracker.ui
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,13 +14,17 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.nick.nutritiontracker.data.FoodEntryEntity
 import com.nick.nutritiontracker.data.FoodItemEntity
 import com.nick.nutritiontracker.data.FoodPortionEntity
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 private val ProteinGreen = Color(0xFF2E7D32)
 private val CarbOrange = Color(0xFFFF9800)
@@ -64,7 +70,6 @@ fun NutritionApp(vm: NutritionViewModel) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SwipeToDeleteContainer(
     onDeleteConfirmed: () -> Unit,
@@ -72,22 +77,15 @@ fun SwipeToDeleteContainer(
 ) {
     val scope = rememberCoroutineScope()
     var showDialog by remember { mutableStateOf(false) }
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.EndToStart) {
-                showDialog = true
-                true // Stay swiped to show the background trash area
-            } else {
-                false
-            }
-        }
-    )
+    
+    val maxSwipePx = with(LocalDensity.current) { 72.dp.toPx() }
+    val offsetX = remember { Animatable(0f) }
 
     if (showDialog) {
         AlertDialog(
             onDismissRequest = { 
                 showDialog = false
-                scope.launch { dismissState.snapTo(SwipeToDismissBoxValue.Settled) }
+                scope.launch { offsetX.animateTo(0f) }
             },
             title = { Text("Eintrag löschen") },
             text = { Text("Möchtest du diesen Eintrag wirklich löschen?") },
@@ -95,7 +93,7 @@ fun SwipeToDeleteContainer(
                 TextButton(onClick = {
                     onDeleteConfirmed()
                     showDialog = false
-                    scope.launch { dismissState.snapTo(SwipeToDismissBoxValue.Settled) }
+                    scope.launch { offsetX.snapTo(0f) }
                 }) {
                     Text("Löschen", color = MaterialTheme.colorScheme.error)
                 }
@@ -103,7 +101,7 @@ fun SwipeToDeleteContainer(
             dismissButton = {
                 TextButton(onClick = { 
                     showDialog = false
-                    scope.launch { dismissState.snapTo(SwipeToDismissBoxValue.Settled) }
+                    scope.launch { offsetX.animateTo(0f) }
                 }) {
                     Text("Abbrechen")
                 }
@@ -111,33 +109,60 @@ fun SwipeToDeleteContainer(
         )
     }
 
-    SwipeToDismissBox(
-        state = dismissState,
-        enableDismissFromStartToEnd = false,
-        backgroundContent = {
-            val color = if (dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart) {
-                Color.Red
-            } else {
-                Color.Transparent
-            }
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(color, RoundedCornerShape(12.dp))
-                    .padding(horizontal = 20.dp),
-                contentAlignment = Alignment.CenterEnd
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(IntrinsicSize.Min)
+    ) {
+        // Background layer with the Delete button
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Red, RoundedCornerShape(12.dp))
+                .padding(end = 12.dp),
+            contentAlignment = Alignment.CenterEnd
+        ) {
+            IconButton(
+                onClick = { showDialog = true },
+                modifier = Modifier.width(72.dp).fillMaxHeight()
             ) {
-                IconButton(onClick = { showDialog = true }) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Löschen",
-                        tint = Color.White
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Löschen",
+                    tint = Color.White
+                )
             }
         }
-    ) {
-        content()
+
+        // Foreground content layer that moves
+        Box(
+            modifier = Modifier
+                .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                .fillMaxWidth()
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onHorizontalDrag = { change, dragAmount ->
+                            scope.launch {
+                                val newOffset = (offsetX.value + dragAmount).coerceIn(-maxSwipePx, 0f)
+                                offsetX.snapTo(newOffset)
+                            }
+                            change.consume()
+                        },
+                        onDragEnd = {
+                            scope.launch {
+                                if (offsetX.value < -maxSwipePx * 0.6f) {
+                                    offsetX.animateTo(-maxSwipePx)
+                                } else {
+                                    offsetX.animateTo(0f)
+                                }
+                            }
+                        }
+                    )
+                }
+                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
+        ) {
+            content()
+        }
     }
 }
 
