@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.*
@@ -22,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -47,9 +49,11 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
     val foods = vm.foods
     val entries = vm.todayEntries
     val userProfile by profileVm.userProfile.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     MaterialTheme {
         Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 TopAppBar(title = {
                     Text(
@@ -87,7 +91,7 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
             Box(Modifier.padding(padding).fillMaxSize()) {
                 when (tab) {
                     0 -> TodayScreen(userProfile, foods, entries, vm)
-                    1 -> FoodsScreen(foods, vm::addFood, vm::deleteFood, vm::updateFood)
+                    1 -> FoodsScreen(foods, vm::addFood, vm::deleteFood, vm::updateFood, snackbarHostState)
                     2 -> ProfileScreen(profileVm)
                 }
             }
@@ -148,7 +152,7 @@ fun SwipeActionContainer(
             }
         }
 
-        // Vordergrund
+        // Foreground content layer
         Box(
             modifier = Modifier
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
@@ -323,7 +327,7 @@ private fun EditEntryDialog(
             }) { Text("Speichern") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Abbrechen") }
+            TextButton(onClick = { onDismiss() }) { Text("Abbrechen") }
         }
     )
 }
@@ -372,6 +376,21 @@ private fun LegendDot(color: Color, text: String) {
         Box(Modifier.size(8.dp).background(color, RoundedCornerShape(50)))
         Text(text, style = MaterialTheme.typography.labelSmall)
     }
+}
+
+@Composable
+private fun MacroGroup(content: @Composable RowScope.() -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically, content = content)
+}
+
+@Composable
+private fun MacroNumber(value: Double, color: Color) {
+    Text(value.round0(), color = color, fontWeight = FontWeight.Bold, modifier = Modifier.widthIn(min = 20.dp))
+}
+
+@Composable
+private fun Separator() {
+    Text("|", color = MaterialTheme.colorScheme.outline)
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -459,8 +478,13 @@ private fun FoodsScreen(
     foods: List<FoodItemEntity>,
     onAddFood: (String, Double, Double, Double, Double, Double, Double, Double, String, List<FoodPortionEntity>, List<FoodPackageEntity>, String?) -> Unit,
     onDeleteFood: (Long) -> Unit,
-    onUpdateFood: (FoodItemEntity) -> Unit
+    onUpdateFood: (FoodItemEntity) -> Unit,
+    snackbarHostState: SnackbarHostState
 ) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val scannerService = remember { BarcodeScannerService(context) }
+    
     var foodToDelete by remember { mutableStateOf<Long?>(null) }
     var foodToEdit by remember { mutableStateOf<FoodItemEntity?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
@@ -482,7 +506,7 @@ private fun FoodsScreen(
         )
     }
 
-    if (foodToEdit != null) {
+    if (foodToEdit != null && !showAddDialog) {
         FoodEditDialog(
             food = foodToEdit!!,
             onDismiss = { foodToEdit = null },
@@ -495,15 +519,23 @@ private fun FoodsScreen(
 
     if (showAddDialog) {
         FoodEditDialog(
-            food = null,
-            onDismiss = { showAddDialog = false },
-            onSave = { newFood ->
-                onAddFood(
-                    newFood.name, newFood.kcalPer100g, newFood.proteinPer100g,
-                    newFood.carbsPer100g, newFood.sugarPer100g, newFood.fatPer100g,
-                    newFood.saturatedFatPer100g, newFood.alcoholPercent, newFood.baseUnit, newFood.portions, newFood.packages, newFood.barcode
-                )
+            food = foodToEdit, // Could be pre-filled from scan
+            onDismiss = { 
                 showAddDialog = false
+                foodToEdit = null
+            },
+            onSave = { newFood ->
+                if (newFood.id == 0L) {
+                    onAddFood(
+                        newFood.name, newFood.kcalPer100g, newFood.proteinPer100g,
+                        newFood.carbsPer100g, newFood.sugarPer100g, newFood.fatPer100g,
+                        newFood.saturatedFatPer100g, newFood.alcoholPercent, newFood.baseUnit, newFood.portions, newFood.packages, newFood.barcode
+                    )
+                } else {
+                    onUpdateFood(newFood)
+                }
+                showAddDialog = false
+                foodToEdit = null
             }
         )
     }
@@ -513,16 +545,51 @@ private fun FoodsScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
-            Button(onClick = { showAddDialog = true }, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Default.Add, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Neues Lebensmittel")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { 
+                        foodToEdit = null
+                        showAddDialog = true 
+                    }, 
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Add, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Neu")
+                }
+                
+                Button(
+                    onClick = {
+                        scope.launch {
+                            val barcode = scannerService.startScan()
+                            if (barcode != null) {
+                                val fetched = scannerService.fetchProduct(barcode)
+                                if (fetched != null) {
+                                    foodToEdit = fetched
+                                    showAddDialog = true
+                                } else {
+                                    scope.launch { 
+                                        snackbarHostState.showSnackbar("Produktdaten konnten nicht geladen werden. Bitte manuell eintragen.")
+                                    }
+                                    foodToEdit = FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
+                                    showAddDialog = true
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                ) {
+                    Icon(Icons.Default.QrCodeScanner, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Scan")
+                }
             }
         }
         items(foods, key = { it.id }) { food ->
             SwipeActionContainer(
                 onDeleteRequest = { foodToDelete = food.id },
-                onEditRequest = { foodToEdit = food }
+                onEditRequest = { foodToEdit = food; showAddDialog = true }
             ) {
                 Card {
                     Column(Modifier.padding(12.dp)) {
@@ -562,12 +629,12 @@ private fun FoodEditDialog(
     onSave: (FoodItemEntity) -> Unit
 ) {
     var name by remember { mutableStateOf(food?.name ?: "") }
-    var protein by remember { mutableStateOf(food?.proteinPer100g?.toString() ?: "") }
-    var carbs by remember { mutableStateOf(food?.carbsPer100g?.toString() ?: "") }
-    var sugar by remember { mutableStateOf(food?.sugarPer100g?.toString() ?: "") }
-    var fat by remember { mutableStateOf(food?.fatPer100g?.toString() ?: "") }
-    var saturatedFat by remember { mutableStateOf(food?.saturatedFatPer100g?.toString() ?: "") }
-    var alcohol by remember { mutableStateOf(food?.alcoholPercent?.toString() ?: "0") }
+    var protein by remember { mutableStateOf(food?.proteinPer100g?.toString()?.replace(".0", "") ?: "") }
+    var carbs by remember { mutableStateOf(food?.carbsPer100g?.toString()?.replace(".0", "") ?: "") }
+    var sugar by remember { mutableStateOf(food?.sugarPer100g?.toString()?.replace(".0", "") ?: "") }
+    var fat by remember { mutableStateOf(food?.fatPer100g?.toString()?.replace(".0", "") ?: "") }
+    var saturatedFat by remember { mutableStateOf(food?.saturatedFatPer100g?.toString()?.replace(".0", "") ?: "") }
+    var alcohol by remember { mutableStateOf(food?.alcoholPercent?.toString()?.replace(".0", "") ?: "0") }
     var baseUnit by remember { mutableStateOf(food?.baseUnit ?: "g") }
     var barcode by remember { mutableStateOf(food?.barcode ?: "") }
     
@@ -598,7 +665,7 @@ private fun FoodEditDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
-                    text = if (food == null) "Lebensmittel anlegen" else "Lebensmittel bearbeiten",
+                    text = if (food == null || food.id == 0L) "Lebensmittel anlegen" else "Lebensmittel bearbeiten",
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.Bold
                 )
@@ -739,19 +806,4 @@ private fun FlowRow(
         verticalArrangement = verticalArrangement,
         content = { content() }
     )
-}
-
-@Composable
-private fun MacroGroup(content: @Composable RowScope.() -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically, content = content)
-}
-
-@Composable
-private fun MacroNumber(value: Double, color: Color) {
-    Text(value.round0(), color = color, fontWeight = FontWeight.Bold, modifier = Modifier.widthIn(min = 20.dp))
-}
-
-@Composable
-private fun Separator() {
-    Text("|", color = MaterialTheme.colorScheme.outline)
 }

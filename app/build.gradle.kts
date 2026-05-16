@@ -50,6 +50,7 @@ dependencies {
 
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.0.0")
