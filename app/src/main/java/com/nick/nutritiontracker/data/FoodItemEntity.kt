@@ -12,7 +12,9 @@ data class FoodItemEntity(
     val sugarPer100g: Double,
     val fatPer100g: Double,
     val saturatedFatPer100g: Double,
+    val alcoholPercent: Double = 0.0,
     val portions: List<FoodPortionEntity> = emptyList(),
+    val packages: List<FoodPackageEntity> = emptyList(),
     val barcode: String? = null
 ) {
     val complexCarbsPer100g: Double
@@ -23,4 +25,16 @@ data class FoodItemEntity(
 
     val defaultPortion: FoodPortionEntity?
         get() = portions.firstOrNull()
+}
+
+fun calculateKcalPer100g(
+    protein: Double,
+    carbs: Double,
+    fat: Double,
+    alcoholPercent: Double
+): Double {
+    return protein * 4.1 +
+            carbs * 4.1 +
+            fat * 9.3 +
+            alcoholPercent * 5.523
 }

@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import com.nick.nutritiontracker.data.FoodEntryEntity
 import com.nick.nutritiontracker.data.FoodItemEntity
 import com.nick.nutritiontracker.data.FoodPortionEntity
+import com.nick.nutritiontracker.data.FoodPackageEntity
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.time.LocalDate
@@ -55,11 +56,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             sugar = 1.1,
             fat = 11.0,
             saturatedFat = 3.3,
+            alcoholPercent = 0.0,
             portions = listOf(
                 FoodPortionEntity(0, "S", 43.0),
                 FoodPortionEntity(0, "M", 53.0),
                 FoodPortionEntity(0, "L", 63.0)
-            )
+            ),
+            packages = emptyList()
         )
         addFood(
             name = "Proteinriegel",
@@ -69,7 +72,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             sugar = 5.0,
             fat = 9.0,
             saturatedFat = 4.0,
-            portions = listOf(FoodPortionEntity(0, "Riegel", 40.0))
+            alcoholPercent = 0.0,
+            portions = listOf(FoodPortionEntity(0, "Riegel", 40.0)),
+            packages = emptyList()
         )
         addFood(
             name = "Skyr natur",
@@ -79,7 +84,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             sugar = 4.0,
             fat = 0.2,
             saturatedFat = 0.1,
-            portions = listOf(FoodPortionEntity(0, "Becher", 500.0))
+            alcoholPercent = 0.0,
+            portions = listOf(FoodPortionEntity(0, "Becher", 500.0)),
+            packages = listOf(FoodPackageEntity(0, "Becher", 500.0, "g"))
         )
     }
 
@@ -91,7 +98,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         sugar: Double,
         fat: Double,
         saturatedFat: Double,
+        alcoholPercent: Double,
         portions: List<FoodPortionEntity>,
+        packages: List<FoodPackageEntity>,
         barcode: String? = null
     ) {
         if (name.isBlank()) return
@@ -105,7 +114,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             sugarPer100g = sugar,
             fatPer100g = fat,
             saturatedFatPer100g = saturatedFat,
+            alcoholPercent = alcoholPercent,
             portions = portions,
+            packages = packages,
             barcode = barcode?.trim()?.takeIf { it.isNotBlank() }
         )
         foods.add(newFood)
@@ -203,10 +214,12 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun recalculateIds() {
         var fId = 1L
         var pId = 1L
+        var pkgId = 1L
         
         val updatedList = foods.map { food ->
             val updatedPortions = food.portions.map { it.copy(id = pId++) }
-            food.copy(id = fId++, portions = updatedPortions)
+            val updatedPackages = food.packages.map { it.copy(id = pkgId++) }
+            food.copy(id = fId++, portions = updatedPortions, packages = updatedPackages)
         }
         
         foods.clear()
