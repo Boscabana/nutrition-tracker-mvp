@@ -1,5 +1,8 @@
 package com.nick.nutritiontracker.data
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class FoodEntryEntity(
     val id: Long,
     val dateIso: String,
