@@ -15,7 +15,9 @@ data class FoodEntryEntity(
     val carbsPer100g: Double,
     val sugarPer100g: Double,
     val fatPer100g: Double,
-    val saturatedFatPer100g: Double
+    val saturatedFatPer100g: Double,
+    val alcoholPercent: Double = 0.0,
+    val baseUnit: String = "g"
 ) {
     val kcal: Double get() = kcalPer100g * grams / 100.0
     val protein: Double get() = proteinPer100g * grams / 100.0

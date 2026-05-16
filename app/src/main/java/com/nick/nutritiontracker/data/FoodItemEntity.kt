@@ -13,6 +13,7 @@ data class FoodItemEntity(
     val fatPer100g: Double,
     val saturatedFatPer100g: Double,
     val alcoholPercent: Double = 0.0,
+    val baseUnit: String = "g",
     val portions: List<FoodPortionEntity> = emptyList(),
     val packages: List<FoodPackageEntity> = emptyList(),
     val barcode: String? = null

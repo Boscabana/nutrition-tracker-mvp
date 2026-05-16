@@ -6,10 +6,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.AndroidViewModel
-import com.nick.nutritiontracker.data.FoodEntryEntity
-import com.nick.nutritiontracker.data.FoodItemEntity
-import com.nick.nutritiontracker.data.FoodPortionEntity
-import com.nick.nutritiontracker.data.FoodPackageEntity
+import com.nick.nutritiontracker.data.*
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.time.LocalDate
@@ -57,23 +54,12 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             fat = 11.0,
             saturatedFat = 3.3,
             alcoholPercent = 0.0,
+            baseUnit = "g",
             portions = listOf(
                 FoodPortionEntity(0, "S", 43.0),
                 FoodPortionEntity(0, "M", 53.0),
                 FoodPortionEntity(0, "L", 63.0)
             ),
-            packages = emptyList()
-        )
-        addFood(
-            name = "Proteinriegel",
-            kcal = 375.0,
-            protein = 50.0,
-            carbs = 25.0,
-            sugar = 5.0,
-            fat = 9.0,
-            saturatedFat = 4.0,
-            alcoholPercent = 0.0,
-            portions = listOf(FoodPortionEntity(0, "Riegel", 40.0)),
             packages = emptyList()
         )
         addFood(
@@ -85,6 +71,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             fat = 0.2,
             saturatedFat = 0.1,
             alcoholPercent = 0.0,
+            baseUnit = "g",
             portions = listOf(FoodPortionEntity(0, "Becher", 500.0)),
             packages = listOf(FoodPackageEntity(0, "Becher", 500.0, "g"))
         )
@@ -99,6 +86,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         fat: Double,
         saturatedFat: Double,
         alcoholPercent: Double,
+        baseUnit: String,
         portions: List<FoodPortionEntity>,
         packages: List<FoodPackageEntity>,
         barcode: String? = null
@@ -115,6 +103,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             fatPer100g = fat,
             saturatedFatPer100g = saturatedFat,
             alcoholPercent = alcoholPercent,
+            baseUnit = baseUnit,
             portions = portions,
             packages = packages,
             barcode = barcode?.trim()?.takeIf { it.isNotBlank() }
@@ -131,6 +120,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             recalculateIds()
             saveFoods()
             
+            // Sync current entries snapshots
             for (i in todayEntries.indices) {
                 if (todayEntries[i].foodItemId == updatedFood.id) {
                     todayEntries[i] = todayEntries[i].copy(
@@ -140,7 +130,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         carbsPer100g = updatedFood.carbsPer100g,
                         sugarPer100g = updatedFood.sugarPer100g,
                         fatPer100g = updatedFood.fatPer100g,
-                        saturatedFatPer100g = updatedFood.saturatedFatPer100g
+                        saturatedFatPer100g = updatedFood.saturatedFatPer100g,
+                        alcoholPercent = updatedFood.alcoholPercent,
+                        baseUnit = updatedFood.baseUnit
                     )
                 }
             }
@@ -157,7 +149,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val grams = if (portion != null) amount * portion.grams else amount
         if (grams <= 0.0) return
         
-        val unitLabel = portion?.name ?: "g"
+        val unitLabel = portion?.name ?: food.baseUnit
         
         val entry = FoodEntryEntity(
             id = nextEntryId++,
@@ -173,7 +165,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             carbsPer100g = food.carbsPer100g,
             sugarPer100g = food.sugarPer100g,
             fatPer100g = food.fatPer100g,
-            saturatedFatPer100g = food.saturatedFatPer100g
+            saturatedFatPer100g = food.saturatedFatPer100g,
+            alcoholPercent = food.alcoholPercent,
+            baseUnit = food.baseUnit
         )
         todayEntries.add(0, entry)
     }

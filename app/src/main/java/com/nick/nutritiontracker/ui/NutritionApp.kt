@@ -110,7 +110,7 @@ fun SwipeActionContainer(
             .fillMaxWidth()
             .height(IntrinsicSize.Min)
     ) {
-        // Edit Layer (Links, erscheint bei Swipe nach rechts)
+        // Edit Layer (Links)
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -123,15 +123,13 @@ fun SwipeActionContainer(
                     scope.launch { offsetX.animateTo(0f) }
                     onEditRequest()
                 },
-                modifier = Modifier
-                    .width(72.dp)
-                    .fillMaxHeight()
+                modifier = Modifier.width(72.dp).fillMaxHeight()
             ) {
                 Icon(Icons.Default.Edit, "Bearbeiten", tint = Color.White)
             }
         }
 
-        // Delete Layer (Rechts, erscheint bei Swipe nach links)
+        // Delete Layer (Rechts)
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -144,9 +142,7 @@ fun SwipeActionContainer(
                     scope.launch { offsetX.animateTo(0f) }
                     onDeleteRequest()
                 },
-                modifier = Modifier
-                    .width(72.dp)
-                    .fillMaxHeight()
+                modifier = Modifier.width(72.dp).fillMaxHeight()
             ) {
                 Icon(Icons.Default.Delete, "Löschen", tint = Color.White)
             }
@@ -205,7 +201,7 @@ private fun TodayScreen(
                 TextButton(onClick = {
                     vm.deleteEntry(entryToDelete!!)
                     entryToDelete = null
-                }) { Text("Löschen", color = SugarRed) }
+                }) { Text("Löschen", color = Color.Red) }
             },
             dismissButton = {
                 TextButton(onClick = { entryToDelete = null }) { Text("Abbrechen") }
@@ -226,9 +222,7 @@ private fun TodayScreen(
     }
 
     LazyColumn(
-        Modifier
-            .fillMaxSize()
-            .padding(12.dp),
+        Modifier.fillMaxSize().padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
@@ -241,6 +235,13 @@ private fun TodayScreen(
                 currentUnsaturatedFat = vm.todayTotalUnsaturatedFat,
                 currentSaturatedFat = vm.todayTotalSaturatedFat
             )
+        }
+        item {
+            Card {
+                Column(Modifier.padding(12.dp)) {
+                    MacroLegendRow()
+                }
+            }
         }
         item { AddEntryCard(foods, vm::addEntry) }
         items(entries, key = { it.id }) { entry ->
@@ -285,13 +286,13 @@ private fun EditEntryDialog(
                     FilterChip(
                         selected = selectedPortion == null,
                         onClick = { selectedPortion = null },
-                        label = { Text("Gramm") }
+                        label = { Text(food.baseUnit) }
                     )
                     food.portions.forEach { portion ->
                         FilterChip(
                             selected = selectedPortion == portion,
                             onClick = { selectedPortion = portion },
-                            label = { Text("${portion.name} (${portion.grams.round0()}g)") }
+                            label = { Text("${portion.name} (${portion.grams.round0()}${food.baseUnit})") }
                         )
                     }
                 }
@@ -314,7 +315,7 @@ private fun EditEntryDialog(
                 onSave(
                     entry.copy(
                         amount = numAmount,
-                        unitLabel = selectedPortion?.name ?: "g",
+                        unitLabel = selectedPortion?.name ?: food.baseUnit,
                         grams = grams,
                         mealSlot = mealSlot
                     )
@@ -334,9 +335,7 @@ private fun CompactEntryRow(entry: FoodEntryEntity) {
         shape = RoundedCornerShape(12.dp)
     ) {
         Row(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -358,7 +357,7 @@ private fun CompactEntryRow(entry: FoodEntryEntity) {
 
 @Composable
 private fun MacroLegendRow() {
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         LegendDot(ProteinGreen, "Protein")
         LegendDot(CarbOrange, "KH")
         LegendDot(SugarRed, "Zucker")
@@ -370,28 +369,9 @@ private fun MacroLegendRow() {
 @Composable
 private fun LegendDot(color: Color, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-        Box(
-            Modifier
-                .size(8.dp)
-                .background(color, RoundedCornerShape(50))
-        )
+        Box(Modifier.size(8.dp).background(color, RoundedCornerShape(50)))
         Text(text, style = MaterialTheme.typography.labelSmall)
     }
-}
-
-@Composable
-private fun MacroGroup(content: @Composable RowScope.() -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically, content = content)
-}
-
-@Composable
-private fun MacroNumber(value: Double, color: Color) {
-    Text(value.round0(), color = color, fontWeight = FontWeight.Bold, modifier = Modifier.widthIn(min = 20.dp))
-}
-
-@Composable
-private fun Separator() {
-    Text("|", color = MaterialTheme.colorScheme.outline)
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -411,13 +391,11 @@ private fun AddEntryCard(
             Text("Eintragen", fontWeight = FontWeight.Bold)
             ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
                 OutlinedTextField(
-                    value = selectedFood?.name ?: "Noch kein Lebensmittel",
+                    value = selectedFood?.name ?: "Wählen...",
                     onValueChange = {},
                     readOnly = true,
                     label = { Text("Lebensmittel") },
-                    modifier = Modifier
-                        .menuAnchor()
-                        .fillMaxWidth()
+                    modifier = Modifier.menuAnchor().fillMaxWidth()
                 )
                 ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                     foods.forEach { food ->
@@ -444,13 +422,13 @@ private fun AddEntryCard(
                 FilterChip(
                     selected = selectedPortion == null,
                     onClick = { selectedPortion = null },
-                    label = { Text("Gramm") }
+                    label = { Text(selectedFood?.baseUnit ?: "g") }
                 )
                 selectedFood?.portions?.forEach { portion ->
                     FilterChip(
                         selected = selectedPortion == portion,
                         onClick = { selectedPortion = portion },
-                        label = { Text("${portion.name} (${portion.grams.round0()}g)") }
+                        label = { Text("${portion.name} (${portion.grams.round0()}${selectedFood?.baseUnit})") }
                     )
                 }
             }
@@ -479,7 +457,7 @@ private fun AddEntryCard(
 @Composable
 private fun FoodsScreen(
     foods: List<FoodItemEntity>,
-    onAddFood: (String, Double, Double, Double, Double, Double, Double, Double, List<FoodPortionEntity>, List<FoodPackageEntity>, String?) -> Unit,
+    onAddFood: (String, Double, Double, Double, Double, Double, Double, Double, String, List<FoodPortionEntity>, List<FoodPackageEntity>, String?) -> Unit,
     onDeleteFood: (Long) -> Unit,
     onUpdateFood: (FoodItemEntity) -> Unit
 ) {
@@ -523,7 +501,7 @@ private fun FoodsScreen(
                 onAddFood(
                     newFood.name, newFood.kcalPer100g, newFood.proteinPer100g,
                     newFood.carbsPer100g, newFood.sugarPer100g, newFood.fatPer100g,
-                    newFood.saturatedFatPer100g, newFood.alcoholPercent, newFood.portions, newFood.packages, newFood.barcode
+                    newFood.saturatedFatPer100g, newFood.alcoholPercent, newFood.baseUnit, newFood.portions, newFood.packages, newFood.barcode
                 )
                 showAddDialog = false
             }
@@ -531,9 +509,7 @@ private fun FoodsScreen(
     }
 
     LazyColumn(
-        Modifier
-            .fillMaxSize()
-            .padding(12.dp),
+        Modifier.fillMaxSize().padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
@@ -551,7 +527,7 @@ private fun FoodsScreen(
                 Card {
                     Column(Modifier.padding(12.dp)) {
                         Text(food.name, fontWeight = FontWeight.Bold)
-                        Text("${food.kcalPer100g.round0()} kcal / 100g", style = MaterialTheme.typography.bodySmall)
+                        Text("${food.kcalPer100g.round0()} kcal / 100 ${food.baseUnit}", style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(4.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             MacroNumber(food.proteinPer100g, ProteinGreen)
@@ -566,7 +542,7 @@ private fun FoodsScreen(
                             Text("Alkohol: ${food.alcoholPercent.round1()}%", style = MaterialTheme.typography.labelSmall, color = Color.Magenta)
                         }
                         if (food.portions.isNotEmpty()) {
-                            Text("Portionen: " + food.portions.joinToString(" · ") { "${it.name} (${it.grams.round0()}g)" }, style = MaterialTheme.typography.labelSmall)
+                            Text("Portionen: " + food.portions.joinToString(" · ") { "${it.name} (${it.grams.round0()}${food.baseUnit})" }, style = MaterialTheme.typography.labelSmall)
                         }
                         if (food.packages.isNotEmpty()) {
                             Text("Packungen: " + food.packages.joinToString(" · ") { "${it.name} ${it.quantity.round0()} ${it.unit}" }, style = MaterialTheme.typography.labelSmall)
@@ -578,6 +554,7 @@ private fun FoodsScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun FoodEditDialog(
     food: FoodItemEntity?,
@@ -591,7 +568,10 @@ private fun FoodEditDialog(
     var fat by remember { mutableStateOf(food?.fatPer100g?.toString() ?: "") }
     var saturatedFat by remember { mutableStateOf(food?.saturatedFatPer100g?.toString() ?: "") }
     var alcohol by remember { mutableStateOf(food?.alcoholPercent?.toString() ?: "0") }
+    var baseUnit by remember { mutableStateOf(food?.baseUnit ?: "g") }
     var barcode by remember { mutableStateOf(food?.barcode ?: "") }
+    
+    var unitExpanded by remember { mutableStateOf(false) }
 
     val kcal = calculateKcalPer100g(protein.num(), carbs.num(), fat.num(), alcohol.num())
 
@@ -611,14 +591,10 @@ private fun FoodEditDialog(
         Surface(
             shape = RoundedCornerShape(16.dp),
             color = MaterialTheme.colorScheme.surface,
-            modifier = Modifier
-                .fillMaxWidth()
-                .fillMaxHeight(0.9f)
+            modifier = Modifier.fillMaxWidth().fillMaxHeight(0.9f)
         ) {
             Column(
-                Modifier
-                    .padding(16.dp)
-                    .verticalScroll(rememberScrollState()),
+                Modifier.padding(16.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
@@ -629,11 +605,32 @@ private fun FoodEditDialog(
 
                 OutlinedTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
 
+                ExposedDropdownMenuBox(
+                    expanded = unitExpanded,
+                    onExpandedChange = { unitExpanded = !unitExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = if (baseUnit == "g") "Gramm (g)" else "Milliliter (ml)",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Basiseinheit") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = unitExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = unitExpanded,
+                        onDismissRequest = { unitExpanded = false }
+                    ) {
+                        DropdownMenuItem(text = { Text("Gramm (g)") }, onClick = { baseUnit = "g"; unitExpanded = false })
+                        DropdownMenuItem(text = { Text("Milliliter (ml)") }, onClick = { baseUnit = "ml"; unitExpanded = false })
+                    }
+                }
+
                 OutlinedTextField(
                     value = kcal.round0(),
                     onValueChange = {},
                     readOnly = true,
-                    label = { Text("Kalorien pro 100g (berechnet)") },
+                    label = { Text("Kalorien pro 100 $baseUnit (berechnet)") },
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = Color.LightGray.copy(alpha = 0.1f),
@@ -661,7 +658,7 @@ private fun FoodEditDialog(
                 portions.forEachIndexed { index, p ->
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(p.name, { p.name = it }, label = { Text("Name") }, modifier = Modifier.weight(1f))
-                        OutlinedTextField(p.grams, { p.grams = it }, label = { Text("g") }, modifier = Modifier.weight(0.6f))
+                        OutlinedTextField(p.grams, { p.grams = it }, label = { Text(baseUnit) }, modifier = Modifier.weight(0.6f))
                         IconButton(onClick = { portions.removeAt(index) }) { Icon(Icons.Default.Delete, null, tint = Color.Red) }
                     }
                 }
@@ -681,7 +678,7 @@ private fun FoodEditDialog(
                         IconButton(onClick = { packages.removeAt(index) }) { Icon(Icons.Default.Delete, null, tint = Color.Red) }
                     }
                 }
-                TextButton(onClick = { packages.add(PackageInputState("", "", "g")) }) {
+                TextButton(onClick = { packages.add(PackageInputState("", "", baseUnit)) }) {
                     Icon(Icons.Default.Add, null)
                     Spacer(Modifier.width(4.dp))
                     Text("Packungsgröße hinzufügen")
@@ -702,6 +699,7 @@ private fun FoodEditDialog(
                                 fatPer100g = fat.num(),
                                 saturatedFatPer100g = saturatedFat.num(),
                                 alcoholPercent = alcohol.num(),
+                                baseUnit = baseUnit,
                                 barcode = barcode.takeIf { it.isNotBlank() },
                                 portions = portions.map { FoodPortionEntity(0, it.name, it.grams.num()) },
                                 packages = packages.map { FoodPackageEntity(0, it.name, it.quantity.num(), it.unit) }
@@ -741,4 +739,19 @@ private fun FlowRow(
         verticalArrangement = verticalArrangement,
         content = { content() }
     )
+}
+
+@Composable
+private fun MacroGroup(content: @Composable RowScope.() -> Unit) {
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically, content = content)
+}
+
+@Composable
+private fun MacroNumber(value: Double, color: Color) {
+    Text(value.round0(), color = color, fontWeight = FontWeight.Bold, modifier = Modifier.widthIn(min = 20.dp))
+}
+
+@Composable
+private fun Separator() {
+    Text("|", color = MaterialTheme.colorScheme.outline)
 }

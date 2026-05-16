@@ -5,6 +5,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -47,30 +48,55 @@ fun ProfileScreen(viewModel: ProfileViewModel) {
         Card {
             Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Persönliche Daten", fontWeight = FontWeight.Bold)
-                OutlinedTextField(firstName, { firstName = it }, label = { Text("Vorname") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    value = firstName,
+                    onValueChange = { firstName = it },
+                    label = { Text("Vorname") },
+                    modifier = Modifier.fillMaxWidth()
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(weight, { weight = it }, label = { Text("Gewicht (kg)") }, modifier = Modifier.weight(1f))
-                    OutlinedTextField(height, { height = it }, label = { Text("Größe (cm)") }, modifier = Modifier.weight(1f))
+                    OutlinedTextField(
+                        value = weight,
+                        onValueChange = { weight = it },
+                        label = { Text("Gewicht (kg)") },
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = height,
+                        onValueChange = { height = it },
+                        label = { Text("Größe (cm)") },
+                        modifier = Modifier.weight(1f)
+                    )
                 }
-                OutlinedTextField(goal, { goal = it }, label = { Text("Ziel (z.B. Muskelaufbau)") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    value = goal,
+                    onValueChange = { goal = it },
+                    label = { Text("Ziel (z.B. Muskelaufbau)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
         
         Card {
             Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Tagesbudget", fontWeight = FontWeight.Bold)
-                OutlinedTextField(budget, { budget = it }, label = { Text("Kalorienbudget") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(
+                    value = budget,
+                    onValueChange = { budget = it },
+                    label = { Text("Kalorienbudget") },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
         
         Card {
             Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Makroverteilung (%)", fontWeight = FontWeight.Bold)
-                MacroPercentInput("Protein", pPct, { pPct = it })
-                MacroPercentInput("Komplexe KH", cCarbPct, { cCarbPct = it })
-                MacroPercentInput("Zucker", sugarPct, { sugarPct = it })
-                MacroPercentInput("Ungesättigte Fette", uFatPct, { uFatPct = it })
-                MacroPercentInput("Gesättigte Fette", sFatPct, { sFatPct = it })
+                MacroPercentInput("Protein", pPct) { pPct = it }
+                MacroPercentInput("Komplexe KH", cCarbPct) { cCarbPct = it }
+                MacroPercentInput("Zucker", sugarPct) { sugarPct = it }
+                MacroPercentInput("Ungesättigte Fette", uFatPct) { uFatPct = it }
+                MacroPercentInput("Gesättigte Fette", sFatPct) { sFatPct = it }
                 
                 Spacer(Modifier.height(8.dp))
                 Text(
@@ -111,7 +137,7 @@ fun ProfileScreen(viewModel: ProfileViewModel) {
 
 @Composable
 private fun MacroPercentInput(label: String, value: String, onValueChange: (String) -> Unit) {
-    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, modifier = Modifier.weight(1f))
         OutlinedTextField(
             value = value,
