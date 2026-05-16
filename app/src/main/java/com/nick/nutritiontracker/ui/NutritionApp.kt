@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Person
@@ -21,6 +22,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -33,6 +35,9 @@ import com.nick.nutritiontracker.data.*
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
 import com.nick.nutritiontracker.viewmodel.ProfileViewModel
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import kotlin.math.roundToInt
 
 private val ProteinGreen = Color(0xFF2E7D32)
@@ -40,7 +45,8 @@ private val CarbOrange = Color(0xFFFF9800)
 private val SugarRed = Color(0xFFD32F2F)
 private val SaturatedGrey = Color(0xFF757575)
 private val UnsaturatedYellow = Color(0xFFFBC02D)
-private val EditYellow = Color(0xFFFFC107)
+private val ActionEditYellow = Color(0xFFFFC107) // Gelb für Bearbeiten
+private val ActionDeleteRed = Color(0xFFD32F2F)  // Rot für Löschen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,27 +56,62 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
     val entries = vm.todayEntries
     val userProfile by profileVm.userProfile.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    
+    val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, d. MMM", Locale.GERMAN) }
+    var dateMenuExpanded by remember { mutableStateOf(false) }
 
     MaterialTheme {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
-                TopAppBar(title = {
-                    Text(
-                        when (tab) {
-                            0 -> "Heute"
-                            1 -> "Lebensmittel"
-                            else -> "Profil & Ziele"
+                TopAppBar(
+                    title = {
+                        if (tab == 0) {
+                            Box {
+                                TextButton(
+                                    onClick = { dateMenuExpanded = true },
+                                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+                                ) {
+                                    val label = if (vm.selectedDate == LocalDate.now()) "Heute" 
+                                               else vm.selectedDate.format(dateFormatter)
+                                    Text(label, style = MaterialTheme.typography.titleLarge)
+                                    Icon(Icons.Default.ArrowDropDown, null)
+                                }
+                                DropdownMenu(
+                                    expanded = dateMenuExpanded,
+                                    onDismissRequest = { dateMenuExpanded = false }
+                                ) {
+                                    vm.availableDates.forEach { date ->
+                                        val isToday = date == LocalDate.now()
+                                        DropdownMenuItem(
+                                            text = { 
+                                                Text(if (isToday) "Heute" else date.format(dateFormatter)) 
+                                            },
+                                            onClick = {
+                                                vm.selectDate(date)
+                                                dateMenuExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            Text(
+                                when (tab) {
+                                    1 -> "Lebensmittel"
+                                    else -> "Profil & Ziele"
+                                }
+                            )
                         }
-                    )
-                })
+                    }
+                )
             },
             bottomBar = {
                 NavigationBar {
                     NavigationBarItem(
                         selected = tab == 0,
                         onClick = { tab = 0 },
-                        label = { Text("Heute") },
+                        label = { Text("Tagebuch") },
                         icon = { Icon(Icons.Default.Today, null) }
                     )
                     NavigationBarItem(
@@ -90,7 +131,7 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
                 when (tab) {
-                    0 -> TodayScreen(userProfile, foods, entries, vm)
+                    0 -> TodayScreen(userProfile, foods, entries, vm, snackbarHostState)
                     1 -> FoodsScreen(foods, vm::addFood, vm::deleteFood, vm::updateFood, snackbarHostState)
                     2 -> ProfileScreen(profileVm)
                 }
@@ -106,54 +147,52 @@ fun SwipeActionContainer(
     content: @Composable () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    val maxSwipePx = with(LocalDensity.current) { 72.dp.toPx() }
+    val maxSwipePx = with(LocalDensity.current) { 80.dp.toPx() }
     val offsetX = remember { Animatable(0f) }
 
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(IntrinsicSize.Min)
+            .clip(RoundedCornerShape(12.dp))
     ) {
-        // Edit Layer (Links)
+        // Hintergrund-Box für Farben und Icons
+        val swipeValue = offsetX.value
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(EditYellow, RoundedCornerShape(12.dp))
-                .padding(start = 12.dp),
-            contentAlignment = Alignment.CenterStart
+                .background(
+                    when {
+                        swipeValue > 1f -> ActionEditYellow
+                        swipeValue < -1f -> ActionDeleteRed
+                        else -> Color.Transparent
+                    }
+                )
         ) {
-            IconButton(
-                onClick = {
-                    scope.launch { offsetX.animateTo(0f) }
-                    onEditRequest()
-                },
-                modifier = Modifier.width(72.dp).fillMaxHeight()
-            ) {
-                Icon(Icons.Default.Edit, "Bearbeiten", tint = Color.White)
+            if (swipeValue > 20f) {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = "Bearbeiten",
+                    tint = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 24.dp)
+                )
+            }
+            if (swipeValue < -20f) {
+                Icon(
+                    imageVector = Icons.Default.Delete,
+                    contentDescription = "Löschen",
+                    tint = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .padding(end = 24.dp)
+                )
             }
         }
 
-        // Delete Layer (Rechts)
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(SugarRed, RoundedCornerShape(12.dp))
-                .padding(end = 12.dp),
-            contentAlignment = Alignment.CenterEnd
-        ) {
-            IconButton(
-                onClick = {
-                    scope.launch { offsetX.animateTo(0f) }
-                    onDeleteRequest()
-                },
-                modifier = Modifier.width(72.dp).fillMaxHeight()
-            ) {
-                Icon(Icons.Default.Delete, "Löschen", tint = Color.White)
-            }
-        }
-
-        // Foreground content layer
-        Box(
+        // Vordergrund-Inhalt (das Element)
+        Surface(
             modifier = Modifier
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
                 .fillMaxWidth()
@@ -161,25 +200,28 @@ fun SwipeActionContainer(
                     detectHorizontalDragGestures(
                         onHorizontalDrag = { change, dragAmount ->
                             scope.launch {
-                                val newOffset = (offsetX.value + dragAmount).coerceIn(-maxSwipePx, maxSwipePx)
-                                offsetX.snapTo(newOffset)
+                                offsetX.snapTo((offsetX.value + dragAmount).coerceIn(-maxSwipePx, maxSwipePx))
                             }
                             change.consume()
                         },
                         onDragEnd = {
                             scope.launch {
-                                if (offsetX.value < -maxSwipePx * 0.6f) {
-                                    offsetX.animateTo(-maxSwipePx)
-                                } else if (offsetX.value > maxSwipePx * 0.6f) {
-                                    offsetX.animateTo(maxSwipePx)
+                                if (offsetX.value > maxSwipePx * 0.6f) {
+                                    offsetX.animateTo(0f)
+                                    onEditRequest()
+                                } else if (offsetX.value < -maxSwipePx * 0.6f) {
+                                    offsetX.animateTo(0f)
+                                    onDeleteRequest()
                                 } else {
                                     offsetX.animateTo(0f)
                                 }
                             }
                         }
                     )
-                }
-                .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
+                },
+            color = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(12.dp),
+            tonalElevation = 1.dp
         ) {
             content()
         }
@@ -191,10 +233,16 @@ private fun TodayScreen(
     userProfile: UserProfile,
     foods: List<FoodItemEntity>,
     entries: List<FoodEntryEntity>,
-    vm: NutritionViewModel
+    vm: NutritionViewModel,
+    snackbarHostState: SnackbarHostState
 ) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val scannerService = remember { BarcodeScannerService(context) }
+
     var entryToDelete by remember { mutableStateOf<Long?>(null) }
     var entryToEdit by remember { mutableStateOf<FoodEntryEntity?>(null) }
+    var scannedFood by remember { mutableStateOf<FoodItemEntity?>(null) }
 
     if (entryToDelete != null) {
         AlertDialog(
@@ -225,6 +273,17 @@ private fun TodayScreen(
         )
     }
 
+    if (scannedFood != null) {
+        AddAmountDialog(
+            food = scannedFood!!,
+            onDismiss = { scannedFood = null },
+            onConfirm = { amount, portion, mealSlot ->
+                vm.addEntry(scannedFood!!, amount, portion, mealSlot)
+                scannedFood = null
+            }
+        )
+    }
+
     LazyColumn(
         Modifier.fillMaxSize().padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -247,7 +306,37 @@ private fun TodayScreen(
                 }
             }
         }
-        item { AddEntryCard(foods, vm::addEntry) }
+        item { 
+            AddEntryCard(
+                foods = foods, 
+                onAddEntry = vm::addEntry,
+                onScanRequest = {
+                    scope.launch {
+                        val barcode = scannerService.startScan()
+                        if (barcode != null) {
+                            var food = vm.findFoodByBarcode(barcode)
+                            if (food == null) {
+                                val fetched = scannerService.fetchProduct(barcode)
+                                if (fetched != null) {
+                                    food = vm.addFood(
+                                        fetched.name, fetched.kcalPer100g, fetched.proteinPer100g,
+                                        fetched.carbsPer100g, fetched.sugarPer100g, fetched.fatPer100g,
+                                        fetched.saturatedFatPer100g, fetched.alcoholPercent, fetched.baseUnit,
+                                        fetched.portions, fetched.packages, fetched.barcode
+                                    )
+                                    snackbarHostState.showSnackbar("Produkt erfolgreich importiert.")
+                                } else {
+                                    snackbarHostState.showSnackbar("Produkt nicht gefunden.")
+                                }
+                            }
+                            if (food != null) {
+                                scannedFood = food
+                            }
+                        }
+                    }
+                }
+            ) 
+        }
         items(entries, key = { it.id }) { entry ->
             SwipeActionContainer(
                 onDeleteRequest = { entryToDelete = entry.id },
@@ -257,6 +346,65 @@ private fun TodayScreen(
             }
         }
     }
+}
+
+@Composable
+private fun AddAmountDialog(
+    food: FoodItemEntity,
+    onDismiss: () -> Unit,
+    onConfirm: (Double, FoodPortionEntity?, String) -> Unit
+) {
+    var amount by remember { mutableStateOf("100") }
+    var selectedPortion by remember { mutableStateOf<FoodPortionEntity?>(null) }
+    var mealSlot by remember { mutableStateOf("Snack") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(food.name) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { amount = it },
+                    label = { Text("Menge") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Text("Einheit", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(
+                        selected = selectedPortion == null,
+                        onClick = { selectedPortion = null },
+                        label = { Text(food.baseUnit) }
+                    )
+                    food.portions.forEach { portion ->
+                        FilterChip(
+                            selected = selectedPortion == portion,
+                            onClick = { selectedPortion = portion },
+                            label = { Text("${portion.name} (${portion.grams.round0()}${food.baseUnit})") }
+                        )
+                    }
+                }
+                Text("Mahlzeit", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Frühstück", "Mittag", "Abend", "Snack").forEach { slot ->
+                        FilterChip(
+                            selected = mealSlot == slot,
+                            onClick = { mealSlot = slot },
+                            label = { Text(slot) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                onConfirm(amount.num(), selectedPortion, mealSlot)
+            }) { Text("Hinzufügen") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Abbrechen") }
+        }
+    )
 }
 
 @Composable
@@ -397,7 +545,8 @@ private fun Separator() {
 @Composable
 private fun AddEntryCard(
     foods: List<FoodItemEntity>,
-    onAddEntry: (FoodItemEntity, Double, FoodPortionEntity?, String) -> Unit
+    onAddEntry: (FoodItemEntity, Double, FoodPortionEntity?, String) -> Unit,
+    onScanRequest: () -> Unit
 ) {
     var selectedFood by remember(foods) { mutableStateOf(foods.firstOrNull()) }
     var selectedPortion by remember(selectedFood) { mutableStateOf(selectedFood?.portions?.firstOrNull()) }
@@ -462,13 +611,29 @@ private fun AddEntryCard(
                     )
                 }
             }
-            Button(
-                enabled = selectedFood != null,
-                onClick = {
-                    selectedFood?.let { onAddEntry(it, amount.num(), selectedPortion, mealSlot) }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Hinzufügen") }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    enabled = selectedFood != null,
+                    onClick = {
+                        selectedFood?.let { onAddEntry(it, amount.num(), selectedPortion, mealSlot) }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Add, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Hinzufügen")
+                }
+
+                Button(
+                    onClick = onScanRequest,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.QrCodeScanner, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Barcode scannen")
+                }
+            }
         }
     }
 }

@@ -5,6 +5,8 @@ import android.content.Context
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import com.nick.nutritiontracker.data.*
 import kotlinx.serialization.encodeToString
@@ -18,16 +20,32 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         prettyPrint = true
     }
 
-    val todayIso: String = LocalDate.now().toString()
+    var selectedDate by mutableStateOf(LocalDate.now())
+        private set
+
+    fun selectDate(date: LocalDate) {
+        selectedDate = date
+    }
 
     private var nextFoodId = 1L
     private var nextPortionId = 1L
     private var nextEntryId = 1L
 
     val foods = mutableStateListOf<FoodItemEntity>()
-    val todayEntries = mutableStateListOf<FoodEntryEntity>()
+    val allEntries = mutableStateListOf<FoodEntryEntity>()
 
-    // Daily totals
+    val todayEntries by derivedStateOf {
+        allEntries.filter { it.dateIso == selectedDate.toString() }
+            .sortedByDescending { it.id }
+    }
+
+    val availableDates by derivedStateOf {
+        (allEntries.map { LocalDate.parse(it.dateIso) } + LocalDate.now())
+            .distinct()
+            .sortedDescending()
+    }
+
+    // Daily totals for the selected date
     val todayTotalKcal by derivedStateOf { todayEntries.sumOf { it.kcal } }
     val todayTotalProtein by derivedStateOf { todayEntries.sumOf { it.protein } }
     val todayTotalComplexCarbs by derivedStateOf { todayEntries.sumOf { it.complexCarbs } }
@@ -37,6 +55,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     init {
         loadFoods()
+        loadEntries()
         if (foods.isEmpty()) {
             createDefaultFoods()
         } else {
@@ -77,6 +96,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         )
     }
 
+    fun findFoodByBarcode(barcode: String): FoodItemEntity? {
+        return foods.find { it.barcode == barcode }
+    }
+
     fun addFood(
         name: String,
         kcal: Double,
@@ -90,9 +113,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         portions: List<FoodPortionEntity>,
         packages: List<FoodPackageEntity>,
         barcode: String? = null
-    ) {
-        if (name.isBlank()) return
-        
+    ): FoodItemEntity {
         val newFood = FoodItemEntity(
             id = 0,
             name = name.trim(),
@@ -111,6 +132,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         foods.add(newFood)
         recalculateIds()
         saveFoods()
+        return foods.first { it.name == newFood.name && (barcode == null || it.barcode == barcode) }
     }
 
     fun updateFood(updatedFood: FoodItemEntity) {
@@ -121,9 +143,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             saveFoods()
             
             // Sync current entries snapshots
-            for (i in todayEntries.indices) {
-                if (todayEntries[i].foodItemId == updatedFood.id) {
-                    todayEntries[i] = todayEntries[i].copy(
+            for (i in allEntries.indices) {
+                if (allEntries[i].foodItemId == updatedFood.id) {
+                    allEntries[i] = allEntries[i].copy(
                         name = updatedFood.name,
                         kcalPer100g = updatedFood.kcalPer100g,
                         proteinPer100g = updatedFood.proteinPer100g,
@@ -136,13 +158,15 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     )
                 }
             }
+            saveEntries()
         }
     }
 
     fun deleteFood(id: Long) {
         foods.removeAll { it.id == id }
-        todayEntries.removeAll { it.foodItemId == id }
+        allEntries.removeAll { it.foodItemId == id }
         saveFoods()
+        saveEntries()
     }
 
     fun addEntry(food: FoodItemEntity, amount: Double, portion: FoodPortionEntity?, mealSlot: String) {
@@ -153,7 +177,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         
         val entry = FoodEntryEntity(
             id = nextEntryId++,
-            dateIso = todayIso,
+            dateIso = selectedDate.toString(),
             mealSlot = mealSlot,
             amount = amount,
             unitLabel = unitLabel,
@@ -169,18 +193,21 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             alcoholPercent = food.alcoholPercent,
             baseUnit = food.baseUnit
         )
-        todayEntries.add(0, entry)
+        allEntries.add(entry)
+        saveEntries()
     }
 
     fun updateEntry(updatedEntry: FoodEntryEntity) {
-        val index = todayEntries.indexOfFirst { it.id == updatedEntry.id }
+        val index = allEntries.indexOfFirst { it.id == updatedEntry.id }
         if (index != -1) {
-            todayEntries[index] = updatedEntry
+            allEntries[index] = updatedEntry
+            saveEntries()
         }
     }
 
     fun deleteEntry(id: Long) {
-        todayEntries.removeAll { it.id == id }
+        allEntries.removeAll { it.id == id }
+        saveEntries()
     }
 
     fun saveFoods() {
@@ -199,6 +226,29 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 val loaded = json.decodeFromString<List<FoodItemEntity>>(data)
                 foods.clear()
                 foods.addAll(loaded)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    fun saveEntries() {
+        try {
+            val data = json.encodeToString(allEntries.toList())
+            prefs.edit().putString("entries_json", data).apply()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun loadEntries() {
+        val data = prefs.getString("entries_json", null)
+        if (data != null) {
+            try {
+                val loaded = json.decodeFromString<List<FoodEntryEntity>>(data)
+                allEntries.clear()
+                allEntries.addAll(loaded)
+                nextEntryId = (allEntries.maxOfOrNull { it.id } ?: 0L) + 1
             } catch (e: Exception) {
                 e.printStackTrace()
             }
