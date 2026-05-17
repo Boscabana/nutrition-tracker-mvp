@@ -7,11 +7,57 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.nick.nutritiontracker.data.UserProfile
 import com.nick.nutritiontracker.viewmodel.ProfileViewModel
+
+@Composable
+private fun AutoSelectTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: @Composable (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    readOnly: Boolean = false,
+    singleLine: Boolean = false,
+    colors: TextFieldColors = OutlinedTextFieldDefaults.colors()
+) {
+    var textFieldValueState by remember {
+        mutableStateOf(TextFieldValue(text = value))
+    }
+    
+    // Sync state when external value changes
+    LaunchedEffect(value) {
+        if (value != textFieldValueState.text) {
+            textFieldValueState = textFieldValueState.copy(text = value)
+        }
+    }
+
+    OutlinedTextField(
+        value = textFieldValueState,
+        onValueChange = {
+            textFieldValueState = it
+            if (value != it.text) {
+                onValueChange(it.text)
+            }
+        },
+        label = label,
+        modifier = modifier.onFocusChanged {
+            if (it.isFocused) {
+                textFieldValueState = textFieldValueState.copy(
+                    selection = TextRange(0, textFieldValueState.text.length)
+                )
+            }
+        },
+        readOnly = readOnly,
+        singleLine = singleLine,
+        colors = colors
+    )
+}
 
 @Composable
 fun ProfileScreen(viewModel: ProfileViewModel) {
@@ -48,27 +94,27 @@ fun ProfileScreen(viewModel: ProfileViewModel) {
         Card {
             Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Persönliche Daten", fontWeight = FontWeight.Bold)
-                OutlinedTextField(
+                AutoSelectTextField(
                     value = firstName,
                     onValueChange = { firstName = it },
                     label = { Text("Vorname") },
                     modifier = Modifier.fillMaxWidth()
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
+                    AutoSelectTextField(
                         value = weight,
                         onValueChange = { weight = it },
                         label = { Text("Gewicht (kg)") },
                         modifier = Modifier.weight(1f)
                     )
-                    OutlinedTextField(
+                    AutoSelectTextField(
                         value = height,
                         onValueChange = { height = it },
                         label = { Text("Größe (cm)") },
                         modifier = Modifier.weight(1f)
                     )
                 }
-                OutlinedTextField(
+                AutoSelectTextField(
                     value = goal,
                     onValueChange = { goal = it },
                     label = { Text("Ziel (z.B. Muskelaufbau)") },
@@ -80,7 +126,7 @@ fun ProfileScreen(viewModel: ProfileViewModel) {
         Card {
             Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Tagesbudget", fontWeight = FontWeight.Bold)
-                OutlinedTextField(
+                AutoSelectTextField(
                     value = budget,
                     onValueChange = { budget = it },
                     label = { Text("Kalorienbudget") },
@@ -139,7 +185,7 @@ fun ProfileScreen(viewModel: ProfileViewModel) {
 private fun MacroPercentInput(label: String, value: String, onValueChange: (String) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, modifier = Modifier.weight(1f))
-        OutlinedTextField(
+        AutoSelectTextField(
             value = value,
             onValueChange = { if (it.isEmpty() || it.toIntOrNull() != null) onValueChange(it) },
             modifier = Modifier.width(80.dp),

@@ -23,17 +23,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.nick.nutritiontracker.data.*
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
 import com.nick.nutritiontracker.viewmodel.ProfileViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -349,6 +353,52 @@ private fun TodayScreen(
 }
 
 @Composable
+private fun AutoSelectTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: @Composable (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    readOnly: Boolean = false,
+    singleLine: Boolean = true,
+    colors: TextFieldColors = OutlinedTextFieldDefaults.colors()
+) {
+    var textFieldValue by remember { mutableStateOf(TextFieldValue(text = value)) }
+    val scope = rememberCoroutineScope()
+
+    // Externer Sync (z.B. bei Portions-Wechsel)
+    LaunchedEffect(value) {
+        if (value != textFieldValue.text) {
+            textFieldValue = textFieldValue.copy(text = value, selection = TextRange.Zero)
+        }
+    }
+
+    OutlinedTextField(
+        value = textFieldValue,
+        onValueChange = { 
+            textFieldValue = it
+            if (it.text != value) {
+                onValueChange(it.text)
+            }
+        },
+        label = label,
+        modifier = modifier.onFocusChanged { focusState ->
+            if (focusState.isFocused) {
+                scope.launch {
+                    // Längerer Delay stellt sicher, dass das Tap-Event die Selektion nicht wieder aufhebt
+                    delay(150)
+                    textFieldValue = textFieldValue.copy(
+                        selection = TextRange(0, textFieldValue.text.length)
+                    )
+                }
+            }
+        },
+        readOnly = readOnly,
+        singleLine = singleLine,
+        colors = colors
+    )
+}
+
+@Composable
 private fun AddAmountDialog(
     food: FoodItemEntity,
     onDismiss: () -> Unit,
@@ -363,7 +413,7 @@ private fun AddAmountDialog(
         title = { Text(food.name) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
+                AutoSelectTextField(
                     value = amount,
                     onValueChange = { amount = it },
                     label = { Text("Menge") },
@@ -427,7 +477,7 @@ private fun EditEntryDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(food.name, fontWeight = FontWeight.Bold)
-                OutlinedTextField(
+                AutoSelectTextField(
                     value = amount,
                     onValueChange = { amount = it },
                     label = { Text("Menge") },
@@ -578,7 +628,7 @@ private fun AddEntryCard(
                 }
             }
 
-            OutlinedTextField(
+            AutoSelectTextField(
                 value = amount,
                 onValueChange = { amount = it },
                 label = { Text("Menge") },
@@ -835,7 +885,7 @@ private fun FoodEditDialog(
                     fontWeight = FontWeight.Bold
                 )
 
-                OutlinedTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+                AutoSelectTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
 
                 ExposedDropdownMenuBox(
                     expanded = unitExpanded,
@@ -871,26 +921,26 @@ private fun FoodEditDialog(
                 )
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(protein, { protein = it }, label = { Text("Protein") }, modifier = Modifier.weight(1f))
-                    OutlinedTextField(carbs, { carbs = it }, label = { Text("KH ges.") }, modifier = Modifier.weight(1f))
+                    AutoSelectTextField(protein, { protein = it }, label = { Text("Protein") }, modifier = Modifier.weight(1f))
+                    AutoSelectTextField(carbs, { carbs = it }, label = { Text("KH ges.") }, modifier = Modifier.weight(1f))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(sugar, { sugar = it }, label = { Text("davon Zucker") }, modifier = Modifier.weight(1f))
-                    OutlinedTextField(alcohol, { alcohol = it }, label = { Text("Alc.-%") }, modifier = Modifier.weight(1f))
+                    AutoSelectTextField(sugar, { sugar = it }, label = { Text("davon Zucker") }, modifier = Modifier.weight(1f))
+                    AutoSelectTextField(alcohol, { alcohol = it }, label = { Text("Alc.-%") }, modifier = Modifier.weight(1f))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(fat, { fat = it }, label = { Text("Fett ges.") }, modifier = Modifier.weight(1f))
-                    OutlinedTextField(saturatedFat, { saturatedFat = it }, label = { Text("davon ges.") }, modifier = Modifier.weight(1f))
+                    AutoSelectTextField(fat, { fat = it }, label = { Text("Fett ges.") }, modifier = Modifier.weight(1f))
+                    AutoSelectTextField(saturatedFat, { saturatedFat = it }, label = { Text("davon ges.") }, modifier = Modifier.weight(1f))
                 }
 
-                OutlinedTextField(barcode, { barcode = it }, label = { Text("Barcode") }, modifier = Modifier.fillMaxWidth())
+                AutoSelectTextField(barcode, { barcode = it }, label = { Text("Barcode") }, modifier = Modifier.fillMaxWidth())
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 Text("Portionen (Stückmengen)", fontWeight = FontWeight.Bold)
                 portions.forEachIndexed { index, p ->
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(p.name, { p.name = it }, label = { Text("Name") }, modifier = Modifier.weight(1f))
-                        OutlinedTextField(p.grams, { p.grams = it }, label = { Text(baseUnit) }, modifier = Modifier.weight(0.6f))
+                        AutoSelectTextField(p.name, { p.name = it }, label = { Text("Name") }, modifier = Modifier.weight(1f))
+                        AutoSelectTextField(p.grams, { p.grams = it }, label = { Text(baseUnit) }, modifier = Modifier.weight(0.6f))
                         IconButton(onClick = { portions.removeAt(index) }) { Icon(Icons.Default.Delete, null, tint = Color.Red) }
                     }
                 }
@@ -904,9 +954,9 @@ private fun FoodEditDialog(
                 Text("Packungsgrößen", fontWeight = FontWeight.Bold)
                 packages.forEachIndexed { index, pkg ->
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        OutlinedTextField(pkg.name, { pkg.name = it }, label = { Text("Name") }, modifier = Modifier.weight(1f))
-                        OutlinedTextField(pkg.quantity, { pkg.quantity = it }, label = { Text("Menge") }, modifier = Modifier.weight(0.7f))
-                        OutlinedTextField(pkg.unit, { pkg.unit = it }, label = { Text("Einh.") }, modifier = Modifier.weight(0.7f))
+                        AutoSelectTextField(pkg.name, { pkg.name = it }, label = { Text("Name") }, modifier = Modifier.weight(1f))
+                        AutoSelectTextField(pkg.quantity, { pkg.quantity = it }, label = { Text("Menge") }, modifier = Modifier.weight(0.7f))
+                        AutoSelectTextField(pkg.unit, { pkg.unit = it }, label = { Text("Einh.") }, modifier = Modifier.weight(0.7f))
                         IconButton(onClick = { packages.removeAt(index) }) { Icon(Icons.Default.Delete, null, tint = Color.Red) }
                     }
                 }
