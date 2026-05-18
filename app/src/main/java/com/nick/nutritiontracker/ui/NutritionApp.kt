@@ -1,7 +1,10 @@
 package com.nick.nutritiontracker.ui
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -14,6 +17,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Restaurant
@@ -23,6 +27,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -255,6 +260,9 @@ private fun TodayScreen(
     var entryToEdit by remember { mutableStateOf<FoodEntryEntity?>(null) }
     var scannedFood by remember { mutableStateOf<FoodItemEntity?>(null) }
 
+    val mealSlots = listOf("Frühstück", "Mittag", "Abend", "Snack")
+    val expandedStates = remember { mutableStateMapOf<String, Boolean>().apply { mealSlots.forEach { put(it, true) } } }
+
     if (entryToDelete != null) {
         AlertDialog(
             onDismissRequest = { entryToDelete = null },
@@ -296,8 +304,9 @@ private fun TodayScreen(
     }
 
     LazyColumn(
-        Modifier.fillMaxSize().padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        Modifier.fillMaxSize().padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp)
     ) {
         item {
             MacroProgressSection(
@@ -348,14 +357,94 @@ private fun TodayScreen(
                 }
             ) 
         }
-        items(entries, key = { it.id }) { entry ->
-            SwipeActionContainer(
-                onDeleteRequest = { entryToDelete = entry.id },
-                onEditRequest = { entryToEdit = entry }
-            ) {
-                CompactEntryRow(entry)
+
+        mealSlots.forEach { slot ->
+            val slotEntries = entries.filter { it.mealSlot == slot }
+            
+            item(key = "header_$slot") {
+                MealGroupHeader(
+                    title = slot,
+                    entries = slotEntries,
+                    isExpanded = expandedStates[slot] ?: true,
+                    onToggle = { expandedStates[slot] = !(expandedStates[slot] ?: true) }
+                )
+            }
+
+            if (expandedStates[slot] ?: true) {
+                items(slotEntries, key = { it.id }) { entry ->
+                    SwipeActionContainer(
+                        onDeleteRequest = { entryToDelete = entry.id },
+                        onEditRequest = { entryToEdit = entry }
+                    ) {
+                        CompactEntryRow(entry)
+                    }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun MealGroupHeader(
+    title: String,
+    entries: List<FoodEntryEntity>,
+    isExpanded: Boolean,
+    onToggle: () -> Unit
+) {
+    val totalKcal = entries.sumOf { it.kcal }
+    val totalProtein = entries.sumOf { it.protein }
+    val totalComplexCarbs = entries.sumOf { it.complexCarbs }
+    val totalSugar = entries.sumOf { it.sugar }
+    val totalSaturatedFat = entries.sumOf { it.saturatedFat }
+    val totalUnsaturatedFat = entries.sumOf { it.unsaturatedFat }
+
+    val rotation by animateFloatAsState(if (isExpanded) 0f else -90f)
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onToggle() }
+            .padding(vertical = 4.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(
+                Icons.Default.ExpandMore,
+                contentDescription = null,
+                modifier = Modifier.rotate(rotation).size(20.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = "${totalKcal.round0()} kcal",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+        
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(start = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MacroNumber(totalProtein, ProteinGreen)
+            Separator()
+            MacroNumber(totalComplexCarbs, CarbOrange)
+            MacroNumber(totalSugar, SugarRed)
+            Separator()
+            MacroNumber(totalSaturatedFat, SaturatedGrey)
+            MacroNumber(totalUnsaturatedFat, UnsaturatedYellow)
+        }
+        HorizontalDivider(modifier = Modifier.padding(top = 4.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
     }
 }
 
