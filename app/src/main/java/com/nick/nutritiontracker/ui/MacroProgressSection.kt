@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nick.nutritiontracker.data.UserProfile
+import com.nick.nutritiontracker.data.DailyActivity
 
 @Composable
 fun MacroProgressSection(
@@ -20,8 +21,17 @@ fun MacroProgressSection(
     currentComplexCarbs: Double,
     currentSugar: Double,
     currentUnsaturatedFat: Double,
-    currentSaturatedFat: Double
+    currentSaturatedFat: Double,
+    steps: Int
 ) {
+    // Activity calories calculation based on MET formula
+    // MET for moderate walking is ~3.5
+    // Assumed average pace: 100 steps per minute
+    val activity = DailyActivity("", steps)
+    val activityKcal = activity.calculateCalories(userProfile.weightKg)
+    
+    val totalBudget = userProfile.calorieBudget + activityKcal
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp)
@@ -32,14 +42,25 @@ fun MacroProgressSection(
         ) {
             Text("Tagesbudget", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
 
-            // Calories
-            BudgetSummary(
-                label = "Kalorien",
-                current = currentKcal,
-                target = userProfile.calorieBudget.toDouble(),
-                unit = "kcal",
-                showRemaining = true
-            )
+            // Calories Summary with Activity
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Grundbudget", style = MaterialTheme.typography.bodyMedium)
+                    Text("${userProfile.calorieBudget} kcal")
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Aktivität ($steps Schritte)", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF2E7D32))
+                    Text("+${activityKcal.round0()} kcal", color = Color(0xFF2E7D32))
+                }
+                HorizontalDivider(thickness = 0.5.dp)
+                BudgetSummary(
+                    label = "Gesamt Kalorien",
+                    current = currentKcal,
+                    target = totalBudget,
+                    unit = "kcal",
+                    showRemaining = true
+                )
+            }
 
             // Progress bars
             MacroProgressBar("Protein", currentProtein, userProfile.proteinGoalGrams, Color(0xFF2E7D32))
@@ -53,14 +74,17 @@ fun MacroProgressSection(
 
 @Composable
 private fun BudgetSummary(label: String, current: Double, target: Double, unit: String, showRemaining: Boolean) {
-    val remaining = (target - current).coerceAtLeast(0.0)
+    val remaining = (target - current)
+    val remainingText = if (remaining >= 0) "${remaining.round0()} $unit übrig" else "${(-remaining).round0()} $unit drüber"
+    val remainingColor = if (remaining >= 0) MaterialTheme.colorScheme.primary else Color.Red
+
     Column {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(label, fontWeight = FontWeight.SemiBold)
+            Text(label, fontWeight = FontWeight.Bold)
             Text("${current.round0()} / ${target.round0()} $unit")
         }
         if (showRemaining) {
-            Text("${remaining.round0()} $unit übrig", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            Text(remainingText, style = MaterialTheme.typography.labelSmall, color = remainingColor)
         }
     }
 }

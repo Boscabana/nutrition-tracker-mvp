@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -54,8 +55,8 @@ private val CarbOrange = Color(0xFFFF9800)
 private val SugarRed = Color(0xFFD32F2F)
 private val SaturatedGrey = Color(0xFF757575)
 private val UnsaturatedYellow = Color(0xFFFBC02D)
-private val ActionEditYellow = Color(0xFFFFC107) // Gelb für Bearbeiten
-private val ActionDeleteRed = Color(0xFFD32F2F)  // Rot für Löschen
+private val ActionEditYellow = Color(0xFFFFC107) 
+private val ActionDeleteRed = Color(0xFFD32F2F)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -172,7 +173,6 @@ fun SwipeActionContainer(
             .height(IntrinsicSize.Min)
             .clip(RoundedCornerShape(12.dp))
     ) {
-        // Hintergrund-Box für Farben und Icons
         val swipeValue = offsetX.value
         Box(
             modifier = Modifier
@@ -207,7 +207,6 @@ fun SwipeActionContainer(
             }
         }
 
-        // Vordergrund-Inhalt (das Element)
         Surface(
             modifier = Modifier
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
@@ -259,6 +258,7 @@ private fun TodayScreen(
     var entryToDelete by remember { mutableStateOf<Long?>(null) }
     var entryToEdit by remember { mutableStateOf<FoodEntryEntity?>(null) }
     var scannedFood by remember { mutableStateOf<FoodItemEntity?>(null) }
+    var showStepDialog by remember { mutableStateOf(false) }
 
     val mealSlots = listOf("Frühstück", "Mittag", "Abend", "Snack")
     val expandedStates = remember { mutableStateMapOf<String, Boolean>().apply { mealSlots.forEach { put(it, true) } } }
@@ -302,6 +302,17 @@ private fun TodayScreen(
             }
         )
     }
+    
+    if (showStepDialog) {
+        StepInputDialog(
+            initialSteps = vm.todaySteps,
+            onDismiss = { showStepDialog = false },
+            onConfirm = { 
+                vm.updateSteps(it)
+                showStepDialog = false
+            }
+        )
+    }
 
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = 12.dp),
@@ -309,15 +320,18 @@ private fun TodayScreen(
         contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp)
     ) {
         item {
-            MacroProgressSection(
-                userProfile = userProfile,
-                currentKcal = vm.todayTotalKcal,
-                currentProtein = vm.todayTotalProtein,
-                currentComplexCarbs = vm.todayTotalComplexCarbs,
-                currentSugar = vm.todayTotalSugar,
-                currentUnsaturatedFat = vm.todayTotalUnsaturatedFat,
-                currentSaturatedFat = vm.todayTotalSaturatedFat
-            )
+            Box(Modifier.clickable { showStepDialog = true }) {
+                MacroProgressSection(
+                    userProfile = userProfile,
+                    currentKcal = vm.todayTotalKcal,
+                    currentProtein = vm.todayTotalProtein,
+                    currentComplexCarbs = vm.todayTotalComplexCarbs,
+                    currentSugar = vm.todayTotalSugar,
+                    currentUnsaturatedFat = vm.todayTotalUnsaturatedFat,
+                    currentSaturatedFat = vm.todayTotalSaturatedFat,
+                    steps = vm.todaySteps
+                )
+            }
         }
         item {
             Card {
@@ -382,6 +396,36 @@ private fun TodayScreen(
             }
         }
     }
+}
+
+@Composable
+private fun StepInputDialog(
+    initialSteps: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    var steps by remember { mutableStateOf(initialSteps.toString()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Schritte erfassen") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Wie viele Schritte hast du heute gemacht?")
+                AutoSelectTextField(
+                    value = steps,
+                    onValueChange = { steps = it },
+                    label = { Text("Schritte") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(steps.toIntOrNull() ?: 0) }) { Text("Speichern") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Abbrechen") }
+        }
+    )
 }
 
 @Composable
@@ -461,7 +505,6 @@ private fun AutoSelectTextField(
     var textFieldValue by remember { mutableStateOf(TextFieldValue(text = value)) }
     val scope = rememberCoroutineScope()
 
-    // Externer Sync (z.B. bei Portions-Wechsel)
     LaunchedEffect(value) {
         if (value != textFieldValue.text) {
             textFieldValue = textFieldValue.copy(text = value, selection = TextRange.Zero)
@@ -480,7 +523,6 @@ private fun AutoSelectTextField(
         modifier = modifier.onFocusChanged { focusState ->
             if (focusState.isFocused) {
                 scope.launch {
-                    // Längerer Delay stellt sicher, dass das Tap-Event die Selektion nicht wieder aufhebt
                     delay(150)
                     textFieldValue = textFieldValue.copy(
                         selection = TextRange(0, textFieldValue.text.length)
@@ -673,11 +715,6 @@ private fun LegendDot(color: Color, text: String) {
 }
 
 @Composable
-private fun MacroGroup(content: @Composable RowScope.() -> Unit) {
-    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically, content = content)
-}
-
-@Composable
 private fun MacroNumber(value: Double, color: Color) {
     Text(value.round0(), color = color, fontWeight = FontWeight.Bold, modifier = Modifier.widthIn(min = 20.dp))
 }
@@ -699,85 +736,109 @@ private fun AddEntryCard(
     var expanded by remember { mutableStateOf(false) }
     var amount by remember { mutableStateOf("1") }
     var mealSlot by remember { mutableStateOf("Snack") }
+    var isMinimized by remember { mutableStateOf(false) }
+
+    val rotation by animateFloatAsState(if (isMinimized) -90f else 0f)
 
     Card {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Eintragen", fontWeight = FontWeight.Bold)
-            ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
-                OutlinedTextField(
-                    value = selectedFood?.name ?: "Wählen...",
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text("Lebensmittel") },
-                    modifier = Modifier.menuAnchor().fillMaxWidth()
+        Column(Modifier.padding(12.dp)) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { isMinimized = !isMinimized },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Eintragen", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Icon(
+                    Icons.Default.ExpandMore,
+                    contentDescription = null,
+                    modifier = Modifier.rotate(rotation).size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary
                 )
-                ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    foods.forEach { food ->
-                        DropdownMenuItem(
-                            text = { Text(food.name) },
-                            onClick = {
-                                selectedFood = food
-                                expanded = false
-                            }
+            }
+
+            AnimatedVisibility(visible = !isMinimized) {
+                Column(
+                    modifier = Modifier.padding(top = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
+                        OutlinedTextField(
+                            value = selectedFood?.name ?: "Wählen...",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Lebensmittel") },
+                            modifier = Modifier.menuAnchor().fillMaxWidth()
                         )
+                        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                            foods.forEach { food ->
+                                DropdownMenuItem(
+                                    text = { Text(food.name) },
+                                    onClick = {
+                                        selectedFood = food
+                                        expanded = false
+                                    }
+                                )
+                            }
+                        }
                     }
-                }
-            }
 
-            AutoSelectTextField(
-                value = amount,
-                onValueChange = { amount = it },
-                label = { Text("Menge") },
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            Text("Einheit", style = MaterialTheme.typography.labelMedium)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = selectedPortion == null,
-                    onClick = { selectedPortion = null },
-                    label = { Text(selectedFood?.baseUnit ?: "g") }
-                )
-                selectedFood?.portions?.forEach { portion ->
-                    FilterChip(
-                        selected = selectedPortion == portion,
-                        onClick = { selectedPortion = portion },
-                        label = { Text("${portion.name} (${portion.grams.round0()}${selectedFood?.baseUnit})") }
+                    AutoSelectTextField(
+                        value = amount,
+                        onValueChange = { amount = it },
+                        label = { Text("Menge") },
+                        modifier = Modifier.fillMaxWidth()
                     )
-                }
-            }
 
-            Text("Mahlzeit", style = MaterialTheme.typography.labelMedium)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("Frühstück", "Mittag", "Abend", "Snack").forEach { slot ->
-                    FilterChip(
-                        selected = mealSlot == slot,
-                        onClick = { mealSlot = slot },
-                        label = { Text(slot) }
-                    )
-                }
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    enabled = selectedFood != null,
-                    onClick = {
-                        selectedFood?.let { onAddEntry(it, amount.num(), selectedPortion, mealSlot) }
-                    },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Add, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Hinzufügen")
-                }
+                    Text("Einheit", style = MaterialTheme.typography.labelMedium)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = selectedPortion == null,
+                            onClick = { selectedPortion = null },
+                            label = { Text(selectedFood?.baseUnit ?: "g") }
+                        )
+                        selectedFood?.portions?.forEach { portion ->
+                            FilterChip(
+                                selected = selectedPortion == portion,
+                                onClick = { selectedPortion = portion },
+                                label = { Text("${portion.name} (${portion.grams.round0()}${selectedFood?.baseUnit})") }
+                            )
+                        }
+                    }
 
-                Button(
-                    onClick = onScanRequest,
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.QrCodeScanner, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Barcode scannen")
+                    Text("Mahlzeit", style = MaterialTheme.typography.labelMedium)
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Frühstück", "Mittag", "Abend", "Snack").forEach { slot ->
+                            FilterChip(
+                                selected = mealSlot == slot,
+                                onClick = { mealSlot = slot },
+                                label = { Text(slot) }
+                            )
+                        }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            enabled = selectedFood != null,
+                            onClick = {
+                                selectedFood?.let { onAddEntry(it, amount.num(), selectedPortion, mealSlot) }
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Add, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Hinzufügen")
+                        }
+
+                        Button(
+                            onClick = onScanRequest,
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.QrCodeScanner, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Barcode scannen")
+                        }
+                    }
                 }
             }
         }
@@ -830,7 +891,7 @@ private fun FoodsScreen(
 
     if (showAddDialog) {
         FoodEditDialog(
-            food = foodToEdit, // Could be pre-filled from scan
+            food = foodToEdit, 
             onDismiss = { 
                 showAddDialog = false
                 foodToEdit = null

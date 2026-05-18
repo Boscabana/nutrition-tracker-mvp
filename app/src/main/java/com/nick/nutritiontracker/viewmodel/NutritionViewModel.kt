@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
@@ -33,6 +34,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     val foods = mutableStateListOf<FoodItemEntity>()
     val allEntries = mutableStateListOf<FoodEntryEntity>()
+    
+    // Step tracking: Date ISO -> Steps
+    val dailySteps = mutableStateMapOf<String, Int>()
 
     val todayEntries by derivedStateOf {
         allEntries.filter { it.dateIso == selectedDate.toString() }
@@ -40,7 +44,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     val availableDates by derivedStateOf {
-        (allEntries.map { LocalDate.parse(it.dateIso) } + LocalDate.now() + LocalDate.now().plusDays(1))
+        (allEntries.map { LocalDate.parse(it.dateIso) } + dailySteps.keys.map { LocalDate.parse(it) } + LocalDate.now() + LocalDate.now().plusDays(1))
             .distinct()
             .sortedDescending()
     }
@@ -52,10 +56,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     val todayTotalSugar by derivedStateOf { todayEntries.sumOf { it.sugar } }
     val todayTotalUnsaturatedFat by derivedStateOf { todayEntries.sumOf { it.unsaturatedFat } }
     val todayTotalSaturatedFat by derivedStateOf { todayEntries.sumOf { it.saturatedFat } }
+    
+    val todaySteps by derivedStateOf { dailySteps[selectedDate.toString()] ?: 0 }
 
     init {
         loadFoods()
         loadEntries()
+        loadSteps()
         if (foods.isEmpty()) {
             createDefaultFoods()
         } else {
@@ -209,6 +216,11 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         allEntries.removeAll { it.id == id }
         saveEntries()
     }
+    
+    fun updateSteps(steps: Int) {
+        dailySteps[selectedDate.toString()] = steps
+        saveSteps()
+    }
 
     fun saveFoods() {
         try {
@@ -249,6 +261,28 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 allEntries.clear()
                 allEntries.addAll(loaded)
                 nextEntryId = (allEntries.maxOfOrNull { it.id } ?: 0L) + 1
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+    
+    private fun saveSteps() {
+        try {
+            val data = json.encodeToString(dailySteps.toMap())
+            prefs.edit().putString("steps_json", data).apply()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+    
+    private fun loadSteps() {
+        val data = prefs.getString("steps_json", null)
+        if (data != null) {
+            try {
+                val loaded = json.decodeFromString<Map<String, Int>>(data)
+                dailySteps.clear()
+                dailySteps.putAll(loaded)
             } catch (e: Exception) {
                 e.printStackTrace()
             }
