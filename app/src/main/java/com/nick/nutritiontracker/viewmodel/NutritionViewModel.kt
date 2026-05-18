@@ -40,7 +40,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     val availableDates by derivedStateOf {
-        (allEntries.map { LocalDate.parse(it.dateIso) } + LocalDate.now())
+        (allEntries.map { LocalDate.parse(it.dateIso) } + LocalDate.now() + LocalDate.now().plusDays(1))
             .distinct()
             .sortedDescending()
     }

@@ -76,8 +76,11 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                                     onClick = { dateMenuExpanded = true },
                                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
                                 ) {
-                                    val label = if (vm.selectedDate == LocalDate.now()) "Heute" 
-                                               else vm.selectedDate.format(dateFormatter)
+                                    val label = when (vm.selectedDate) {
+                                        LocalDate.now() -> "Heute"
+                                        LocalDate.now().plusDays(1) -> "Morgen"
+                                        else -> vm.selectedDate.format(dateFormatter)
+                                    }
                                     Text(label, style = MaterialTheme.typography.titleLarge)
                                     Icon(Icons.Default.ArrowDropDown, null)
                                 }
@@ -86,10 +89,14 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                                     onDismissRequest = { dateMenuExpanded = false }
                                 ) {
                                     vm.availableDates.forEach { date ->
-                                        val isToday = date == LocalDate.now()
+                                        val label = when (date) {
+                                            LocalDate.now() -> "Heute"
+                                            LocalDate.now().plusDays(1) -> "Morgen"
+                                            else -> date.format(dateFormatter)
+                                        }
                                         DropdownMenuItem(
                                             text = { 
-                                                Text(if (isToday) "Heute" else date.format(dateFormatter)) 
+                                                Text(label) 
                                             },
                                             onClick = {
                                                 vm.selectDate(date)
