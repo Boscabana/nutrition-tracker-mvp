@@ -343,7 +343,23 @@ private fun TodayScreen(
         item { 
             AddEntryCard(
                 foods = foods, 
-                onAddEntry = vm::addEntry,
+                onAddEntry = { food, amount, portion, mealSlot ->
+                    var finalFood = food
+                    if (food.id == 0L) {
+                        val existing = if (food.barcode != null) vm.findFoodByBarcode(food.barcode!!) else null
+                        if (existing != null) {
+                            finalFood = existing
+                        } else {
+                            finalFood = vm.addFood(
+                                food.name, food.kcalPer100g, food.proteinPer100g,
+                                food.carbsPer100g, food.sugarPer100g, food.fatPer100g,
+                                food.saturatedFatPer100g, food.alcoholPercent, food.baseUnit,
+                                food.portions, food.packages, food.barcode, food.brand
+                            )
+                        }
+                    }
+                    vm.addEntry(finalFood, amount, portion, mealSlot)
+                },
                 onScanRequest = {
                     scope.launch {
                         val barcode = scannerService.startScan()
@@ -356,7 +372,7 @@ private fun TodayScreen(
                                         fetched.name, fetched.kcalPer100g, fetched.proteinPer100g,
                                         fetched.carbsPer100g, fetched.sugarPer100g, fetched.fatPer100g,
                                         fetched.saturatedFatPer100g, fetched.alcoholPercent, fetched.baseUnit,
-                                        fetched.portions, fetched.packages, fetched.barcode
+                                        fetched.portions, fetched.packages, fetched.barcode, fetched.brand
                                     )
                                     snackbarHostState.showSnackbar("Produkt erfolgreich importiert.")
                                 } else {
@@ -368,7 +384,8 @@ private fun TodayScreen(
                             }
                         }
                     }
-                }
+                },
+                onSearchRequest = { query -> scannerService.searchProducts(query) }
             ) 
         }
 
@@ -681,6 +698,9 @@ private fun CompactEntryRow(entry: FoodEntryEntity) {
         ) {
             Column(Modifier.weight(1f)) {
                 Text(entry.name, fontWeight = FontWeight.Bold, maxLines = 1)
+                if (!entry.brand.isNullOrBlank()) {
+                    Text(entry.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1)
+                }
                 Text(entry.displayAmount(), style = MaterialTheme.typography.labelSmall, maxLines = 1)
             }
             Text(entry.kcal.round0(), modifier = Modifier.width(36.dp), fontWeight = FontWeight.Bold)
@@ -729,16 +749,46 @@ private fun Separator() {
 private fun AddEntryCard(
     foods: List<FoodItemEntity>,
     onAddEntry: (FoodItemEntity, Double, FoodPortionEntity?, String) -> Unit,
-    onScanRequest: () -> Unit
+    onScanRequest: () -> Unit,
+    onSearchRequest: suspend (String) -> List<FoodItemEntity>
 ) {
-    var selectedFood by remember(foods) { mutableStateOf(foods.firstOrNull()) }
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedFood by remember { mutableStateOf<FoodItemEntity?>(null) }
     var selectedPortion by remember(selectedFood) { mutableStateOf(selectedFood?.portions?.firstOrNull()) }
     var expanded by remember { mutableStateOf(false) }
     var amount by remember { mutableStateOf("1") }
     var mealSlot by remember { mutableStateOf("Snack") }
     var isMinimized by remember { mutableStateOf(false) }
+    
+    var remoteResults by remember { mutableStateOf(emptyList<FoodItemEntity>()) }
+    var isSearching by remember { mutableStateOf(false) }
 
     val rotation by animateFloatAsState(if (isMinimized) -90f else 0f)
+
+    LaunchedEffect(searchQuery) {
+        if (searchQuery.length >= 3 && selectedFood?.name != searchQuery) {
+            isSearching = true
+            delay(500)
+            remoteResults = onSearchRequest(searchQuery)
+            isSearching = false
+            expanded = true
+        } else {
+            remoteResults = emptyList()
+        }
+    }
+
+    val filteredLocal = remember(searchQuery, foods) {
+        if (searchQuery.isEmpty()) foods.take(10)
+        else {
+            val queryWords = searchQuery.split("\\s+".toRegex()).filter { it.isNotBlank() }
+            foods.filter { food ->
+                queryWords.all { word ->
+                    food.name.contains(word, ignoreCase = true) || 
+                    (food.brand?.contains(word, ignoreCase = true) ?: false)
+                }
+            }
+        }
+    }
 
     Card {
         Column(Modifier.padding(12.dp)) {
@@ -762,23 +812,67 @@ private fun AddEntryCard(
                     modifier = Modifier.padding(top = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
+                    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
                         OutlinedTextField(
-                            value = selectedFood?.name ?: "Wählen...",
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Lebensmittel") },
-                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                            value = searchQuery,
+                            onValueChange = { 
+                                searchQuery = it
+                                if (it.isEmpty()) selectedFood = null
+                                expanded = true
+                            },
+                            label = { Text("Lebensmittel suchen...") },
+                            trailingIcon = {
+                                if (isSearching) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                            },
+                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                            singleLine = true
                         )
-                        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                            foods.forEach { food ->
-                                DropdownMenuItem(
-                                    text = { Text(food.name) },
-                                    onClick = {
-                                        selectedFood = food
-                                        expanded = false
-                                    }
-                                )
+                        
+                        ExposedDropdownMenu(
+                            expanded = expanded && (filteredLocal.isNotEmpty() || remoteResults.isNotEmpty()), 
+                            onDismissRequest = { expanded = false }
+                        ) {
+                            if (filteredLocal.isNotEmpty()) {
+                                Text("Lokal", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+                                filteredLocal.forEach { food ->
+                                    DropdownMenuItem(
+                                        text = { 
+                                            Column {
+                                                Text(food.name)
+                                                if (!food.brand.isNullOrBlank()) {
+                                                    Text(food.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedFood = food
+                                            searchQuery = food.name
+                                            expanded = false
+                                        }
+                                    )
+                                }
+                            }
+                            if (remoteResults.isNotEmpty()) {
+                                if (filteredLocal.isNotEmpty()) HorizontalDivider()
+                                Text("Datenbank", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+                                remoteResults.forEach { food ->
+                                    DropdownMenuItem(
+                                        text = { 
+                                            Column {
+                                                Text(food.name)
+                                                if (!food.brand.isNullOrBlank()) {
+                                                    Text(food.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                                }
+                                            }
+                                        },
+                                        onClick = {
+                                            selectedFood = food
+                                            searchQuery = food.name
+                                            expanded = false
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -848,7 +942,7 @@ private fun AddEntryCard(
 @Composable
 private fun FoodsScreen(
     foods: List<FoodItemEntity>,
-    onAddFood: (String, Double, Double, Double, Double, Double, Double, Double, String, List<FoodPortionEntity>, List<FoodPackageEntity>, String?) -> Unit,
+    onAddFood: (String, Double, Double, Double, Double, Double, Double, Double, String, List<FoodPortionEntity>, List<FoodPackageEntity>, String?, String?) -> Unit,
     onDeleteFood: (Long) -> Unit,
     onUpdateFood: (FoodItemEntity) -> Unit,
     snackbarHostState: SnackbarHostState
@@ -901,7 +995,7 @@ private fun FoodsScreen(
                     onAddFood(
                         newFood.name, newFood.kcalPer100g, newFood.proteinPer100g,
                         newFood.carbsPer100g, newFood.sugarPer100g, newFood.fatPer100g,
-                        newFood.saturatedFatPer100g, newFood.alcoholPercent, newFood.baseUnit, newFood.portions, newFood.packages, newFood.barcode
+                        newFood.saturatedFatPer100g, newFood.alcoholPercent, newFood.baseUnit, newFood.portions, newFood.packages, newFood.barcode, newFood.brand
                     )
                 } else {
                     onUpdateFood(newFood)
@@ -966,6 +1060,9 @@ private fun FoodsScreen(
                 Card {
                     Column(Modifier.padding(12.dp)) {
                         Text(food.name, fontWeight = FontWeight.Bold)
+                        if (!food.brand.isNullOrBlank()) {
+                            Text(food.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                        }
                         Text("${food.kcalPer100g.round0()} kcal / 100 ${food.baseUnit}", style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(4.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1001,6 +1098,7 @@ private fun FoodEditDialog(
     onSave: (FoodItemEntity) -> Unit
 ) {
     var name by remember { mutableStateOf(food?.name ?: "") }
+    var brand by remember { mutableStateOf(food?.brand ?: "") }
     var protein by remember { mutableStateOf(food?.proteinPer100g?.toString()?.replace(".0", "") ?: "") }
     var carbs by remember { mutableStateOf(food?.carbsPer100g?.toString()?.replace(".0", "") ?: "") }
     var sugar by remember { mutableStateOf(food?.sugarPer100g?.toString()?.replace(".0", "") ?: "") }
@@ -1043,6 +1141,7 @@ private fun FoodEditDialog(
                 )
 
                 AutoSelectTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+                AutoSelectTextField(brand, { brand = it }, label = { Text("Marke") }, modifier = Modifier.fillMaxWidth())
 
                 ExposedDropdownMenuBox(
                     expanded = unitExpanded,
@@ -1131,6 +1230,7 @@ private fun FoodEditDialog(
                             FoodItemEntity(
                                 id = food?.id ?: 0,
                                 name = name,
+                                brand = brand.takeIf { it.isNotBlank() },
                                 kcalPer100g = kcal,
                                 proteinPer100g = protein.num(),
                                 carbsPer100g = carbs.num(),

@@ -16,7 +16,8 @@ data class FoodItemEntity(
     val baseUnit: String = "g",
     val portions: List<FoodPortionEntity> = emptyList(),
     val packages: List<FoodPackageEntity> = emptyList(),
-    val barcode: String? = null
+    val barcode: String? = null,
+    val brand: String? = null
 ) {
     val complexCarbsPer100g: Double
         get() = (carbsPer100g - sugarPer100g).coerceAtLeast(0.0)

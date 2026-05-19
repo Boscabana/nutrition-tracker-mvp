@@ -119,11 +119,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         baseUnit: String,
         portions: List<FoodPortionEntity>,
         packages: List<FoodPackageEntity>,
-        barcode: String? = null
+        barcode: String? = null,
+        brand: String? = null
     ): FoodItemEntity {
         val newFood = FoodItemEntity(
             id = 0,
             name = name.trim(),
+            brand = brand?.trim()?.takeIf { it.isNotBlank() },
             kcalPer100g = kcal,
             proteinPer100g = protein,
             carbsPer100g = carbs,
@@ -139,7 +141,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         foods.add(newFood)
         recalculateIds()
         saveFoods()
-        return foods.first { it.name == newFood.name && (barcode == null || it.barcode == barcode) }
+        return foods.last { it.name == newFood.name && (barcode == null || it.barcode == barcode) }
     }
 
     fun updateFood(updatedFood: FoodItemEntity) {
@@ -154,6 +156,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 if (allEntries[i].foodItemId == updatedFood.id) {
                     allEntries[i] = allEntries[i].copy(
                         name = updatedFood.name,
+                        brand = updatedFood.brand,
                         kcalPer100g = updatedFood.kcalPer100g,
                         proteinPer100g = updatedFood.proteinPer100g,
                         carbsPer100g = updatedFood.carbsPer100g,
@@ -191,6 +194,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             grams = grams,
             foodItemId = food.id,
             name = food.name,
+            brand = food.brand,
             kcalPer100g = food.kcalPer100g,
             proteinPer100g = food.proteinPer100g,
             carbsPer100g = food.carbsPer100g,

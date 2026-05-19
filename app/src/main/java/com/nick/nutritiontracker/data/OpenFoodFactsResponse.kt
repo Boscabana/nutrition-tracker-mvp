@@ -6,13 +6,17 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class OFFProductResponse(
     val product: OFFProduct? = null,
-    val status: Int? = null
+    val products: List<OFFProduct>? = null,
+    val status: Int? = null,
+    val count: Int? = null
 )
 
 @Serializable
 data class OFFProduct(
+    val id: String? = null,
     @SerialName("product_name") val productName: String? = null,
     @SerialName("product_name_de") val productNameDe: String? = null,
+    val brands: String? = null,
     val nutriments: OFFNutriments? = null,
     @SerialName("serving_quantity_unit") val unit: String? = null
 )

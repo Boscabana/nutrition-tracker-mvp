@@ -13,6 +13,7 @@ data class FoodEntryEntity(
 
     val foodItemId: Long,
     val name: String,
+    val brand: String? = null,
     val kcalPer100g: Double,
     val proteinPer100g: Double,
     val carbsPer100g: Double,
