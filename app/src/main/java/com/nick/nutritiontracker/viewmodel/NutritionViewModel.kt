@@ -104,7 +104,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun findFoodByBarcode(barcode: String): FoodItemEntity? {
-        return foods.find { it.barcode == barcode }
+        return foods.find { it.barcode?.equals(barcode, ignoreCase = true) == true }
     }
 
     fun addFood(
@@ -141,7 +141,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         foods.add(newFood)
         recalculateIds()
         saveFoods()
-        return foods.last { it.name == newFood.name && (barcode == null || it.barcode == barcode) }
+        return foods.last { it.name.equals(newFood.name, ignoreCase = true) && (barcode == null || it.barcode?.equals(barcode, ignoreCase = true) == true) }
     }
 
     fun updateFood(updatedFood: FoodItemEntity) {

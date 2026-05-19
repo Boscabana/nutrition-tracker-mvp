@@ -12,6 +12,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -23,6 +25,7 @@ import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.Today
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,6 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -762,16 +766,22 @@ private fun AddEntryCard(
     
     var remoteResults by remember { mutableStateOf(emptyList<FoodItemEntity>()) }
     var isSearching by remember { mutableStateOf(false) }
+    var searchTrigger by remember { mutableIntStateOf(0) }
 
     val rotation by animateFloatAsState(if (isMinimized) -90f else 0f)
 
-    LaunchedEffect(searchQuery) {
-        if (searchQuery.length >= 3 && selectedFood?.name != searchQuery) {
-            isSearching = true
-            delay(500)
-            remoteResults = onSearchRequest(searchQuery)
-            isSearching = false
-            expanded = true
+    LaunchedEffect(searchQuery, searchTrigger) {
+        if (searchQuery.length >= 3) {
+            val isManual = searchTrigger > 0
+            val isJustSelected = selectedFood != null && selectedFood?.name == searchQuery
+            
+            if (!isJustSelected || isManual) {
+                isSearching = true
+                if (!isManual) delay(500)
+                remoteResults = onSearchRequest(searchQuery)
+                isSearching = false
+                expanded = true
+            }
         } else {
             remoteResults = emptyList()
         }
@@ -817,22 +827,48 @@ private fun AddEntryCard(
                             value = searchQuery,
                             onValueChange = { 
                                 searchQuery = it
-                                if (it.isEmpty()) selectedFood = null
+                                if (selectedFood != null && it != selectedFood?.name) {
+                                    selectedFood = null
+                                }
                                 expanded = true
                             },
                             label = { Text("Lebensmittel suchen...") },
                             trailingIcon = {
-                                if (isSearching) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                                else ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (isSearching) {
+                                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    } else {
+                                        IconButton(onClick = { if (searchQuery.length >= 3) searchTrigger++ }) {
+                                            Icon(Icons.Default.Search, contentDescription = "Suchen")
+                                        }
+                                    }
+                                    ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                                }
                             },
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                            keyboardActions = KeyboardActions(onSearch = {
+                                if (searchQuery.length >= 3) searchTrigger++
+                            }),
                             modifier = Modifier.menuAnchor().fillMaxWidth(),
                             singleLine = true
                         )
                         
                         ExposedDropdownMenu(
-                            expanded = expanded && (filteredLocal.isNotEmpty() || remoteResults.isNotEmpty()), 
+                            expanded = expanded && (filteredLocal.isNotEmpty() || remoteResults.isNotEmpty() || isSearching), 
                             onDismissRequest = { expanded = false }
                         ) {
+                            if (isSearching && remoteResults.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { 
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                                            Spacer(Modifier.width(12.dp))
+                                            Text("Suche Datenbank...", style = MaterialTheme.typography.bodyMedium)
+                                        }
+                                    },
+                                    onClick = {}
+                                )
+                            }
                             if (filteredLocal.isNotEmpty()) {
                                 Text("Lokal", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
                                 filteredLocal.forEach { food ->

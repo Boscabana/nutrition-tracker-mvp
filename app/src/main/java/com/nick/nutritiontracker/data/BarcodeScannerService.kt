@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 
@@ -23,10 +24,21 @@ class BarcodeScannerService(private val context: Context) {
         }
     }
 
+    private suspend fun getUrlText(url: String, timeout: Int = 8000): String = withContext(Dispatchers.IO) {
+        val connection = URL(url).openConnection() as HttpURLConnection
+        connection.connectTimeout = timeout
+        connection.readTimeout = timeout
+        try {
+            connection.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     suspend fun fetchProduct(barcode: String): FoodItemEntity? = withContext(Dispatchers.IO) {
         try {
             val url = "https://world.openfoodfacts.org/api/v2/product/$barcode.json"
-            val responseText = URL(url).readText()
+            val responseText = getUrlText(url)
             val response = json.decodeFromString<OFFProductResponse>(responseText)
             
             val product = response.product ?: return@withContext null
@@ -49,8 +61,8 @@ class BarcodeScannerService(private val context: Context) {
 
             val encodedQuery = URLEncoder.encode(trimmedQuery, "UTF-8")
             // Search with higher limit to allow better local ranking
-            val url = "https://world.openfoodfacts.org/cgi/search.pl?search_terms=$encodedQuery&search_simple=1&action=process&json=1&page_size=100"
-            val responseText = URL(url).readText()
+            val url = "https://world.openfoodfacts.org/cgi/search.pl?search_terms=$encodedQuery&search_simple=1&action=process&json=1&page_size=50"
+            val responseText = getUrlText(url, timeout = 10000)
             val response = json.decodeFromString<OFFProductResponse>(responseText)
             
             val products = response.products ?: emptyList()
@@ -64,7 +76,7 @@ class BarcodeScannerService(private val context: Context) {
 
             // Ensure barcode result is first if it was found
             barcodeResult?.let { b ->
-                val existingIndex = mapped.indexOfFirst { it.barcode == b.barcode }
+                val existingIndex = mapped.indexOfFirst { it.barcode?.equals(b.barcode, ignoreCase = true) == true }
                 if (existingIndex != -1) {
                     mapped.removeAt(existingIndex)
                 }
