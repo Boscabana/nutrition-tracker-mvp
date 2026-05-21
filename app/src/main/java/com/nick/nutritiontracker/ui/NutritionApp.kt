@@ -1,5 +1,7 @@
 package com.nick.nutritiontracker.ui
 
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
@@ -15,17 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.QrCodeScanner
-import androidx.compose.material.icons.filled.Restaurant
-import androidx.compose.material.icons.filled.DirectionsWalk
-import androidx.compose.material.icons.filled.Today
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,6 +36,8 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.PermissionController
 import com.nick.nutritiontracker.data.*
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
 import com.nick.nutritiontracker.viewmodel.ProfileViewModel
@@ -65,6 +59,8 @@ private val ActionDeleteRed = Color(0xFFD32F2F)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var tab by remember { mutableIntStateOf(0) }
     val foods = vm.foods
     val entries = vm.todayEntries
@@ -73,6 +69,16 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
     
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, d. MMM", Locale.GERMAN) }
     var dateMenuExpanded by remember { mutableStateOf(false) }
+
+    // Health Connect Permission Launcher
+    val permissionLauncher = rememberLauncherForActivityResult(
+        PermissionController.createRequestPermissionResultContract()
+    ) { granted ->
+        if (granted.containsAll(vm.healthConnectManager.permissions)) {
+            vm.syncStepsForSelectedDate()
+            scope.launch { snackbarHostState.showSnackbar("Berechtigung erteilt!") }
+        }
+    }
 
     MaterialTheme {
         Scaffold(
@@ -123,6 +129,50 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                                     else -> "Profil & Ziele"
                                 }
                             )
+                        }
+                    },
+                    actions = {
+                        if (tab == 0) {
+                            IconButton(onClick = {
+                                scope.launch {
+                                    val status = vm.healthConnectManager.getAvailabilityStatus()
+                                    when (status) {
+                                        HealthConnectClient.SDK_AVAILABLE -> {
+                                            if (vm.healthConnectManager.hasAllPermissions()) {
+                                                vm.syncStepsForSelectedDate()
+                                                snackbarHostState.showSnackbar("Schritte aktualisiert")
+                                            } else {
+                                                snackbarHostState.showSnackbar(
+                                                    "Berechtigung erforderlich",
+                                                    actionLabel = "Einstellungen"
+                                                ).also { result ->
+                                                    if (result == SnackbarResult.ActionPerformed) {
+                                                        context.startActivity(vm.healthConnectManager.getSettingsIntent())
+                                                    } else {
+                                                        // Fallback: Dialog versuchen
+                                                        permissionLauncher.launch(vm.healthConnectManager.permissions)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> {
+                                            snackbarHostState.showSnackbar(
+                                                "Health Connect Update erforderlich",
+                                                actionLabel = "Update"
+                                            ).also { result ->
+                                                if (result == SnackbarResult.ActionPerformed) {
+                                                    context.startActivity(vm.healthConnectManager.getInstallIntent())
+                                                }
+                                            }
+                                        }
+                                        else -> {
+                                            snackbarHostState.showSnackbar("Health Connect nicht verfügbar")
+                                        }
+                                    }
+                                }
+                            }) {
+                                Icon(Icons.Default.Sync, contentDescription = "Sync steps")
+                            }
                         }
                     }
                 )

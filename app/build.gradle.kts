@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.nick.nutritiontracker"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.nick.nutritiontracker"
@@ -54,4 +54,7 @@ dependencies {
 
     // DataStore
     implementation("androidx.datastore:datastore-preferences:1.0.0")
+
+    // Health Connect
+    implementation("androidx.health.connect:connect-client:1.1.0")
 }

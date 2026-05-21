@@ -9,7 +9,9 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.nick.nutritiontracker.data.*
+import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.time.LocalDate
@@ -21,11 +23,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         prettyPrint = true
     }
 
+    val healthConnectManager = HealthConnectManager(application)
+
     var selectedDate by mutableStateOf(LocalDate.now())
         private set
 
     fun selectDate(date: LocalDate) {
         selectedDate = date
+        syncStepsForSelectedDate()
     }
 
     private var nextFoodId = 1L
@@ -35,7 +40,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     val foods = mutableStateListOf<FoodItemEntity>()
     val allEntries = mutableStateListOf<FoodEntryEntity>()
     
-    // Step tracking: Date ISO -> Steps
     val dailySteps = mutableStateMapOf<String, Int>()
 
     val todayEntries by derivedStateOf {
@@ -49,7 +53,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             .sortedDescending()
     }
 
-    // Daily totals for the selected date
     val todayTotalKcal by derivedStateOf { todayEntries.sumOf { it.kcal } }
     val todayTotalProtein by derivedStateOf { todayEntries.sumOf { it.protein } }
     val todayTotalComplexCarbs by derivedStateOf { todayEntries.sumOf { it.complexCarbs } }
@@ -67,6 +70,18 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             createDefaultFoods()
         } else {
             recalculateIds()
+        }
+        syncStepsForSelectedDate()
+    }
+
+    fun syncStepsForSelectedDate() {
+        viewModelScope.launch {
+            if (healthConnectManager.isAvailable() && healthConnectManager.hasAllPermissions()) {
+                val steps = healthConnectManager.getStepsForDate(selectedDate)
+                if (steps != null) {
+                    updateSteps(steps)
+                }
+            }
         }
     }
 
@@ -87,19 +102,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 FoodPortionEntity(0, "L", 63.0)
             ),
             packages = emptyList()
-        )
-        addFood(
-            name = "Skyr natur",
-            kcal = 63.0,
-            protein = 11.0,
-            carbs = 4.0,
-            sugar = 4.0,
-            fat = 0.2,
-            saturatedFat = 0.1,
-            alcoholPercent = 0.0,
-            baseUnit = "g",
-            portions = listOf(FoodPortionEntity(0, "Becher", 500.0)),
-            packages = listOf(FoodPackageEntity(0, "Becher", 500.0, "g"))
         )
     }
 
@@ -151,7 +153,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             recalculateIds()
             saveFoods()
             
-            // Sync current entries snapshots
             for (i in allEntries.indices) {
                 if (allEntries[i].foodItemId == updatedFood.id) {
                     allEntries[i] = allEntries[i].copy(
@@ -230,9 +231,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         try {
             val data = json.encodeToString(foods.toList())
             prefs.edit().putString("foods_json", data).apply()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
     }
 
     fun loadFoods() {
@@ -242,9 +241,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 val loaded = json.decodeFromString<List<FoodItemEntity>>(data)
                 foods.clear()
                 foods.addAll(loaded)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            } catch (e: Exception) { e.printStackTrace() }
         }
     }
 
@@ -252,9 +249,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         try {
             val data = json.encodeToString(allEntries.toList())
             prefs.edit().putString("entries_json", data).apply()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
     }
 
     fun loadEntries() {
@@ -265,9 +260,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 allEntries.clear()
                 allEntries.addAll(loaded)
                 nextEntryId = (allEntries.maxOfOrNull { it.id } ?: 0L) + 1
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            } catch (e: Exception) { e.printStackTrace() }
         }
     }
     
@@ -275,9 +268,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         try {
             val data = json.encodeToString(dailySteps.toMap())
             prefs.edit().putString("steps_json", data).apply()
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
+        } catch (e: Exception) { e.printStackTrace() }
     }
     
     private fun loadSteps() {
@@ -287,9 +278,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 val loaded = json.decodeFromString<Map<String, Int>>(data)
                 dailySteps.clear()
                 dailySteps.putAll(loaded)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
+            } catch (e: Exception) { e.printStackTrace() }
         }
     }
 
@@ -297,16 +286,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         var fId = 1L
         var pId = 1L
         var pkgId = 1L
-        
         val updatedList = foods.map { food ->
             val updatedPortions = food.portions.map { it.copy(id = pId++) }
             val updatedPackages = food.packages.map { it.copy(id = pkgId++) }
             food.copy(id = fId++, portions = updatedPortions, packages = updatedPackages)
         }
-        
         foods.clear()
         foods.addAll(updatedList)
-        
         nextFoodId = fId
         nextPortionId = pId
     }
