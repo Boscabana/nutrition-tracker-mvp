@@ -9,6 +9,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.nick.nutritiontracker.data.UserProfile
 import com.nick.nutritiontracker.data.DailyActivity
@@ -25,8 +26,6 @@ fun MacroProgressSection(
     steps: Int
 ) {
     // Activity calories calculation based on MET formula
-    // MET for moderate walking is ~3.5
-    // Assumed average pace: 100 steps per minute
     val activity = DailyActivity("", steps)
     val activityKcal = activity.calculateCalories(userProfile.weightKg)
     
@@ -62,7 +61,20 @@ fun MacroProgressSection(
                 )
             }
 
-            // Progress bars
+            // Calorie Progress Bar (Thicker, App-Purple/Primary)
+            MacroProgressBar(
+                label = "Kalorien Fortschritt",
+                current = currentKcal,
+                target = totalBudget,
+                color = MaterialTheme.colorScheme.primary,
+                height = 14.dp,
+                unit = "kcal"
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+            HorizontalDivider(thickness = 0.5.dp, modifier = Modifier.padding(vertical = 4.dp))
+
+            // Macro Progress bars
             MacroProgressBar("Protein", currentProtein, userProfile.proteinGoalGrams, Color(0xFF2E7D32))
             MacroProgressBar("Komplexe KH", currentComplexCarbs, userProfile.complexCarbsGoalGrams, Color(0xFFFF9800))
             MacroProgressBar("Zucker", currentSugar, userProfile.sugarGoalGrams, Color(0xFFD32F2F))
@@ -90,33 +102,40 @@ private fun BudgetSummary(label: String, current: Double, target: Double, unit: 
 }
 
 @Composable
-private fun MacroProgressBar(label: String, current: Double, target: Double, color: Color) {
+private fun MacroProgressBar(
+    label: String, 
+    current: Double, 
+    target: Double, 
+    color: Color,
+    height: Dp = 8.dp,
+    unit: String = "g"
+) {
     val progress = if (target > 0) (current / target).toFloat().coerceIn(0f, 1f) else 0f
     val isOver = current > target && target > 0
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(label, style = MaterialTheme.typography.labelMedium)
-            Text("${current.round0()} / ${target.round0()} g", style = MaterialTheme.typography.labelSmall)
+            Text("${current.round0()} / ${target.round0()} $unit", style = MaterialTheme.typography.labelSmall)
         }
         
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(8.dp)
-                .background(color.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                .height(height)
+                .background(color.copy(alpha = 0.2f), RoundedCornerShape(height / 2))
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth(progress)
                     .fillMaxHeight()
-                    .background(color, RoundedCornerShape(4.dp))
+                    .background(color, RoundedCornerShape(height / 2))
             )
         }
         
         if (isOver) {
             Text(
-                "+${(current - target).round0()} g über Ziel", 
+                "+${(current - target).round0()} $unit über Ziel", 
                 style = MaterialTheme.typography.labelSmall, 
                 color = Color.Red,
                 fontWeight = FontWeight.Bold
