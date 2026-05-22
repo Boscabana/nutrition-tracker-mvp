@@ -36,8 +36,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private var nextFoodId = 1L
     private var nextPortionId = 1L
     private var nextEntryId = 1L
+    private var nextMealId = 1L
 
     val foods = mutableStateListOf<FoodItemEntity>()
+    val meals = mutableStateListOf<MealEntity>()
     val allEntries = mutableStateListOf<FoodEntryEntity>()
     
     val dailySteps = mutableStateMapOf<String, Int>()
@@ -64,6 +66,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     init {
         loadFoods()
+        loadMeals()
         loadEntries()
         loadSteps()
         if (foods.isEmpty()) {
@@ -180,6 +183,33 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         saveEntries()
     }
 
+    // --- MEAL TEMPLATE MANAGEMENT ---
+
+    fun addMealTemplate(name: String, ingredients: List<MealIngredientEntity>) {
+        val newMeal = MealEntity(
+            id = nextMealId++,
+            name = name,
+            ingredients = ingredients
+        )
+        meals.add(newMeal)
+        saveMeals()
+    }
+
+    fun updateMealTemplate(updatedMeal: MealEntity) {
+        val index = meals.indexOfFirst { it.id == updatedMeal.id }
+        if (index != -1) {
+            meals[index] = updatedMeal
+            saveMeals()
+        }
+    }
+
+    fun deleteMealTemplate(id: Long) {
+        meals.removeAll { it.id == id }
+        saveMeals()
+    }
+
+    // --- LOGGING ---
+
     fun addEntry(food: FoodItemEntity, amount: Double, portion: FoodPortionEntity?, mealSlot: String) {
         val grams = if (portion != null) amount * portion.grams else amount
         if (grams <= 0.0) return
@@ -204,6 +234,29 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             saturatedFatPer100g = food.saturatedFatPer100g,
             alcoholPercent = food.alcoholPercent,
             baseUnit = food.baseUnit
+        )
+        allEntries.add(entry)
+        saveEntries()
+    }
+
+    fun addMealEntry(meal: MealEntity, mealSlot: String) {
+        val entry = FoodEntryEntity(
+            id = nextEntryId++,
+            dateIso = selectedDate.toString(),
+            mealSlot = mealSlot,
+            amount = 1.0,
+            unitLabel = "Meal",
+            grams = meal.ingredients.sumOf { it.grams },
+            foodItemId = -1, // Not a single food item
+            name = meal.name,
+            kcalPer100g = 0.0,
+            proteinPer100g = 0.0,
+            carbsPer100g = 0.0,
+            sugarPer100g = 0.0,
+            fatPer100g = 0.0,
+            saturatedFatPer100g = 0.0,
+            isMeal = true,
+            mealIngredients = meal.ingredients
         )
         allEntries.add(entry)
         saveEntries()
@@ -241,6 +294,25 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 val loaded = json.decodeFromString<List<FoodItemEntity>>(data)
                 foods.clear()
                 foods.addAll(loaded)
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+
+    fun saveMeals() {
+        try {
+            val data = json.encodeToString(meals.toList())
+            prefs.edit().putString("meals_json", data).apply()
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    fun loadMeals() {
+        val data = prefs.getString("meals_json", null)
+        if (data != null) {
+            try {
+                val loaded = json.decodeFromString<List<MealEntity>>(data)
+                meals.clear()
+                meals.addAll(loaded)
+                nextMealId = (meals.maxOfOrNull { it.id } ?: 0L) + 1
             } catch (e: Exception) { e.printStackTrace() }
         }
     }

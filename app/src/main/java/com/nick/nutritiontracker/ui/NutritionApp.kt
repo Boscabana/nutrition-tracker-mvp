@@ -36,6 +36,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.PopupProperties
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import com.nick.nutritiontracker.data.*
@@ -126,6 +127,7 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                             Text(
                                 when (tab) {
                                     1 -> "Lebensmittel"
+                                    2 -> "Mahlzeiten"
                                     else -> "Profil & Ziele"
                                 }
                             )
@@ -188,12 +190,18 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                     NavigationBarItem(
                         selected = tab == 1,
                         onClick = { tab = 1 },
-                        label = { Text("Lebensmittel") },
+                        label = { Text("Artikel") },
                         icon = { Icon(Icons.Default.Restaurant, null) }
                     )
                     NavigationBarItem(
                         selected = tab == 2,
                         onClick = { tab = 2 },
+                        label = { Text("Mahlzeiten") },
+                        icon = { Icon(Icons.Default.SoupKitchen, null) }
+                    )
+                    NavigationBarItem(
+                        selected = tab == 3,
+                        onClick = { tab = 3 },
                         label = { Text("Profil") },
                         icon = { Icon(Icons.Default.Person, null) }
                     )
@@ -204,7 +212,8 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                 when (tab) {
                     0 -> TodayScreen(userProfile, foods, entries, vm, snackbarHostState)
                     1 -> FoodsScreen(foods, vm::addFood, vm::deleteFood, vm::updateFood, snackbarHostState)
-                    2 -> ProfileScreen(profileVm)
+                    2 -> MealsScreen(vm, snackbarHostState)
+                    3 -> ProfileScreen(profileVm)
                 }
             }
         }
@@ -335,15 +344,27 @@ private fun TodayScreen(
     }
 
     if (entryToEdit != null) {
-        EditEntryDialog(
-            entry = entryToEdit!!,
-            foods = foods,
-            onDismiss = { entryToEdit = null },
-            onSave = { updated ->
-                vm.updateEntry(updated)
-                entryToEdit = null
-            }
-        )
+        if (entryToEdit!!.isMeal) {
+            EditMealEntryDialog(
+                entry = entryToEdit!!,
+                foods = foods,
+                onDismiss = { entryToEdit = null },
+                onSave = { updated ->
+                    vm.updateEntry(updated)
+                    entryToEdit = null
+                }
+            )
+        } else {
+            EditEntryDialog(
+                entry = entryToEdit!!,
+                foods = foods,
+                onDismiss = { entryToEdit = null },
+                onSave = { updated ->
+                    vm.updateEntry(updated)
+                    entryToEdit = null
+                }
+            )
+        }
     }
 
     if (scannedFood != null) {
@@ -397,6 +418,7 @@ private fun TodayScreen(
         item { 
             AddEntryCard(
                 foods = foods, 
+                meals = vm.meals,
                 onAddEntry = { food, amount, portion, mealSlot ->
                     var finalFood = food
                     if (food.id == 0L) {
@@ -413,6 +435,9 @@ private fun TodayScreen(
                         }
                     }
                     vm.addEntry(finalFood, amount, portion, mealSlot)
+                },
+                onAddMeal = { meal, mealSlot ->
+                    vm.addMealEntry(meal, mealSlot)
                 },
                 onScanRequest = {
                     scope.launch {
@@ -613,8 +638,9 @@ private fun AddAmountDialog(
     onDismiss: () -> Unit,
     onConfirm: (Double, FoodPortionEntity?, String) -> Unit
 ) {
-    var amount by remember { mutableStateOf("100") }
-    var selectedPortion by remember { mutableStateOf<FoodPortionEntity?>(null) }
+    val firstPortion = food.portions.firstOrNull()
+    var amount by remember { mutableStateOf(if (firstPortion != null) "1" else "100") }
+    var selectedPortion by remember { mutableStateOf<FoodPortionEntity?>(firstPortion) }
     var mealSlot by remember { mutableStateOf("Snack") }
 
     AlertDialog(
@@ -632,14 +658,22 @@ private fun AddAmountDialog(
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = selectedPortion == null,
-                        onClick = { selectedPortion = null },
+                        onClick = { 
+                            val oldGrams = if (selectedPortion != null) amount.num() * selectedPortion!!.grams else amount.num()
+                            selectedPortion = null 
+                            amount = oldGrams.roundString()
+                        },
                         label = { Text(food.baseUnit) }
                     )
                     food.portions.forEach { portion ->
                         FilterChip(
                             selected = selectedPortion == portion,
-                            onClick = { selectedPortion = portion },
-                            label = { Text("${portion.name} (${portion.grams.round0()}${food.baseUnit})") }
+                            onClick = { 
+                                val oldGrams = if (selectedPortion != null) amount.num() * selectedPortion!!.grams else amount.num()
+                                selectedPortion = portion
+                                amount = (oldGrams / portion.grams).roundString()
+                            },
+                            label = { Text("${portion.name} (${portion.grams.roundString()}${food.baseUnit})") }
                         )
                     }
                 }
@@ -674,7 +708,7 @@ private fun EditEntryDialog(
     onSave: (FoodEntryEntity) -> Unit
 ) {
     val food = foods.find { it.id == entry.foodItemId } ?: return
-    var amount by remember { mutableStateOf(entry.amount.toString().replace(".0", "")) }
+    var amount by remember { mutableStateOf(entry.amount.roundString()) }
     var selectedPortion by remember {
         mutableStateOf(food.portions.find { it.name == entry.unitLabel })
     }
@@ -696,14 +730,22 @@ private fun EditEntryDialog(
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = selectedPortion == null,
-                        onClick = { selectedPortion = null },
+                        onClick = { 
+                            val oldGrams = if (selectedPortion != null) amount.num() * selectedPortion!!.grams else amount.num()
+                            selectedPortion = null
+                            amount = oldGrams.roundString()
+                        },
                         label = { Text(food.baseUnit) }
                     )
                     food.portions.forEach { portion ->
                         FilterChip(
                             selected = selectedPortion == portion,
-                            onClick = { selectedPortion = portion },
-                            label = { Text("${portion.name} (${portion.grams.round0()}${food.baseUnit})") }
+                            onClick = { 
+                                val oldGrams = if (selectedPortion != null) amount.num() * selectedPortion!!.grams else amount.num()
+                                selectedPortion = portion
+                                amount = (oldGrams / portion.grams).roundString()
+                            },
+                            label = { Text("${portion.name} (${portion.grams.roundString()}${food.baseUnit})") }
                         )
                     }
                 }
@@ -739,32 +781,249 @@ private fun EditEntryDialog(
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun EditMealEntryDialog(
+    entry: FoodEntryEntity,
+    foods: List<FoodItemEntity>,
+    onDismiss: () -> Unit,
+    onSave: (FoodEntryEntity) -> Unit
+) {
+    var mealSlot by remember { mutableStateOf(entry.mealSlot) }
+    val ingredients = remember { mutableStateListOf<MealIngredientEntity>().apply { 
+        entry.mealIngredients?.let { addAll(it) } 
+    } }
+    
+    var searchQuery by remember { mutableStateOf("") }
+    var expanded by remember { mutableStateOf(false) }
+
+    val filteredFoods = remember(searchQuery) {
+        if (searchQuery.isBlank()) emptyList()
+        else foods.filter { it.name.contains(searchQuery, ignoreCase = true) }.take(5)
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth().fillMaxHeight(0.9f)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Text("Mahlzeit abwandeln", style = MaterialTheme.typography.headlineSmall)
+                Text(entry.name, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                
+                Text("Mahlzeit", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Frühstück", "Mittag", "Abend", "Snack").forEach { slot ->
+                        FilterChip(
+                            selected = mealSlot == slot,
+                            onClick = { mealSlot = slot },
+                            label = { Text(slot) }
+                        )
+                    }
+                }
+                
+                Spacer(Modifier.height(8.dp))
+                Text("Zutaten anpassen:", style = MaterialTheme.typography.labelMedium)
+                
+                Box {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { 
+                            searchQuery = it
+                            expanded = true
+                        },
+                        label = { Text("Zutat hinzufügen...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        trailingIcon = { Icon(Icons.Default.Search, null) }
+                    )
+                    DropdownMenu(
+                        expanded = expanded && filteredFoods.isNotEmpty(),
+                        onDismissRequest = { expanded = false },
+                        properties = PopupProperties(focusable = false)
+                    ) {
+                        filteredFoods.forEach { food ->
+                            DropdownMenuItem(
+                                text = { Text(food.name) },
+                                onClick = {
+                                    val firstPortion = food.portions.firstOrNull()
+                                    ingredients.add(
+                                        MealIngredientEntity(
+                                            foodItemId = food.id,
+                                            name = food.name,
+                                            amount = if (firstPortion != null) 1.0 else 100.0,
+                                            unitLabel = firstPortion?.name ?: food.baseUnit,
+                                            grams = if (firstPortion != null) firstPortion.grams else 100.0,
+                                            kcalPer100g = food.kcalPer100g,
+                                            proteinPer100g = food.proteinPer100g,
+                                            carbsPer100g = food.carbsPer100g,
+                                            sugarPer100g = food.sugarPer100g,
+                                            fatPer100g = food.fatPer100g,
+                                            saturatedFatPer100g = food.saturatedFatPer100g,
+                                            alcoholPercent = food.alcoholPercent,
+                                            baseUnit = food.baseUnit
+                                        )
+                                    )
+                                    searchQuery = ""
+                                    expanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
+                    items(ingredients) { ingredient ->
+                        IngredientAdjustRow(
+                            ingredient = ingredient,
+                            foods = foods,
+                            onUpdate = { updated ->
+                                val idx = ingredients.indexOf(ingredient)
+                                if (idx != -1) ingredients[idx] = updated
+                            },
+                            onRemove = { ingredients.remove(ingredient) }
+                        )
+                    }
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss) { Text("Abbrechen") }
+                    Button(onClick = {
+                        onSave(entry.copy(mealSlot = mealSlot, mealIngredients = ingredients.toList()))
+                    }) { Text("Speichern") }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun IngredientAdjustRow(
+    ingredient: MealIngredientEntity,
+    foods: List<FoodItemEntity>,
+    onUpdate: (MealIngredientEntity) -> Unit,
+    onRemove: () -> Unit
+) {
+    val food = foods.find { it.id == ingredient.foodItemId }
+    var amountText by remember(ingredient.amount, ingredient.unitLabel) { 
+        mutableStateOf(ingredient.amount.roundString()) 
+    }
+    val selectedPortion = food?.portions?.find { it.name == ingredient.unitLabel }
+
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+    ) {
+        Column(Modifier.padding(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(ingredient.name, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                IconButton(onClick = onRemove) {
+                    Icon(Icons.Default.Close, null, tint = Color.Red, modifier = Modifier.size(18.dp))
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AutoSelectTextField(
+                    value = amountText,
+                    onValueChange = { 
+                        amountText = it
+                        val amt = it.num()
+                        val grams = if (selectedPortion != null) amt * selectedPortion.grams else amt
+                        onUpdate(ingredient.copy(amount = amt, grams = grams))
+                    },
+                    label = { Text("Menge") },
+                    modifier = Modifier.weight(0.3f)
+                )
+                
+                Column(Modifier.weight(0.7f)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        FilterChip(
+                            selected = selectedPortion == null,
+                            onClick = { 
+                                val oldGrams = if (selectedPortion != null) amountText.num() * selectedPortion.grams else amountText.num()
+                                val newAmt = oldGrams
+                                amountText = newAmt.roundString()
+                                onUpdate(ingredient.copy(amount = newAmt, unitLabel = food?.baseUnit ?: "g", grams = oldGrams))
+                            },
+                            label = { Text(food?.baseUnit ?: "g") }
+                        )
+                        food?.portions?.forEach { portion ->
+                            FilterChip(
+                                selected = selectedPortion == portion,
+                                onClick = {
+                                    val oldGrams = if (selectedPortion != null) amountText.num() * selectedPortion.grams else amountText.num()
+                                    val newAmt = oldGrams / portion.grams
+                                    amountText = newAmt.roundString()
+                                    onUpdate(ingredient.copy(amount = newAmt, unitLabel = portion.name, grams = oldGrams))
+                                },
+                                label = { Text(portion.name) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun CompactEntryRow(entry: FoodEntryEntity) {
+    var isExpanded by remember { mutableStateOf(false) }
+
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable { if (entry.isMeal) isExpanded = !isExpanded },
         shape = RoundedCornerShape(12.dp)
     ) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(entry.name, fontWeight = FontWeight.Bold, maxLines = 1)
-                if (!entry.brand.isNullOrBlank()) {
-                    Text(entry.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1)
+        Column {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (entry.isMeal) {
+                            Icon(
+                                if (isExpanded) Icons.Default.ExpandLess else Icons.Default.SoupKitchen, 
+                                null, 
+                                modifier = Modifier.size(14.dp), 
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(entry.name, fontWeight = FontWeight.Bold, maxLines = 1)
+                    }
+                    if (!entry.brand.isNullOrBlank()) {
+                        Text(entry.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1)
+                    }
+                    Text(entry.displayAmount(), style = MaterialTheme.typography.labelSmall, maxLines = 1)
                 }
-                Text(entry.displayAmount(), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                Text(entry.kcal.round0(), modifier = Modifier.width(36.dp), fontWeight = FontWeight.Bold)
+                MacroNumber(entry.protein, ProteinGreen)
+                Separator()
+                MacroNumber(entry.complexCarbs, CarbOrange)
+                MacroNumber(entry.sugar, SugarRed)
+                Separator()
+                MacroNumber(entry.saturatedFat, SaturatedGrey)
+                MacroNumber(entry.unsaturatedFat, UnsaturatedYellow)
             }
-            Text(entry.kcal.round0(), modifier = Modifier.width(36.dp), fontWeight = FontWeight.Bold)
-            MacroNumber(entry.protein, ProteinGreen)
-            Separator()
-            MacroNumber(entry.complexCarbs, CarbOrange)
-            MacroNumber(entry.sugar, SugarRed)
-            Separator()
-            MacroNumber(entry.saturatedFat, SaturatedGrey)
-            MacroNumber(entry.unsaturatedFat, UnsaturatedYellow)
+            
+            if (isExpanded && entry.isMeal && entry.mealIngredients != null) {
+                HorizontalDivider(modifier = Modifier.padding(horizontal = 10.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    entry.mealIngredients.forEach { ing ->
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("${ing.amount.roundString()} ${ing.unitLabel} ${ing.name}", style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("${ing.kcal.round0()} kcal", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Text("P:${ing.protein.round0()}", style = MaterialTheme.typography.labelSmall, color = ProteinGreen)
+                                Text("C:${ing.carbs.round0()}", style = MaterialTheme.typography.labelSmall, color = CarbOrange)
+                                Text("F:${ing.fat.round0()}", style = MaterialTheme.typography.labelSmall, color = UnsaturatedYellow)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -802,15 +1061,23 @@ private fun Separator() {
 @Composable
 private fun AddEntryCard(
     foods: List<FoodItemEntity>,
+    meals: List<MealEntity>,
     onAddEntry: (FoodItemEntity, Double, FoodPortionEntity?, String) -> Unit,
+    onAddMeal: (MealEntity, String) -> Unit,
     onScanRequest: () -> Unit,
     onSearchRequest: suspend (String) -> List<FoodItemEntity>
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedFood by remember { mutableStateOf<FoodItemEntity?>(null) }
+    var selectedMeal by remember { mutableStateOf<MealEntity?>(null) }
     var selectedPortion by remember(selectedFood) { mutableStateOf(selectedFood?.portions?.firstOrNull()) }
     var expanded by remember { mutableStateOf(false) }
-    var amount by remember { mutableStateOf("1") }
+    
+    // Default to 1 if portion exists, else 100
+    var amount by remember(selectedFood) { 
+        mutableStateOf(if (selectedFood?.portions?.isNotEmpty() == true) "1" else "100") 
+    }
+    
     var mealSlot by remember { mutableStateOf("Snack") }
     var isMinimized by remember { mutableStateOf(false) }
     
@@ -823,7 +1090,7 @@ private fun AddEntryCard(
     LaunchedEffect(searchQuery, searchTrigger) {
         if (searchQuery.length >= 3) {
             val isManual = searchTrigger > 0
-            val isJustSelected = selectedFood != null && selectedFood?.name == searchQuery
+            val isJustSelected = (selectedFood != null && selectedFood?.name == searchQuery) || (selectedMeal != null && selectedMeal?.name == searchQuery)
             
             if (!isJustSelected || isManual) {
                 isSearching = true
@@ -838,7 +1105,7 @@ private fun AddEntryCard(
     }
 
     val filteredLocal = remember(searchQuery, foods) {
-        if (searchQuery.isEmpty()) foods.take(10)
+        if (searchQuery.isEmpty()) emptyList()
         else {
             val queryWords = searchQuery.split("\\s+".toRegex()).filter { it.isNotBlank() }
             foods.filter { food ->
@@ -847,6 +1114,13 @@ private fun AddEntryCard(
                     (food.brand?.contains(word, ignoreCase = true) ?: false)
                 }
             }
+        }
+    }
+
+    val filteredMeals = remember(searchQuery, meals) {
+        if (searchQuery.isEmpty()) emptyList()
+        else {
+            meals.filter { it.name.contains(searchQuery, ignoreCase = true) }
         }
     }
 
@@ -863,8 +1137,7 @@ private fun AddEntryCard(
                     Icons.Default.ExpandMore,
                     contentDescription = null,
                     modifier = Modifier.rotate(rotation).size(20.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
+                    tint = MaterialTheme.colorScheme.primary)
             }
 
             AnimatedVisibility(visible = !isMinimized) {
@@ -877,12 +1150,11 @@ private fun AddEntryCard(
                             value = searchQuery,
                             onValueChange = { 
                                 searchQuery = it
-                                if (selectedFood != null && it != selectedFood?.name) {
-                                    selectedFood = null
-                                }
+                                if (selectedFood != null && it != selectedFood?.name) selectedFood = null
+                                if (selectedMeal != null && it != selectedMeal?.name) selectedMeal = null
                                 expanded = true
                             },
-                            label = { Text("Lebensmittel suchen...") },
+                            label = { Text("Suchen (Artikel oder Mahlzeit)...") },
                             trailingIcon = {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     if (isSearching) {
@@ -904,7 +1176,7 @@ private fun AddEntryCard(
                         )
                         
                         ExposedDropdownMenu(
-                            expanded = expanded && (filteredLocal.isNotEmpty() || remoteResults.isNotEmpty() || isSearching), 
+                            expanded = expanded && (filteredLocal.isNotEmpty() || filteredMeals.isNotEmpty() || remoteResults.isNotEmpty() || isSearching), 
                             onDismissRequest = { expanded = false }
                         ) {
                             if (isSearching && remoteResults.isEmpty()) {
@@ -919,8 +1191,25 @@ private fun AddEntryCard(
                                     onClick = {}
                                 )
                             }
+                            
+                            if (filteredMeals.isNotEmpty()) {
+                                Text("Deine Mahlzeiten", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+                                filteredMeals.forEach { meal ->
+                                    DropdownMenuItem(
+                                        text = { Text(meal.name) },
+                                        onClick = {
+                                            selectedMeal = meal
+                                            selectedFood = null
+                                            searchQuery = meal.name
+                                            expanded = false
+                                        },
+                                        leadingIcon = { Icon(Icons.Default.SoupKitchen, null, modifier = Modifier.size(18.dp)) }
+                                    )
+                                }
+                            }
+
                             if (filteredLocal.isNotEmpty()) {
-                                Text("Lokal", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+                                Text("Deine Artikel", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
                                 filteredLocal.forEach { food ->
                                     DropdownMenuItem(
                                         text = { 
@@ -933,6 +1222,7 @@ private fun AddEntryCard(
                                         },
                                         onClick = {
                                             selectedFood = food
+                                            selectedMeal = null
                                             searchQuery = food.name
                                             expanded = false
                                         }
@@ -940,7 +1230,7 @@ private fun AddEntryCard(
                                 }
                             }
                             if (remoteResults.isNotEmpty()) {
-                                if (filteredLocal.isNotEmpty()) HorizontalDivider()
+                                if (filteredLocal.isNotEmpty() || filteredMeals.isNotEmpty()) HorizontalDivider()
                                 Text("Datenbank", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
                                 remoteResults.forEach { food ->
                                     DropdownMenuItem(
@@ -954,6 +1244,7 @@ private fun AddEntryCard(
                                         },
                                         onClick = {
                                             selectedFood = food
+                                            selectedMeal = null
                                             searchQuery = food.name
                                             expanded = false
                                         }
@@ -963,30 +1254,43 @@ private fun AddEntryCard(
                         }
                     }
 
-                    AutoSelectTextField(
-                        value = amount,
-                        onValueChange = { amount = it },
-                        label = { Text("Menge") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Text("Einheit", style = MaterialTheme.typography.labelMedium)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(
-                            selected = selectedPortion == null,
-                            onClick = { selectedPortion = null },
-                            label = { Text(selectedFood?.baseUnit ?: "g") }
+                    if (selectedMeal == null) {
+                        AutoSelectTextField(
+                            value = amount,
+                            onValueChange = { amount = it },
+                            label = { Text("Menge") },
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        selectedFood?.portions?.forEach { portion ->
+
+                        Text("Einheit", style = MaterialTheme.typography.labelMedium)
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilterChip(
-                                selected = selectedPortion == portion,
-                                onClick = { selectedPortion = portion },
-                                label = { Text("${portion.name} (${portion.grams.round0()}${selectedFood?.baseUnit})") }
+                                selected = selectedPortion == null,
+                                onClick = { 
+                                    val oldGrams = if (selectedPortion != null) amount.num() * selectedPortion!!.grams else amount.num()
+                                    selectedPortion = null 
+                                    amount = oldGrams.roundString()
+                                },
+                                label = { Text(selectedFood?.baseUnit ?: "g") }
                             )
+                            selectedFood?.portions?.forEach { portion ->
+                                FilterChip(
+                                    selected = selectedPortion == portion,
+                                    onClick = { 
+                                        val oldGrams = if (selectedPortion != null) amount.num() * selectedPortion!!.grams else amount.num()
+                                        selectedPortion = portion
+                                        amount = (oldGrams / portion.grams).roundString()
+                                    },
+                                    label = { Text("${portion.name} (${portion.grams.roundString()}${selectedFood?.baseUnit ?: "g"})") }
+                                )
+                            }
                         }
+                    } else {
+                        Text("Mahlzeit ausgewählt: ${selectedMeal!!.name}", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                        Text("${selectedMeal!!.totalKcal.round0()} kcal gesamt", style = MaterialTheme.typography.labelSmall)
                     }
 
-                    Text("Mahlzeit", style = MaterialTheme.typography.labelMedium)
+                    Text("Mahlzeit-Slot", style = MaterialTheme.typography.labelMedium)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("Frühstück", "Mittag", "Abend", "Snack").forEach { slot ->
                             FilterChip(
@@ -998,9 +1302,13 @@ private fun AddEntryCard(
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
-                            enabled = selectedFood != null,
+                            enabled = selectedFood != null || selectedMeal != null,
                             onClick = {
-                                selectedFood?.let { onAddEntry(it, amount.num(), selectedPortion, mealSlot) }
+                                if (selectedFood != null) {
+                                    onAddEntry(selectedFood!!, amount.num(), selectedPortion, mealSlot)
+                                } else if (selectedMeal != null) {
+                                    onAddMeal(selectedMeal!!, mealSlot)
+                                }
                             },
                             modifier = Modifier.weight(1f)
                         ) {
@@ -1016,7 +1324,7 @@ private fun AddEntryCard(
                         ) {
                             Icon(Icons.Default.QrCodeScanner, null)
                             Spacer(Modifier.width(8.dp))
-                            Text("Barcode scannen")
+                            Text("Barcode")
                         }
                     }
                 }
@@ -1081,7 +1389,8 @@ private fun FoodsScreen(
                     onAddFood(
                         newFood.name, newFood.kcalPer100g, newFood.proteinPer100g,
                         newFood.carbsPer100g, newFood.sugarPer100g, newFood.fatPer100g,
-                        newFood.saturatedFatPer100g, newFood.alcoholPercent, newFood.baseUnit, newFood.portions, newFood.packages, newFood.barcode, newFood.brand
+                        newFood.saturatedFatPer100g, newFood.alcoholPercent, newFood.baseUnit,
+                        newFood.portions, newFood.packages, newFood.barcode, newFood.brand
                     )
                 } else {
                     onUpdateFood(newFood)
@@ -1351,6 +1660,7 @@ class PackageInputState(nameInitial: String, quantityInitial: String, unitInitia
 private fun String.num(): Double = replace(',', '.').toDoubleOrNull() ?: 0.0
 private fun Double.round0(): String = "%.0f".format(this)
 private fun Double.round1(): String = "%.1f".format(this)
+private fun Double.roundString(): String = if (this % 1.0 == 0.0) "%.0f".format(this) else "%.1f".format(this)
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
