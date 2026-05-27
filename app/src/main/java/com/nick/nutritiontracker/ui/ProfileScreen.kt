@@ -7,57 +7,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import com.nick.nutritiontracker.data.Gender
 import com.nick.nutritiontracker.data.UserProfile
 import com.nick.nutritiontracker.viewmodel.ProfileViewModel
-
-@Composable
-private fun AutoSelectTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    label: @Composable (() -> Unit)? = null,
-    modifier: Modifier = Modifier,
-    readOnly: Boolean = false,
-    singleLine: Boolean = false,
-    colors: TextFieldColors = OutlinedTextFieldDefaults.colors()
-) {
-    var textFieldValueState by remember {
-        mutableStateOf(TextFieldValue(text = value))
-    }
-    
-    LaunchedEffect(value) {
-        if (value != textFieldValueState.text) {
-            textFieldValueState = textFieldValueState.copy(text = value)
-        }
-    }
-
-    OutlinedTextField(
-        value = textFieldValueState,
-        onValueChange = {
-            textFieldValueState = it
-            if (value != it.text) {
-                onValueChange(it.text)
-            }
-        },
-        label = label,
-        modifier = modifier.onFocusChanged {
-            if (it.isFocused) {
-                textFieldValueState = textFieldValueState.copy(
-                    selection = TextRange(0, textFieldValueState.text.length)
-                )
-            }
-        },
-        readOnly = readOnly,
-        singleLine = singleLine,
-        colors = colors
-    )
-}
 
 @Composable
 fun ProfileScreen(viewModel: ProfileViewModel) {

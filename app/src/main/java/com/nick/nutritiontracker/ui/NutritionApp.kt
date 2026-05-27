@@ -589,50 +589,6 @@ private fun MealGroupHeader(
 }
 
 @Composable
-private fun AutoSelectTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    label: @Composable (() -> Unit)? = null,
-    modifier: Modifier = Modifier,
-    readOnly: Boolean = false,
-    singleLine: Boolean = true,
-    colors: TextFieldColors = OutlinedTextFieldDefaults.colors()
-) {
-    var textFieldValue by remember { mutableStateOf(TextFieldValue(text = value)) }
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(value) {
-        if (value != textFieldValue.text) {
-            textFieldValue = textFieldValue.copy(text = value, selection = TextRange.Zero)
-        }
-    }
-
-    OutlinedTextField(
-        value = textFieldValue,
-        onValueChange = { 
-            textFieldValue = it
-            if (it.text != value) {
-                onValueChange(it.text)
-            }
-        },
-        label = label,
-        modifier = modifier.onFocusChanged { focusState ->
-            if (focusState.isFocused) {
-                scope.launch {
-                    delay(150)
-                    textFieldValue = textFieldValue.copy(
-                        selection = TextRange(0, textFieldValue.text.length)
-                    )
-                }
-            }
-        },
-        readOnly = readOnly,
-        singleLine = singleLine,
-        colors = colors
-    )
-}
-
-@Composable
 private fun AddAmountDialog(
     food: FoodItemEntity,
     onDismiss: () -> Unit,
@@ -827,7 +783,7 @@ private fun EditMealEntryDialog(
                 Text("Zutaten anpassen:", style = MaterialTheme.typography.labelMedium)
                 
                 Box {
-                    OutlinedTextField(
+                    AutoSelectTextField(
                         value = searchQuery,
                         onValueChange = { 
                             searchQuery = it
@@ -1146,7 +1102,7 @@ private fun AddEntryCard(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
-                        OutlinedTextField(
+                        AutoSelectTextField(
                             value = searchQuery,
                             onValueChange = { 
                                 searchQuery = it
@@ -1661,17 +1617,3 @@ private fun String.num(): Double = replace(',', '.').toDoubleOrNull() ?: 0.0
 private fun Double.round0(): String = "%.0f".format(this)
 private fun Double.round1(): String = "%.1f".format(this)
 private fun Double.roundString(): String = if (this % 1.0 == 0.0) "%.0f".format(this) else "%.1f".format(this)
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun FlowRow(
-    horizontalArrangement: Arrangement.Horizontal = Arrangement.Start,
-    verticalArrangement: Arrangement.Vertical = Arrangement.Top,
-    content: @Composable () -> Unit
-) {
-    androidx.compose.foundation.layout.FlowRow(
-        horizontalArrangement = horizontalArrangement,
-        verticalArrangement = verticalArrangement,
-        content = { content() }
-    )
-}

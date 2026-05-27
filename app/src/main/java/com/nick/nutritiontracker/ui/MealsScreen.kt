@@ -166,7 +166,7 @@ fun MealEditDialog(
                 )
                 Spacer(Modifier.height(8.dp))
                 
-                OutlinedTextField(
+                AutoSelectTextField(
                     value = name,
                     onValueChange = { name = it },
                     label = { Text("Name der Mahlzeit") },
@@ -178,7 +178,7 @@ fun MealEditDialog(
                 
                 // Ingredient Search
                 Box {
-                    OutlinedTextField(
+                    AutoSelectTextField(
                         value = searchQuery,
                         onValueChange = { 
                             searchQuery = it
@@ -231,7 +231,6 @@ fun MealEditDialog(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AddIngredientDialog(
     food: FoodItemEntity,
@@ -280,7 +279,6 @@ fun AddIngredientDialog(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun IngredientRow(
     ingredient: MealIngredientEntity,
@@ -345,33 +343,3 @@ fun IngredientRow(
 private fun String.num(): Double = replace(',', '.').toDoubleOrNull() ?: 0.0
 private fun Double.round0(): String = "%.0f".format(this)
 private fun Double.roundString(): String = toString().replace(".0", "")
-
-@Composable
-fun AutoSelectTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    label: @Composable (() -> Unit)? = null,
-    modifier: Modifier = Modifier
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = label,
-        modifier = modifier,
-        singleLine = true
-    )
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun FlowRow(
-    horizontalArrangement: Arrangement.Horizontal = Arrangement.Start,
-    verticalArrangement: Arrangement.Vertical = Arrangement.Top,
-    content: @Composable () -> Unit
-) {
-    androidx.compose.foundation.layout.FlowRow(
-        horizontalArrangement = horizontalArrangement,
-        verticalArrangement = verticalArrangement,
-        content = { content() }
-    )
-}
