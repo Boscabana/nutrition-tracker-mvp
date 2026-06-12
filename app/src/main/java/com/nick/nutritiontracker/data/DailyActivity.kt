@@ -15,9 +15,7 @@ data class DailyActivity(
      * Annahme: Ein Durchschnittstempo von 100 Schritten pro Minute.
      * Dauer (h) = (Schritte / 100) / 60
      */
-    fun calculateCalories(weightKg: Double): Double {
-        val metValue = 3.5
-        val durationInHours = (steps / 100.0) / 60.0
-        return metValue * weightKg * durationInHours
+    fun calculateCalories(weightKg: Double, heightM: Double): Double {
+        return 0.55 * weightKg * steps * 0.415 * heightM / 1000
     }
 }

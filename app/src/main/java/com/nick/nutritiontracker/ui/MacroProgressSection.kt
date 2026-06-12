@@ -27,7 +27,7 @@ fun MacroProgressSection(
 ) {
     // Activity calories calculation based on MET formula
     val activity = DailyActivity("", steps)
-    val activityKcal = activity.calculateCalories(userProfile.weightKg)
+    val activityKcal = activity.calculateCalories(userProfile.weightKg, userProfile.heightCm / 100.0)
     
     val totalBudget = userProfile.calorieBudget + activityKcal
 
