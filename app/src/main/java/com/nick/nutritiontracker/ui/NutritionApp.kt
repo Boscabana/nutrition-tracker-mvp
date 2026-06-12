@@ -582,8 +582,8 @@ private fun MealGroupHeader(
             MacroNumber(totalComplexCarbs, CarbOrange)
             MacroNumber(totalSugar, SugarRed)
             Separator()
-            MacroNumber(totalSaturatedFat, SaturatedGrey)
             MacroNumber(totalUnsaturatedFat, UnsaturatedYellow)
+            MacroNumber(totalSaturatedFat, SaturatedGrey)
         }
         HorizontalDivider(modifier = Modifier.padding(top = 4.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
     }
@@ -960,8 +960,8 @@ private fun CompactEntryRow(entry: FoodEntryEntity) {
                 MacroNumber(entry.complexCarbs, CarbOrange)
                 MacroNumber(entry.sugar, SugarRed)
                 Separator()
-                MacroNumber(entry.saturatedFat, SaturatedGrey)
                 MacroNumber(entry.unsaturatedFat, UnsaturatedYellow)
+                MacroNumber(entry.saturatedFat, SaturatedGrey)
             }
             
             if (isExpanded && entry.isMeal && entry.mealIngredients != null) {
@@ -990,8 +990,8 @@ private fun MacroLegendRow() {
         LegendDot(ProteinGreen, "Protein")
         LegendDot(CarbOrange, "KH")
         LegendDot(SugarRed, "Zucker")
-        LegendDot(SaturatedGrey, "ges.")
         LegendDot(UnsaturatedYellow, "unges.")
+        LegendDot(SaturatedGrey, "ges.")
     }
 }
 
@@ -1428,8 +1428,8 @@ private fun FoodsScreen(
                             MacroNumber(food.complexCarbsPer100g, CarbOrange)
                             MacroNumber(food.sugarPer100g, SugarRed)
                             Separator()
-                            MacroNumber(food.saturatedFatPer100g, SaturatedGrey)
                             MacroNumber(food.unsaturatedFatPer100g, UnsaturatedYellow)
+                            MacroNumber(food.saturatedFatPer100g, SaturatedGrey)
                         }
                         if (food.alcoholPercent > 0) {
                             Text("Alkohol: ${food.alcoholPercent.round1()}%", style = MaterialTheme.typography.labelSmall, color = Color.Magenta)
