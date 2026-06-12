@@ -1,22 +1,34 @@
 package com.nick.nutritiontracker.ui
 
+import android.content.Intent
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import com.nick.nutritiontracker.data.Gender
 import com.nick.nutritiontracker.data.UserProfile
+import com.nick.nutritiontracker.viewmodel.NutritionViewModel
 import com.nick.nutritiontracker.viewmodel.ProfileViewModel
+import java.io.File
 
 @Composable
-fun ProfileScreen(viewModel: ProfileViewModel) {
+fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionViewModel) {
     val userProfile by viewModel.userProfile.collectAsState()
+    val context = LocalContext.current
     
     var firstName by remember(userProfile) { mutableStateOf(userProfile.firstName) }
     var age by remember(userProfile) { mutableStateOf(userProfile.age.toString()) }
@@ -37,6 +49,23 @@ fun ProfileScreen(viewModel: ProfileViewModel) {
                    (sFatPct.toIntOrNull() ?: 0)
     
     val isValid = totalPct == 100
+
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let {
+            try {
+                context.contentResolver.openInputStream(it)?.use { stream ->
+                    val content = stream.bufferedReader().readText()
+                    if (nutritionViewModel.importBackup(content)) {
+                        Toast.makeText(context, "Daten erfolgreich importiert!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "Fehler beim Importieren.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Fehler: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -151,6 +180,49 @@ fun ProfileScreen(viewModel: ProfileViewModel) {
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Profil speichern")
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Text("Daten-Sicherung", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = {
+                    try {
+                        val json = nutritionViewModel.getBackupJson()
+                        val file = File(context.cacheDir, "nutrition_backup.json")
+                        file.writeText(json)
+                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                        
+                        val intent = Intent(Intent.ACTION_SEND).apply {
+                            type = "application/json"
+                            putExtra(Intent.EXTRA_STREAM, uri)
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(Intent.createChooser(intent, "Backup exportieren"))
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Export fehlgeschlagen: ${e.message}", Toast.LENGTH_SHORT).show()
+                    }
+                },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+            ) {
+                Icon(Icons.Default.FileUpload, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Exportieren")
+            }
+            
+            Button(
+                onClick = {
+                    importLauncher.launch("*/*") // Best practice to use */* or application/json, but some pickers are picky
+                },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+            ) {
+                Icon(Icons.Default.FileDownload, null)
+                Spacer(Modifier.width(8.dp))
+                Text("Importieren")
+            }
         }
         
         Spacer(Modifier.height(32.dp))

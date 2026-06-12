@@ -1,6 +1,5 @@
 package com.nick.nutritiontracker.ui
 
-import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -12,10 +11,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -24,15 +23,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -213,7 +209,7 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                     0 -> TodayScreen(userProfile, foods, entries, vm, snackbarHostState)
                     1 -> FoodsScreen(foods, vm::addFood, vm::deleteFood, vm::updateFood, snackbarHostState)
                     2 -> MealsScreen(vm, snackbarHostState)
-                    3 -> ProfileScreen(profileVm)
+                    3 -> ProfileScreen(profileVm, vm)
                 }
             }
         }
@@ -333,8 +329,11 @@ private fun TodayScreen(
             text = { Text("Möchtest du diesen Eintrag wirklich löschen?") },
             confirmButton = {
                 TextButton(onClick = {
-                    vm.deleteEntry(entryToDelete!!)
-                    entryToDelete = null
+                    val id = entryToDelete
+                    if (id != null) {
+                        vm.deleteEntry(id)
+                        entryToDelete = null
+                    }
                 }) { Text("Löschen", color = Color.Red) }
             },
             dismissButton = {
@@ -344,9 +343,10 @@ private fun TodayScreen(
     }
 
     if (entryToEdit != null) {
-        if (entryToEdit!!.isMeal) {
+        val currentEntry = entryToEdit!!
+        if (currentEntry.isMeal) {
             EditMealEntryDialog(
-                entry = entryToEdit!!,
+                entry = currentEntry,
                 foods = foods,
                 onDismiss = { entryToEdit = null },
                 onSave = { updated ->
@@ -356,7 +356,7 @@ private fun TodayScreen(
             )
         } else {
             EditEntryDialog(
-                entry = entryToEdit!!,
+                entry = currentEntry,
                 foods = foods,
                 onDismiss = { entryToEdit = null },
                 onSave = { updated ->
@@ -368,11 +368,12 @@ private fun TodayScreen(
     }
 
     if (scannedFood != null) {
+        val food = scannedFood!!
         AddAmountDialog(
-            food = scannedFood!!,
+            food = food,
             onDismiss = { scannedFood = null },
             onConfirm = { amount, portion, mealSlot ->
-                vm.addEntry(scannedFood!!, amount, portion, mealSlot)
+                vm.addEntry(food, amount, portion, mealSlot)
                 scannedFood = null
             }
         )
@@ -422,7 +423,7 @@ private fun TodayScreen(
                 onAddEntry = { food, amount, portion, mealSlot ->
                     var finalFood = food
                     if (food.id == 0L) {
-                        val existing = if (food.barcode != null) vm.findFoodByBarcode(food.barcode!!) else null
+                        val existing = food.barcode?.let { vm.findFoodByBarcode(it) }
                         if (existing != null) {
                             finalFood = existing
                         } else {
@@ -897,9 +898,8 @@ private fun IngredientAdjustRow(
                             selected = selectedPortion == null,
                             onClick = { 
                                 val oldGrams = if (selectedPortion != null) amountText.num() * selectedPortion.grams else amountText.num()
-                                val newAmt = oldGrams
-                                amountText = newAmt.roundString()
-                                onUpdate(ingredient.copy(amount = newAmt, unitLabel = food?.baseUnit ?: "g", grams = oldGrams))
+                                amountText = oldGrams.roundString()
+                                onUpdate(ingredient.copy(amount = oldGrams, unitLabel = food?.baseUnit ?: "g", grams = oldGrams))
                             },
                             label = { Text(food?.baseUnit ?: "g") }
                         )
@@ -1312,8 +1312,11 @@ private fun FoodsScreen(
             text = { Text("Möchtest du dieses Lebensmittel und alle zugehörigen Einträge wirklich löschen?") },
             confirmButton = {
                 TextButton(onClick = {
-                    onDeleteFood(foodToDelete!!)
-                    foodToDelete = null
+                    val id = foodToDelete
+                    if (id != null) {
+                        onDeleteFood(id)
+                        foodToDelete = null
+                    }
                 }) { Text("Löschen", color = Color.Red) }
             },
             dismissButton = {
@@ -1406,7 +1409,10 @@ private fun FoodsScreen(
         items(foods, key = { it.id }) { food ->
             SwipeActionContainer(
                 onDeleteRequest = { foodToDelete = food.id },
-                onEditRequest = { foodToEdit = food; showAddDialog = true }
+                onEditRequest = { 
+                    foodToEdit = food
+                    showAddDialog = true 
+                }
             ) {
                 Card {
                     Column(Modifier.padding(12.dp)) {

@@ -324,6 +324,42 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         } catch (e: Exception) { e.printStackTrace() }
     }
 
+    fun getBackupJson(): String {
+        val backup = BackupData(foods = foods.toList(), meals = meals.toList())
+        return json.encodeToString(backup)
+    }
+
+    fun importBackup(jsonString: String): Boolean {
+        return try {
+            val backup = json.decodeFromString<BackupData>(jsonString)
+            
+            var addedCount = 0
+            backup.foods.forEach { importedFood ->
+                if (foods.none { it.name == importedFood.name && it.barcode == importedFood.barcode }) {
+                    foods.add(importedFood)
+                    addedCount++
+                }
+            }
+            
+            backup.meals.forEach { importedMeal ->
+                if (meals.none { it.name == importedMeal.name }) {
+                    meals.add(importedMeal)
+                    addedCount++
+                }
+            }
+            
+            if (addedCount > 0) {
+                recalculateIds()
+                saveFoods()
+                saveMeals()
+            }
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
     fun loadEntries() {
         val data = prefs.getString("entries_json", null)
         if (data != null) {
