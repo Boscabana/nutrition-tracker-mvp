@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -207,7 +208,7 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
             Box(Modifier.padding(padding).fillMaxSize()) {
                 when (tab) {
                     0 -> TodayScreen(userProfile, foods, entries, vm, snackbarHostState)
-                    1 -> FoodsScreen(foods, vm::addFood, vm::deleteFood, vm::updateFood, snackbarHostState)
+                    1 -> FoodsScreen(vm, snackbarHostState)
                     2 -> MealsScreen(vm, snackbarHostState)
                     3 -> ProfileScreen(profileVm, vm)
                 }
@@ -317,7 +318,10 @@ private fun TodayScreen(
     var entryToDelete by remember { mutableStateOf<Long?>(null) }
     var entryToEdit by remember { mutableStateOf<FoodEntryEntity?>(null) }
     var scannedFood by remember { mutableStateOf<FoodItemEntity?>(null) }
+    var duplicateFood by remember { mutableStateOf<FoodItemEntity?>(null) }
     var showStepDialog by remember { mutableStateOf(false) }
+    var foodToCapture by remember { mutableStateOf<FoodItemEntity?>(null) }
+    var askToCaptureFood by remember { mutableStateOf<FoodItemEntity?>(null) }
 
     val mealSlots = listOf("Frühstück", "Mittag", "Abend", "Snack")
     val expandedStates = remember { mutableStateMapOf<String, Boolean>().apply { mealSlots.forEach { put(it, true) } } }
@@ -378,6 +382,66 @@ private fun TodayScreen(
             }
         )
     }
+
+    if (duplicateFood != null) {
+        val food = duplicateFood!!
+        AlertDialog(
+            onDismissRequest = { duplicateFood = null },
+            title = { Text("Artikel bereits vorhanden") },
+            text = { Text("Ein Artikel mit dem Barcode '${food.barcode}' ist bereits als '${food.name}' gespeichert. Möchtest du den vorhandenen Artikel verwenden?") },
+            confirmButton = {
+                Button(onClick = {
+                    scannedFood = food
+                    duplicateFood = null
+                }) { Text("Verwenden") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    duplicateFood = null
+                }) { Text("Abbrechen") }
+            }
+        )
+    }
+
+    if (askToCaptureFood != null) {
+        val food = askToCaptureFood!!
+        AlertDialog(
+            onDismissRequest = { askToCaptureFood = null },
+            title = { Text("Neuer Artikel") },
+            text = { Text("Möchtest du '${food.name}' dauerhaft in deinen Artikeln speichern (mit Portionen etc.) oder nur für diesen Eintrag verwenden?") },
+            confirmButton = {
+                Button(onClick = {
+                    foodToCapture = food
+                    askToCaptureFood = null
+                }) { Text("Dauerhaft speichern") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    scannedFood = food
+                    askToCaptureFood = null
+                }) { Text("Nur verwenden") }
+            }
+        )
+    }
+
+    if (foodToCapture != null) {
+        FoodEditDialog(
+            food = foodToCapture,
+            vm = vm,
+            onDismiss = { foodToCapture = null },
+            onSave = { newFood ->
+                val saved = vm.addFood(
+                    newFood.name, newFood.kcalPer100g, newFood.proteinPer100g,
+                    newFood.carbsPer100g, newFood.sugarPer100g, newFood.fatPer100g,
+                    newFood.saturatedFatPer100g, newFood.alcoholPercent, newFood.baseUnit,
+                    newFood.portions, newFood.packages, newFood.barcode, newFood.brand,
+                    newFood.category
+                )
+                foodToCapture = null
+                scannedFood = saved
+            }
+        )
+    }
     
     if (showStepDialog) {
         StepInputDialog(
@@ -431,7 +495,7 @@ private fun TodayScreen(
                                 food.name, food.kcalPer100g, food.proteinPer100g,
                                 food.carbsPer100g, food.sugarPer100g, food.fatPer100g,
                                 food.saturatedFatPer100g, food.alcoholPercent, food.baseUnit,
-                                food.portions, food.packages, food.barcode, food.brand
+                                food.portions, food.packages, food.barcode, food.brand, food.category
                             )
                         }
                     }
@@ -444,28 +508,23 @@ private fun TodayScreen(
                     scope.launch {
                         val barcode = scannerService.startScan()
                         if (barcode != null) {
-                            var food = vm.findFoodByBarcode(barcode)
-                            if (food == null) {
+                            val existing = vm.findFoodByBarcode(barcode)
+                            if (existing != null) {
+                                duplicateFood = existing
+                            } else {
                                 val fetched = scannerService.fetchProduct(barcode)
                                 if (fetched != null) {
-                                    food = vm.addFood(
-                                        fetched.name, fetched.kcalPer100g, fetched.proteinPer100g,
-                                        fetched.carbsPer100g, fetched.sugarPer100g, fetched.fatPer100g,
-                                        fetched.saturatedFatPer100g, fetched.alcoholPercent, fetched.baseUnit,
-                                        fetched.portions, fetched.packages, fetched.barcode, fetched.brand
-                                    )
-                                    snackbarHostState.showSnackbar("Produkt erfolgreich importiert.")
+                                    askToCaptureFood = fetched
                                 } else {
-                                    snackbarHostState.showSnackbar("Produkt nicht gefunden.")
+                                    snackbarHostState.showSnackbar("Produkt nicht gefunden. Bitte manuell erfassen.")
+                                    foodToCapture = FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
                                 }
-                            }
-                            if (food != null) {
-                                scannedFood = food
                             }
                         }
                     }
                 },
-                onSearchRequest = { query -> scannerService.searchProducts(query) }
+                onSearchRequest = { query -> scannerService.searchProducts(query) },
+                onCaptureRequested = { food -> askToCaptureFood = food }
             ) 
         }
 
@@ -1021,7 +1080,8 @@ private fun AddEntryCard(
     onAddEntry: (FoodItemEntity, Double, FoodPortionEntity?, String) -> Unit,
     onAddMeal: (MealEntity, String) -> Unit,
     onScanRequest: () -> Unit,
-    onSearchRequest: suspend (String) -> List<FoodItemEntity>
+    onSearchRequest: suspend (String) -> List<FoodItemEntity>,
+    onCaptureRequested: (FoodItemEntity) -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var selectedFood by remember { mutableStateOf<FoodItemEntity?>(null) }
@@ -1040,6 +1100,7 @@ private fun AddEntryCard(
     var remoteResults by remember { mutableStateOf(emptyList<FoodItemEntity>()) }
     var isSearching by remember { mutableStateOf(false) }
     var searchTrigger by remember { mutableIntStateOf(0) }
+    var captureSelected by remember { mutableStateOf(false) }
 
     val rotation by animateFloatAsState(if (isMinimized) -90f else 0f)
 
@@ -1158,6 +1219,7 @@ private fun AddEntryCard(
                                             selectedFood = null
                                             searchQuery = meal.name
                                             expanded = false
+                                            captureSelected = false
                                         },
                                         leadingIcon = { Icon(Icons.Default.SoupKitchen, null, modifier = Modifier.size(18.dp)) }
                                     )
@@ -1181,6 +1243,7 @@ private fun AddEntryCard(
                                             selectedMeal = null
                                             searchQuery = food.name
                                             expanded = false
+                                            captureSelected = false
                                         }
                                     )
                                 }
@@ -1203,6 +1266,7 @@ private fun AddEntryCard(
                                             selectedMeal = null
                                             searchQuery = food.name
                                             expanded = false
+                                            captureSelected = true
                                         }
                                     )
                                 }
@@ -1211,6 +1275,13 @@ private fun AddEntryCard(
                     }
 
                     if (selectedMeal == null) {
+                        if (selectedFood != null && captureSelected) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = true, onCheckedChange = { })
+                                Text("Diesen Artikel dauerhaft erfassen", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+
                         AutoSelectTextField(
                             value = amount,
                             onValueChange = { amount = it },
@@ -1261,7 +1332,11 @@ private fun AddEntryCard(
                             enabled = selectedFood != null || selectedMeal != null,
                             onClick = {
                                 if (selectedFood != null) {
-                                    onAddEntry(selectedFood!!, amount.num(), selectedPortion, mealSlot)
+                                    if (captureSelected) {
+                                        onCaptureRequested(selectedFood!!)
+                                    } else {
+                                        onAddEntry(selectedFood!!, amount.num(), selectedPortion, mealSlot)
+                                    }
                                 } else if (selectedMeal != null) {
                                     onAddMeal(selectedMeal!!, mealSlot)
                                 }
@@ -1291,12 +1366,10 @@ private fun AddEntryCard(
 
 @Composable
 private fun FoodsScreen(
-    foods: List<FoodItemEntity>,
-    onAddFood: (String, Double, Double, Double, Double, Double, Double, Double, String, List<FoodPortionEntity>, List<FoodPackageEntity>, String?, String?) -> Unit,
-    onDeleteFood: (Long) -> Unit,
-    onUpdateFood: (FoodItemEntity) -> Unit,
+    vm: NutritionViewModel,
     snackbarHostState: SnackbarHostState
 ) {
+    val foods = vm.foods
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val scannerService = remember { BarcodeScannerService(context) }
@@ -1304,6 +1377,19 @@ private fun FoodsScreen(
     var foodToDelete by remember { mutableStateOf<Long?>(null) }
     var foodToEdit by remember { mutableStateOf<FoodItemEntity?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
+
+    var searchQuery by remember { mutableStateOf("") }
+    var selectedCategory by remember { mutableStateOf<String?>(null) }
+
+    val categories = vm.categories.sorted()
+
+    val filteredFoods = remember(foods, searchQuery, selectedCategory) {
+        foods.filter { food ->
+            val matchesSearch = food.name.contains(searchQuery, ignoreCase = true) || (food.brand?.contains(searchQuery, ignoreCase = true) == true)
+            val matchesCategory = selectedCategory == null || food.category == selectedCategory
+            matchesSearch && matchesCategory
+        }
+    }
 
     if (foodToDelete != null) {
         AlertDialog(
@@ -1314,7 +1400,7 @@ private fun FoodsScreen(
                 TextButton(onClick = {
                     val id = foodToDelete
                     if (id != null) {
-                        onDeleteFood(id)
+                        vm.deleteFood(id)
                         foodToDelete = null
                     }
                 }) { Text("Löschen", color = Color.Red) }
@@ -1328,9 +1414,10 @@ private fun FoodsScreen(
     if (foodToEdit != null && !showAddDialog) {
         FoodEditDialog(
             food = foodToEdit!!,
+            vm = vm,
             onDismiss = { foodToEdit = null },
             onSave = { updated ->
-                onUpdateFood(updated)
+                vm.updateFood(updated)
                 foodToEdit = null
             }
         )
@@ -1339,20 +1426,21 @@ private fun FoodsScreen(
     if (showAddDialog) {
         FoodEditDialog(
             food = foodToEdit, 
+            vm = vm,
             onDismiss = { 
                 showAddDialog = false
                 foodToEdit = null
             },
             onSave = { newFood ->
                 if (newFood.id == 0L) {
-                    onAddFood(
+                    vm.addFood(
                         newFood.name, newFood.kcalPer100g, newFood.proteinPer100g,
                         newFood.carbsPer100g, newFood.sugarPer100g, newFood.fatPer100g,
                         newFood.saturatedFatPer100g, newFood.alcoholPercent, newFood.baseUnit,
-                        newFood.portions, newFood.packages, newFood.barcode, newFood.brand
+                        newFood.portions, newFood.packages, newFood.barcode, newFood.brand, newFood.category
                     )
                 } else {
-                    onUpdateFood(newFood)
+                    vm.updateFood(newFood)
                 }
                 showAddDialog = false
                 foodToEdit = null
@@ -1360,11 +1448,8 @@ private fun FoodsScreen(
         )
     }
 
-    LazyColumn(
-        Modifier.fillMaxSize().padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        item {
+    Column(Modifier.fillMaxSize()) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = { 
@@ -1383,16 +1468,23 @@ private fun FoodsScreen(
                         scope.launch {
                             val barcode = scannerService.startScan()
                             if (barcode != null) {
-                                val fetched = scannerService.fetchProduct(barcode)
-                                if (fetched != null) {
-                                    foodToEdit = fetched
+                                val existing = foods.find { it.barcode == barcode }
+                                if (existing != null) {
+                                    snackbarHostState.showSnackbar("Artikel '${existing.name}' existiert bereits.")
+                                    foodToEdit = existing
                                     showAddDialog = true
                                 } else {
-                                    scope.launch { 
-                                        snackbarHostState.showSnackbar("Produktdaten konnten nicht geladen werden. Bitte manuell eintragen.")
+                                    val fetched = scannerService.fetchProduct(barcode)
+                                    if (fetched != null) {
+                                        foodToEdit = fetched
+                                        showAddDialog = true
+                                    } else {
+                                        scope.launch { 
+                                            snackbarHostState.showSnackbar("Produktdaten konnten nicht geladen werden. Bitte manuell eintragen.")
+                                        }
+                                        foodToEdit = FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
+                                        showAddDialog = true
                                     }
-                                    foodToEdit = FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
-                                    showAddDialog = true
                                 }
                             }
                         }
@@ -1405,40 +1497,78 @@ private fun FoodsScreen(
                     Text("Scan")
                 }
             }
-        }
-        items(foods, key = { it.id }) { food ->
-            SwipeActionContainer(
-                onDeleteRequest = { foodToDelete = food.id },
-                onEditRequest = { 
-                    foodToEdit = food
-                    showAddDialog = true 
+
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                label = { Text("Suchen...") },
+                modifier = Modifier.fillMaxWidth(),
+                leadingIcon = { Icon(Icons.Default.Search, null) },
+                trailingIcon = { if (searchQuery.isNotEmpty()) IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Clear, null) } }
+            )
+
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                item {
+                    FilterChip(
+                        selected = selectedCategory == null,
+                        onClick = { selectedCategory = null },
+                        label = { Text("Alle") }
+                    )
                 }
-            ) {
-                Card {
-                    Column(Modifier.padding(12.dp)) {
-                        Text(food.name, fontWeight = FontWeight.Bold)
-                        if (!food.brand.isNullOrBlank()) {
-                            Text(food.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                        }
-                        Text("${food.kcalPer100g.round0()} kcal / 100 ${food.baseUnit}", style = MaterialTheme.typography.bodySmall)
-                        Spacer(Modifier.height(4.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            MacroNumber(food.proteinPer100g, ProteinGreen)
-                            Separator()
-                            MacroNumber(food.complexCarbsPer100g, CarbOrange)
-                            MacroNumber(food.sugarPer100g, SugarRed)
-                            Separator()
-                            MacroNumber(food.unsaturatedFatPer100g, UnsaturatedYellow)
-                            MacroNumber(food.saturatedFatPer100g, SaturatedGrey)
-                        }
-                        if (food.alcoholPercent > 0) {
-                            Text("Alkohol: ${food.alcoholPercent.round1()}%", style = MaterialTheme.typography.labelSmall, color = Color.Magenta)
-                        }
-                        if (food.portions.isNotEmpty()) {
-                            Text("Portionen: " + food.portions.joinToString(" · ") { "${it.name} (${it.grams.round0()}${food.baseUnit})" }, style = MaterialTheme.typography.labelSmall)
-                        }
-                        if (food.packages.isNotEmpty()) {
-                            Text("Packungen: " + food.packages.joinToString(" · ") { "${it.name} ${it.quantity.round0()} ${it.unit}" }, style = MaterialTheme.typography.labelSmall)
+                items(categories) { cat ->
+                    FilterChip(
+                        selected = selectedCategory == cat,
+                        onClick = { selectedCategory = if (selectedCategory == cat) null else cat },
+                        label = { Text(cat) }
+                    )
+                }
+            }
+        }
+
+        LazyColumn(
+            Modifier.weight(1f).padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(bottom = 16.dp)
+        ) {
+            items(filteredFoods, key = { it.id }) { food ->
+                SwipeActionContainer(
+                    onDeleteRequest = { foodToDelete = food.id },
+                    onEditRequest = { 
+                        foodToEdit = food
+                        showAddDialog = true 
+                    }
+                ) {
+                    Card {
+                        Column(Modifier.padding(12.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(food.name, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                if (!food.category.isNullOrBlank()) {
+                                    SuggestionChip(onClick = {}, label = { Text(food.category, style = MaterialTheme.typography.labelSmall) })
+                                }
+                            }
+                            if (!food.brand.isNullOrBlank()) {
+                                Text(food.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                            }
+                            Text("${food.kcalPer100g.round0()} kcal / 100 ${food.baseUnit}", style = MaterialTheme.typography.bodySmall)
+                            Spacer(Modifier.height(4.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                MacroNumber(food.proteinPer100g, ProteinGreen)
+                                Separator()
+                                MacroNumber(food.complexCarbsPer100g, CarbOrange)
+                                MacroNumber(food.sugarPer100g, SugarRed)
+                                Separator()
+                                MacroNumber(food.unsaturatedFatPer100g, UnsaturatedYellow)
+                                MacroNumber(food.saturatedFatPer100g, SaturatedGrey)
+                            }
+                            if (food.alcoholPercent > 0) {
+                                Text("Alkohol: ${food.alcoholPercent.round1()}%", style = MaterialTheme.typography.labelSmall, color = Color.Magenta)
+                            }
+                            if (food.portions.isNotEmpty()) {
+                                Text("Portionen: " + food.portions.joinToString(" · ") { "${it.name} (${it.grams.round0()}${food.baseUnit})" }, style = MaterialTheme.typography.labelSmall)
+                            }
+                            if (food.packages.isNotEmpty()) {
+                                Text("Packungen: " + food.packages.joinToString(" · ") { "${it.name} ${it.quantity.round0()} ${it.unit}" }, style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                     }
                 }
@@ -1451,11 +1581,13 @@ private fun FoodsScreen(
 @Composable
 private fun FoodEditDialog(
     food: FoodItemEntity?,
+    vm: NutritionViewModel,
     onDismiss: () -> Unit,
     onSave: (FoodItemEntity) -> Unit
 ) {
     var name by remember { mutableStateOf(food?.name ?: "") }
     var brand by remember { mutableStateOf(food?.brand ?: "") }
+    var category by remember { mutableStateOf(food?.category ?: "") }
     var protein by remember { mutableStateOf(food?.proteinPer100g?.toString()?.replace(".0", "") ?: "") }
     var carbs by remember { mutableStateOf(food?.carbsPer100g?.toString()?.replace(".0", "") ?: "") }
     var sugar by remember { mutableStateOf(food?.sugarPer100g?.toString()?.replace(".0", "") ?: "") }
@@ -1466,6 +1598,7 @@ private fun FoodEditDialog(
     var barcode by remember { mutableStateOf(food?.barcode ?: "") }
     
     var unitExpanded by remember { mutableStateOf(false) }
+    var categoryExpanded by remember { mutableStateOf(false) }
 
     val kcal = calculateKcalPer100g(protein.num(), carbs.num(), fat.num(), alcohol.num())
 
@@ -1499,6 +1632,37 @@ private fun FoodEditDialog(
 
                 AutoSelectTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
                 AutoSelectTextField(brand, { brand = it }, label = { Text("Marke") }, modifier = Modifier.fillMaxWidth())
+                
+                ExposedDropdownMenuBox(
+                    expanded = categoryExpanded,
+                    onExpandedChange = { categoryExpanded = !categoryExpanded }
+                ) {
+                    OutlinedTextField(
+                        value = category,
+                        onValueChange = { category = it },
+                        readOnly = true,
+                        label = { Text("Kategorie") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = categoryExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = categoryExpanded,
+                        onDismissRequest = { categoryExpanded = false }
+                    ) {
+                        vm.categories.sorted().forEach { cat ->
+                            DropdownMenuItem(
+                                text = { Text(cat) },
+                                onClick = {
+                                    category = cat
+                                    categoryExpanded = false
+                                }
+                            )
+                        }
+                        if (vm.categories.isEmpty()) {
+                            DropdownMenuItem(text = { Text("Keine Kategorien definiert") }, onClick = { }, enabled = false)
+                        }
+                    }
+                }
 
                 ExposedDropdownMenuBox(
                     expanded = unitExpanded,
@@ -1588,6 +1752,7 @@ private fun FoodEditDialog(
                                 id = food?.id ?: 0,
                                 name = name,
                                 brand = brand.takeIf { it.isNotBlank() },
+                                category = category.takeIf { it.isNotBlank() },
                                 kcalPer100g = kcal,
                                 proteinPer100g = protein.num(),
                                 carbsPer100g = carbs.num(),

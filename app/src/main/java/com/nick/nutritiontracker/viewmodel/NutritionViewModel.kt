@@ -41,6 +41,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     val foods = mutableStateListOf<FoodItemEntity>()
     val meals = mutableStateListOf<MealEntity>()
     val allEntries = mutableStateListOf<FoodEntryEntity>()
+    val categories = mutableStateListOf<String>()
     
     val dailySteps = mutableStateMapOf<String, Int>()
 
@@ -69,10 +70,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         loadMeals()
         loadEntries()
         loadSteps()
+        loadCategories()
         if (foods.isEmpty()) {
             createDefaultFoods()
         } else {
             recalculateIds()
+        }
+        if (categories.isEmpty()) {
+            createDefaultCategories()
         }
         syncStepsForSelectedDate()
     }
@@ -86,6 +91,16 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             }
         }
+    }
+
+    private fun createDefaultCategories() {
+        val defaults = listOf(
+            "Milchprodukte", "Fleisch", "Süßigkeiten", "Getränke", "Obst", 
+            "Gemüse", "Teigwaren", "Fertiggerichte", "Tiefkühlprodukte", 
+            "Kühlregal", "Convenience"
+        )
+        categories.addAll(defaults)
+        saveCategories()
     }
 
     private fun createDefaultFoods() {
@@ -104,7 +119,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 FoodPortionEntity(0, "M", 53.0),
                 FoodPortionEntity(0, "L", 63.0)
             ),
-            packages = emptyList()
+            packages = emptyList(),
+            category = "Protein"
         )
     }
 
@@ -125,7 +141,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         portions: List<FoodPortionEntity>,
         packages: List<FoodPackageEntity>,
         barcode: String? = null,
-        brand: String? = null
+        brand: String? = null,
+        category: String? = null
     ): FoodItemEntity {
         val newFood = FoodItemEntity(
             id = 0,
@@ -141,12 +158,16 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             baseUnit = baseUnit,
             portions = portions,
             packages = packages,
-            barcode = barcode?.trim()?.takeIf { it.isNotBlank() }
+            barcode = barcode?.trim()?.takeIf { it.isNotBlank() },
+            category = category?.trim()?.takeIf { it.isNotBlank() }
         )
         foods.add(newFood)
         recalculateIds()
         saveFoods()
-        return foods.last { it.name.equals(newFood.name, ignoreCase = true) && (barcode == null || it.barcode?.equals(barcode, ignoreCase = true) == true) }
+        return foods.last { 
+            it.name.equals(newFood.name, ignoreCase = true) && 
+            (barcode == null || it.barcode?.equals(barcode, ignoreCase = true) == true) 
+        }
     }
 
     fun updateFood(updatedFood: FoodItemEntity) {
@@ -181,6 +202,54 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         allEntries.removeAll { it.foodItemId == id }
         saveFoods()
         saveEntries()
+    }
+
+    // --- CATEGORY MANAGEMENT ---
+
+    fun addCategory(name: String) {
+        if (name.isNotBlank() && !categories.contains(name.trim())) {
+            categories.add(name.trim())
+            saveCategories()
+        }
+    }
+
+    fun deleteCategory(name: String) {
+        categories.remove(name)
+        saveCategories()
+    }
+
+    fun updateCategory(oldName: String, newName: String) {
+        val idx = categories.indexOf(oldName)
+        if (idx != -1 && newName.isNotBlank() && !categories.contains(newName.trim())) {
+            categories[idx] = newName.trim()
+            saveCategories()
+            
+            // Update foods using this category
+            foods.forEachIndexed { index, food ->
+                if (food.category == oldName) {
+                    foods[index] = food.copy(category = newName.trim())
+                }
+            }
+            saveFoods()
+        }
+    }
+
+    private fun saveCategories() {
+        try {
+            val data = json.encodeToString(categories.toList())
+            prefs.edit().putString("categories_json", data).apply()
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    private fun loadCategories() {
+        val data = prefs.getString("categories_json", null)
+        if (data != null) {
+            try {
+                val loaded = json.decodeFromString<List<String>>(data)
+                categories.clear()
+                categories.addAll(loaded)
+            } catch (e: Exception) { e.printStackTrace() }
+        }
     }
 
     // --- MEAL TEMPLATE MANAGEMENT ---

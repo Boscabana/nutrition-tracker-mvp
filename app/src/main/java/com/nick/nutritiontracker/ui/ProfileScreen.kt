@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material3.*
@@ -158,6 +161,8 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
                 )
             }
         }
+
+        CategoryManagementCard(nutritionViewModel)
         
         Button(
             onClick = {
@@ -226,6 +231,84 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
         }
         
         Spacer(Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun CategoryManagementCard(vm: NutritionViewModel) {
+    var showAddDialog by remember { mutableStateOf(false) }
+    var categoryToEdit by remember { mutableStateOf<String?>(null) }
+    var newCategoryName by remember { mutableStateOf("") }
+
+    if (showAddDialog || categoryToEdit != null) {
+        AlertDialog(
+            onDismissRequest = { 
+                showAddDialog = false
+                categoryToEdit = null
+                newCategoryName = ""
+            },
+            title = { Text(if (categoryToEdit != null) "Kategorie bearbeiten" else "Neue Kategorie") },
+            text = {
+                OutlinedTextField(
+                    value = newCategoryName,
+                    onValueChange = { newCategoryName = it },
+                    label = { Text("Name der Kategorie") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (categoryToEdit != null) {
+                            vm.updateCategory(categoryToEdit!!, newCategoryName)
+                        } else {
+                            vm.addCategory(newCategoryName)
+                        }
+                        showAddDialog = false
+                        categoryToEdit = null
+                        newCategoryName = ""
+                    },
+                    enabled = newCategoryName.isNotBlank()
+                ) {
+                    Text("Speichern")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { 
+                    showAddDialog = false
+                    categoryToEdit = null
+                    newCategoryName = ""
+                }) {
+                    Text("Abbrechen")
+                }
+            }
+        )
+    }
+
+    Card {
+        Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Kategorien verwalten", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                IconButton(onClick = { showAddDialog = true }) {
+                    Icon(Icons.Default.Add, "Kategorie hinzufügen")
+                }
+            }
+            
+            vm.categories.forEach { cat ->
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Text(cat, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { 
+                        categoryToEdit = cat
+                        newCategoryName = cat
+                    }) {
+                        Icon(Icons.Default.Edit, "Bearbeiten", modifier = Modifier.size(20.dp))
+                    }
+                    IconButton(onClick = { vm.deleteCategory(cat) }) {
+                        Icon(Icons.Default.Delete, "Löschen", tint = Color.Red, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+        }
     }
 }
 
