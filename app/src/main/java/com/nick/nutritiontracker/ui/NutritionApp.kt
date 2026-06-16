@@ -59,21 +59,14 @@ private val ActionDeleteRed = Color(0xFFD32F2F)
 fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val scannerService = remember { BarcodeScannerService(context) }
     var tab by remember { mutableIntStateOf(0) }
-
+    val foods = vm.foods
+    val entries = vm.todayEntries
     val userProfile by profileVm.userProfile.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
-
+    
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, d. MMM", Locale.GERMAN) }
     var dateMenuExpanded by remember { mutableStateOf(false) }
-
-    // Global Scanning State
-    var scannedFoodForEntry by remember { mutableStateOf<FoodItemEntity?>(null) }
-    var scannedFoodForArticle by remember { mutableStateOf<FoodItemEntity?>(null) }
-    var selectedMealSlot by remember { mutableStateOf("Snack") }
-    var foodToCapture by remember { mutableStateOf<FoodItemEntity?>(null) }
-    var duplicateFood by remember { mutableStateOf<FoodItemEntity?>(null) }
 
     // Health Connect Permission Launcher
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -83,67 +76,6 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
             vm.syncStepsForSelectedDate()
             scope.launch { snackbarHostState.showSnackbar("Berechtigung erteilt!") }
         }
-    }
-
-    // Dialogs moved to top level for universal scan button
-    if (scannedFoodForEntry != null) {
-        val food = scannedFoodForEntry!!
-        AddAmountDialog(
-            food = food,
-            initialMealSlot = selectedMealSlot,
-            onDismiss = { scannedFoodForEntry = null },
-            onConfirm = { amount, portion, mealSlot ->
-                vm.addEntry(food, amount, portion, mealSlot)
-                scannedFoodForEntry = null
-            }
-        )
-    }
-
-    if (scannedFoodForArticle != null || foodToCapture != null) {
-        FoodEditDialog(
-            food = scannedFoodForArticle ?: foodToCapture,
-            vm = vm,
-            onDismiss = {
-                scannedFoodForArticle = null
-                foodToCapture = null
-            },
-            onSave = { newFood ->
-                if (newFood.id == 0L) {
-                    val saved = vm.addFood(
-                        newFood.name, newFood.kcalPer100g, newFood.proteinPer100g,
-                        newFood.carbsPer100g, newFood.sugarPer100g, newFood.fatPer100g,
-                        newFood.saturatedFatPer100g, newFood.alcoholPercent, newFood.baseUnit,
-                        newFood.portions, newFood.packages, newFood.barcode, newFood.brand,
-                        newFood.category
-                    )
-                    if (foodToCapture != null) {
-                        scannedFoodForEntry = saved
-                    }
-                } else {
-                    vm.updateFood(newFood)
-                }
-                scannedFoodForArticle = null
-                foodToCapture = null
-            }
-        )
-    }
-
-    if (duplicateFood != null) {
-        val food = duplicateFood!!
-        AlertDialog(
-            onDismissRequest = { duplicateFood = null },
-            title = { Text("Artikel bereits vorhanden") },
-            text = { Text("Ein Artikel mit dem Barcode '${food.barcode}' ist bereits als '${food.name}' gespeichert. Möchtest du den vorhandenen Artikel verwenden?") },
-            confirmButton = {
-                Button(onClick = {
-                    scannedFoodForEntry = food
-                    duplicateFood = null
-                }) { Text("Verwenden") }
-            },
-            dismissButton = {
-                TextButton(onClick = { duplicateFood = null }) { Text("Abbrechen") }
-            }
-        )
     }
 
     MaterialTheme {
@@ -177,7 +109,9 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                                             else -> date.format(dateFormatter)
                                         }
                                         DropdownMenuItem(
-                                            text = { Text(label) },
+                                            text = { 
+                                                Text(label) 
+                                            },
                                             onClick = {
                                                 vm.selectDate(date)
                                                 dateMenuExpanded = false
@@ -214,12 +148,25 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                                                     if (result == SnackbarResult.ActionPerformed) {
                                                         context.startActivity(vm.healthConnectManager.getSettingsIntent())
                                                     } else {
+                                                        // Fallback: Dialog versuchen
                                                         permissionLauncher.launch(vm.healthConnectManager.permissions)
                                                     }
                                                 }
                                             }
                                         }
-                                        else -> snackbarHostState.showSnackbar("Health Connect nicht verfügbar")
+                                        HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> {
+                                            snackbarHostState.showSnackbar(
+                                                "Health Connect Update erforderlich",
+                                                actionLabel = "Update"
+                                            ).also { result ->
+                                                if (result == SnackbarResult.ActionPerformed) {
+                                                    context.startActivity(vm.healthConnectManager.getInstallIntent())
+                                                }
+                                            }
+                                        }
+                                        else -> {
+                                            snackbarHostState.showSnackbar("Health Connect nicht verfügbar")
+                                        }
                                     }
                                 }
                             }) {
@@ -230,79 +177,38 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                 )
             },
             bottomBar = {
-                Box(contentAlignment = Alignment.BottomCenter) {
-                    NavigationBar {
-                        NavigationBarItem(
-                            selected = tab == 0,
-                            onClick = { tab = 0 },
-                            label = { Text("Tagebuch") },
-                            icon = { Icon(Icons.Default.Today, null) }
-                        )
-                        NavigationBarItem(
-                            selected = tab == 1,
-                            onClick = { tab = 1 },
-                            label = { Text("Artikel") },
-                            icon = { Icon(Icons.Default.Restaurant, null) }
-                        )
-
-                        // Space for the integrated FAB
-                        Spacer(Modifier.weight(0.6f))
-
-                        NavigationBarItem(
-                            selected = tab == 2,
-                            onClick = { tab = 2 },
-                            label = { Text("Mahlzeiten") },
-                            icon = { Icon(Icons.Default.SoupKitchen, null) }
-                        )
-                        NavigationBarItem(
-                            selected = tab == 3,
-                            onClick = { tab = 3 },
-                            label = { Text("Profil") },
-                            icon = { Icon(Icons.Default.Person, null) }
-                        )
-                    }
-                    
-                    RadialScanButton(
-                        modifier = Modifier.offset(y = (-60).dp),
-                        onScan = { slot ->
-                            selectedMealSlot = slot
-                            scope.launch {
-                                val barcode = scannerService.startScan()
-                                if (barcode != null) {
-                                    if (tab == 1) { // Foods Screen
-                                        val existing = vm.findFoodByBarcode(barcode)
-                                        if (existing != null) {
-                                            snackbarHostState.showSnackbar("Artikel '${existing.name}' existiert bereits.")
-                                            scannedFoodForArticle = existing
-                                        } else {
-                                            val fetched = scannerService.fetchProduct(barcode)
-                                            scannedFoodForArticle = fetched ?: FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
-                                        }
-                                    } else { // Default: Add to Today
-                                        val existing = vm.findFoodByBarcode(barcode)
-                                        if (existing != null) {
-                                            duplicateFood = existing
-                                        } else {
-                                            val fetched = scannerService.fetchProduct(barcode)
-                                            if (fetched != null) {
-                                                foodToCapture = fetched
-                                            } else {
-                                                snackbarHostState.showSnackbar("Nicht gefunden. Bitte manuell erfassen.")
-                                                foodToCapture = FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = tab == 0,
+                        onClick = { tab = 0 },
+                        label = { Text("Tagebuch") },
+                        icon = { Icon(Icons.Default.Today, null) }
+                    )
+                    NavigationBarItem(
+                        selected = tab == 1,
+                        onClick = { tab = 1 },
+                        label = { Text("Artikel") },
+                        icon = { Icon(Icons.Default.Restaurant, null) }
+                    )
+                    NavigationBarItem(
+                        selected = tab == 2,
+                        onClick = { tab = 2 },
+                        label = { Text("Mahlzeiten") },
+                        icon = { Icon(Icons.Default.SoupKitchen, null) }
+                    )
+                    NavigationBarItem(
+                        selected = tab == 3,
+                        onClick = { tab = 3 },
+                        label = { Text("Profil") },
+                        icon = { Icon(Icons.Default.Person, null) }
                     )
                 }
             }
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
                 when (tab) {
-                    0 -> TodayScreen(userProfile, vm.foods, vm.todayEntries, vm, snackbarHostState, scannerService)
-                    1 -> FoodsScreen(vm, snackbarHostState, scannerService)
+                    0 -> TodayScreen(userProfile, foods, entries, vm, snackbarHostState)
+                    1 -> FoodsScreen(vm, snackbarHostState)
                     2 -> MealsScreen(vm, snackbarHostState)
                     3 -> ProfileScreen(profileVm, vm)
                 }
@@ -403,14 +309,18 @@ private fun TodayScreen(
     foods: List<FoodItemEntity>,
     entries: List<FoodEntryEntity>,
     vm: NutritionViewModel,
-    snackbarHostState: SnackbarHostState,
-    scannerService: BarcodeScannerService
+    snackbarHostState: SnackbarHostState
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val scannerService = remember { BarcodeScannerService(context) }
 
     var entryToDelete by remember { mutableStateOf<Long?>(null) }
     var entryToEdit by remember { mutableStateOf<FoodEntryEntity?>(null) }
+    var scannedFood by remember { mutableStateOf<FoodItemEntity?>(null) }
+    var duplicateFood by remember { mutableStateOf<FoodItemEntity?>(null) }
     var showStepDialog by remember { mutableStateOf(false) }
+    var foodToCapture by remember { mutableStateOf<FoodItemEntity?>(null) }
     var askToCaptureFood by remember { mutableStateOf<FoodItemEntity?>(null) }
 
     val mealSlots = listOf("Frühstück", "Mittag", "Abend", "Snack")
@@ -461,6 +371,38 @@ private fun TodayScreen(
         }
     }
 
+    if (scannedFood != null) {
+        val food = scannedFood!!
+        AddAmountDialog(
+            food = food,
+            onDismiss = { scannedFood = null },
+            onConfirm = { amount, portion, mealSlot ->
+                vm.addEntry(food, amount, portion, mealSlot)
+                scannedFood = null
+            }
+        )
+    }
+
+    if (duplicateFood != null) {
+        val food = duplicateFood!!
+        AlertDialog(
+            onDismissRequest = { duplicateFood = null },
+            title = { Text("Artikel bereits vorhanden") },
+            text = { Text("Ein Artikel mit dem Barcode '${food.barcode}' ist bereits als '${food.name}' gespeichert. Möchtest du den vorhandenen Artikel verwenden?") },
+            confirmButton = {
+                Button(onClick = {
+                    scannedFood = food
+                    duplicateFood = null
+                }) { Text("Verwenden") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    duplicateFood = null
+                }) { Text("Abbrechen") }
+            }
+        )
+    }
+
     if (askToCaptureFood != null) {
         val food = askToCaptureFood!!
         AlertDialog(
@@ -469,17 +411,38 @@ private fun TodayScreen(
             text = { Text("Möchtest du '${food.name}' dauerhaft in deinen Artikeln speichern (mit Portionen etc.) oder nur für diesen Eintrag verwenden?") },
             confirmButton = {
                 Button(onClick = {
+                    foodToCapture = food
                     askToCaptureFood = null
                 }) { Text("Dauerhaft speichern") }
             },
             dismissButton = {
                 TextButton(onClick = {
+                    scannedFood = food
                     askToCaptureFood = null
                 }) { Text("Nur verwenden") }
             }
         )
     }
 
+    if (foodToCapture != null) {
+        FoodEditDialog(
+            food = foodToCapture,
+            vm = vm,
+            onDismiss = { foodToCapture = null },
+            onSave = { newFood ->
+                val saved = vm.addFood(
+                    newFood.name, newFood.kcalPer100g, newFood.proteinPer100g,
+                    newFood.carbsPer100g, newFood.sugarPer100g, newFood.fatPer100g,
+                    newFood.saturatedFatPer100g, newFood.alcoholPercent, newFood.baseUnit,
+                    newFood.portions, newFood.packages, newFood.barcode, newFood.brand,
+                    newFood.category
+                )
+                foodToCapture = null
+                scannedFood = saved
+            }
+        )
+    }
+    
     if (showStepDialog) {
         StepInputDialog(
             initialSteps = vm.todaySteps,
@@ -494,7 +457,7 @@ private fun TodayScreen(
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
-        contentPadding = PaddingValues(top = 12.dp, bottom = 100.dp)
+        contentPadding = PaddingValues(top = 12.dp, bottom = 80.dp)
     ) {
         item {
             Box(Modifier.clickable { showStepDialog = true }) {
@@ -547,13 +510,14 @@ private fun TodayScreen(
                         if (barcode != null) {
                             val existing = vm.findFoodByBarcode(barcode)
                             if (existing != null) {
-                                // show duplicate dialog (simplified for this refactor)
+                                duplicateFood = existing
                             } else {
                                 val fetched = scannerService.fetchProduct(barcode)
                                 if (fetched != null) {
                                     askToCaptureFood = fetched
                                 } else {
-                                    snackbarHostState.showSnackbar("Nicht gefunden.")
+                                    snackbarHostState.showSnackbar("Produkt nicht gefunden. Bitte manuell erfassen.")
+                                    foodToCapture = FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
                                 }
                             }
                         }
@@ -687,14 +651,13 @@ private fun MealGroupHeader(
 @Composable
 private fun AddAmountDialog(
     food: FoodItemEntity,
-    initialMealSlot: String = "Snack",
     onDismiss: () -> Unit,
     onConfirm: (Double, FoodPortionEntity?, String) -> Unit
 ) {
     val firstPortion = food.portions.firstOrNull()
     var amount by remember { mutableStateOf(if (firstPortion != null) "1" else "100") }
     var selectedPortion by remember { mutableStateOf<FoodPortionEntity?>(firstPortion) }
-    var mealSlot by remember { mutableStateOf(initialMealSlot) }
+    var mealSlot by remember { mutableStateOf("Snack") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1126,6 +1089,7 @@ private fun AddEntryCard(
     var selectedPortion by remember(selectedFood) { mutableStateOf(selectedFood?.portions?.firstOrNull()) }
     var expanded by remember { mutableStateOf(false) }
     
+    // Default to 1 if portion exists, else 100
     var amount by remember(selectedFood) { 
         mutableStateOf(if (selectedFood?.portions?.isNotEmpty() == true) "1" else "100") 
     }
@@ -1403,11 +1367,12 @@ private fun AddEntryCard(
 @Composable
 private fun FoodsScreen(
     vm: NutritionViewModel,
-    snackbarHostState: SnackbarHostState,
-    scannerService: BarcodeScannerService
+    snackbarHostState: SnackbarHostState
 ) {
     val foods = vm.foods
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val scannerService = remember { BarcodeScannerService(context) }
     
     var foodToDelete by remember { mutableStateOf<Long?>(null) }
     var foodToEdit by remember { mutableStateOf<FoodItemEntity?>(null) }
@@ -1514,6 +1479,9 @@ private fun FoodsScreen(
                                         foodToEdit = fetched
                                         showAddDialog = true
                                     } else {
+                                        scope.launch { 
+                                            snackbarHostState.showSnackbar("Produktdaten konnten nicht geladen werden. Bitte manuell eintragen.")
+                                        }
                                         foodToEdit = FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
                                         showAddDialog = true
                                     }
@@ -1560,7 +1528,7 @@ private fun FoodsScreen(
         LazyColumn(
             Modifier.weight(1f).padding(horizontal = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(bottom = 100.dp)
+            contentPadding = PaddingValues(bottom = 16.dp)
         ) {
             items(filteredFoods, key = { it.id }) { food ->
                 SwipeActionContainer(
@@ -1611,7 +1579,7 @@ private fun FoodsScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun FoodEditDialog(
+private fun FoodEditDialog(
     food: FoodItemEntity?,
     vm: NutritionViewModel,
     onDismiss: () -> Unit,
