@@ -67,8 +67,9 @@ fun MealsScreen(
     }
 
     LazyColumn(
-        Modifier.fillMaxSize().padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        Modifier.fillMaxSize().padding(horizontal = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(top = 12.dp, bottom = 100.dp)
     ) {
         item {
             Button(
@@ -342,4 +343,4 @@ fun IngredientRow(
 
 private fun String.num(): Double = replace(',', '.').toDoubleOrNull() ?: 0.0
 private fun Double.round0(): String = "%.0f".format(this)
-private fun Double.roundString(): String = toString().replace(".0", "")
+private fun Double.roundString(): String = if (this % 1.0 == 0.0) "%.0f".format(this) else "%.1f".format(this)
