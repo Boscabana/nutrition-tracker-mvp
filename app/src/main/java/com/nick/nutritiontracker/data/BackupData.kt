@@ -5,5 +5,6 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class BackupData(
     val foods: List<FoodItemEntity> = emptyList(),
-    val meals: List<MealEntity> = emptyList()
+    val meals: List<MealEntity> = emptyList(),
+    val categories: List<String> = emptyList()
 )

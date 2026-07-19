@@ -43,6 +43,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     val allEntries = mutableStateListOf<FoodEntryEntity>()
     val categories = mutableStateListOf<String>()
     
+    // UI State for Foods Screen (to prevent reset on tab switch)
+    var foodSearchQuery by mutableStateOf("")
+    var selectedFoodCategory by mutableStateOf<String?>(null)
+    
     val dailySteps = mutableStateMapOf<String, Int>()
 
     val todayEntries by derivedStateOf {
@@ -394,7 +398,11 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun getBackupJson(): String {
-        val backup = BackupData(foods = foods.toList(), meals = meals.toList())
+        val backup = BackupData(
+            foods = foods.toList(),
+            meals = meals.toList(),
+            categories = categories.toList()
+        )
         return json.encodeToString(backup)
     }
 
@@ -402,25 +410,51 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         return try {
             val backup = json.decodeFromString<BackupData>(jsonString)
             
-            var addedCount = 0
+            var changed = false
+
+            // 1. Import explicit categories
+            backup.categories.forEach { cat ->
+                if (cat.isNotBlank() && !categories.contains(cat)) {
+                    categories.add(cat)
+                    changed = true
+                }
+            }
+
+            // 2. Import foods
             backup.foods.forEach { importedFood ->
-                if (foods.none { it.name == importedFood.name && it.barcode == importedFood.barcode }) {
+                val existing = foods.find { it.name == importedFood.name && it.barcode == importedFood.barcode }
+                if (existing == null) {
                     foods.add(importedFood)
-                    addedCount++
+                    changed = true
+                } else if (existing.category == null && importedFood.category != null) {
+                    // Update category if missing locally
+                    val idx = foods.indexOf(existing)
+                    foods[idx] = existing.copy(category = importedFood.category)
+                    changed = true
+                }
+                
+                // Ensure the food's category is in our master list
+                importedFood.category?.let { cat ->
+                    if (cat.isNotBlank() && !categories.contains(cat)) {
+                        categories.add(cat)
+                        changed = true
+                    }
                 }
             }
             
-            backup.meals.forEach { importedMeal ->
-                if (meals.none { it.name == importedMeal.name }) {
-                    meals.add(importedMeal)
-                    addedCount++
+            // 3. Import meals
+            backup.meals.forEach { meal ->
+                if (meals.none { it.name == meal.name }) {
+                    meals.add(meal)
+                    changed = true
                 }
             }
-            
-            if (addedCount > 0) {
+
+            if (changed) {
                 recalculateIds()
                 saveFoods()
                 saveMeals()
+                saveCategories()
             }
             true
         } catch (e: Exception) {

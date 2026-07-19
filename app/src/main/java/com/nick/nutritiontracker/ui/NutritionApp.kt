@@ -1378,8 +1378,9 @@ private fun FoodsScreen(
     var foodToEdit by remember { mutableStateOf<FoodItemEntity?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
 
-    var searchQuery by remember { mutableStateOf("") }
-    var selectedCategory by remember { mutableStateOf<String?>(null) }
+    // Use persistent state from VM
+    val searchQuery = vm.foodSearchQuery
+    val selectedCategory = vm.selectedFoodCategory
 
     val categories = vm.categories.sorted()
 
@@ -1500,25 +1501,25 @@ private fun FoodsScreen(
 
             OutlinedTextField(
                 value = searchQuery,
-                onValueChange = { searchQuery = it },
+                onValueChange = { vm.foodSearchQuery = it },
                 label = { Text("Suchen...") },
                 modifier = Modifier.fillMaxWidth(),
                 leadingIcon = { Icon(Icons.Default.Search, null) },
-                trailingIcon = { if (searchQuery.isNotEmpty()) IconButton(onClick = { searchQuery = "" }) { Icon(Icons.Default.Clear, null) } }
+                trailingIcon = { if (searchQuery.isNotEmpty()) IconButton(onClick = { vm.foodSearchQuery = "" }) { Icon(Icons.Default.Clear, null) } }
             )
 
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                 item {
                     FilterChip(
                         selected = selectedCategory == null,
-                        onClick = { selectedCategory = null },
+                        onClick = { vm.selectedFoodCategory = null },
                         label = { Text("Alle") }
                     )
                 }
                 items(categories) { cat ->
                     FilterChip(
                         selected = selectedCategory == cat,
-                        onClick = { selectedCategory = if (selectedCategory == cat) null else cat },
+                        onClick = { vm.selectedFoodCategory = if (selectedCategory == cat) null else cat },
                         label = { Text(cat) }
                     )
                 }
