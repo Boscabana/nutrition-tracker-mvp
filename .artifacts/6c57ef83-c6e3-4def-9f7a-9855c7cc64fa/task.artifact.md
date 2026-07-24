@@ -1,11 +1,6 @@
-- [x] Mahlzeiten-Datenmodell erweitern (`servings` in `MealEntity`)
-- [x] ViewModel anpassen (Mahlzeiten-Funktionen)
-- [x] `MealsScreen.kt` überarbeiten
-    - [x] `MealEditDialog` um Portions-Eingabe erweitern
-    - [x] Ausklappbare Liste implementieren
-    - [x] Anzeige "pro Portion" berechnen
-- [x] `NutritionApp.kt` (Artikel-Screen) überarbeiten
-    - [x] Ausklappbare Liste für Lebensmittel implementieren
-    - [x] Eingeklappte vs. Ausgeklappte Ansicht definieren
-- [x] Verifikation der Änderungen
-- [x] Compilation Errors fixen
+- [ ] ViewModel anpassen (`availableDates` um nächste 14 Tage erweitern)
+- [ ] `NutritionApp.kt` überarbeiten
+    - [ ] `DatePicker` State und Logik für Top-Bar hinzufügen
+    - [ ] Dropdown-Menü durch Kalender-Dialog ersetzen
+    - [ ] Vorhandenen `DatePickerDialog` (für Copy/Move) modernisieren/anpassen
+- [ ] Verifikation & Test

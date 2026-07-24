@@ -1,48 +1,31 @@
-# Platzsparendere UI für Artikel und Mahlzeiten
+# Erweiterte Datumsplanung (Vorausplanung bis zu 2 Wochen)
 
-Diese Änderung macht die Listen für Artikel (Lebensmittel) und Mahlzeiten kompakter, indem sie standardmäßig eingeklappt angezeigt werden. Erst beim Antippen werden detaillierte Informationen wie Makros, Portionen oder Zutaten eingeblendet.
+Diese Änderung ermöglicht es, Mahlzeiten bis zu zwei Wochen im Voraus zu planen. Die bisherige einfache Liste zur Datumsauswahl wird durch einen Kalender-Dialog ersetzt.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> - **Mahlzeiten-Portionen**: Um "Kalorien pro Portion" anzeigen zu können, füge ich dem `MealEntity` ein Feld `servings` (Portionen) hinzu. Standardmäßig ist dies 1.0. Im Bearbeitungsdialog für Mahlzeiten wird ein neues Feld hinzugefügt, um die Anzahl der Portionen anzugeben.
-> - **Artikel-Anzeige**: Im eingeklappten Zustand wird wirklich *nur* der Name angezeigt, wie gewünscht. Alle anderen Infos (Marke, Kalorien, Makros) erscheinen erst beim Ausklappen.
+> - **Kalender-Ansicht**: Statt einer einfachen Liste im Dropdown wird nun ein vollwertiger Material 3 `DatePicker` verwendet. Dies bietet die gewünschte "Minikalender"-Funktionalität.
+> - **Zeitraum**: Der Kalender erlaubt die Auswahl jedes Datums, wobei wir den Fokus auf den Bereich von "heute" bis "+14 Tage" legen können. Technisch ist jedoch jedes Datum möglich, was maximale Flexibilität bietet.
 
 ## Proposed Changes
 
-### Datenmodell
-
-#### [MODIFY] [MealEntity.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/data/MealEntity.kt)
-- Feld `servings: Double = 1.0` zur `MealEntity` hinzufügen.
-
-### Mahlzeiten-Verwaltung
-
-#### [MODIFY] [NutritionViewModel.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/viewmodel/NutritionViewModel.kt)
-- `addMealTemplate` und `updateMealTemplate` anpassen, um das `servings`-Feld zu unterstützen.
-
-#### [MODIFY] [MealsScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/MealsScreen.kt)
-- **`MealEditDialog`**: Eingabefeld für "Portionen" hinzufügen.
-- **Mahlzeiten-Liste**:
-    - `expanded`-Status pro Element einführen.
-    - Karte anklickbar machen zum Auf-/Zuklappen.
-    - Eingeklappt: `Name (Kcal pro Portion)`.
-    - Ausgeklappt: Zutatenliste anzeigen, wobei die Mengen pro Portion berechnet werden (`Gesamtmenge / Portionen`).
-
-### Artikel-Verwaltung (Lebensmittel)
+### UI & UX (NutritionApp.kt)
 
 #### [MODIFY] [NutritionApp.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/NutritionApp.kt)
-- **`FoodsScreen`**:
-    - `expanded`-Status pro Lebensmittel-Element einführen.
-    - Karte anklickbar machen zum Auf-/Zuklappen.
-    - Eingeklappt: Nur der Name in einer Zeile.
-    - Ausgeklappt: Marke, Kalorien/100g, Makros, Portionen und Packungen anzeigen.
+- **TopAppBar**: Den `DropdownMenu` für die Datumsauswahl entfernen.
+- **Datumsauswahl**: Ein Klick auf den Datums-Button öffnet nun einen Material 3 `DatePickerDialog`.
+- **DatePicker**: Den `DatePicker` so konfigurieren, dass er standardmäßig das aktuell ausgewählte Datum markiert.
+- **Schnellauswahl**: (Optional) "Heute" und "Morgen" als prominente Buttons im Dialog beibehalten, falls der User schnell wechseln möchte.
+
+### Datenverwaltung (NutritionViewModel.kt)
+
+#### [MODIFY] [NutritionViewModel.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/viewmodel/NutritionViewModel.kt)
+- **availableDates**: Diese Liste wird weiterhin für die "Copy/Move"-Funktionalität genutzt. Ich werde sie so anpassen, dass sie zumindest alle Tage der nächsten 14 Tage enthält, damit man beim Verschieben/Kopieren ebenfalls leicht in die Zukunft planen kann.
 
 ## Verification Plan
 
 ### Manual Verification
-- **Artikel-Screen**: Prüfen, ob Lebensmittel nur als Name erscheinen und sich beim Klicken korrekt erweitern.
-- **Mahlzeiten-Screen**:
-    - Neue Mahlzeit erstellen und Portionen angeben (z.B. 2).
-    - Prüfen, ob in der Liste die Kalorien korrekt (Gesamt / 2) angezeigt werden.
-    - Prüfen, ob beim Ausklappen die Zutatenmengen ebenfalls halbiert angezeigt werden (pro Portion).
-    - Mahlzeit bearbeiten und Portionen ändern -> Anzeige muss sich aktualisieren.
+- **Tagebuch**: Auf das Datum in der Top-Bar klicken. Prüfen, ob sich der Kalender öffnet.
+- **Vorausplanung**: Ein Datum in 10 Tagen auswählen und einen Eintrag hinzufügen. Prüfen, ob der Eintrag gespeichert wird und beim Zurückkehren auf diesen Tag wieder erscheint.
+- **Kopieren/Verschieben**: Mehrere Einträge markieren, "Kopieren" wählen und prüfen, ob im Ziel-Dialog nun auch zukünftige Daten leicht auswählbar sind.

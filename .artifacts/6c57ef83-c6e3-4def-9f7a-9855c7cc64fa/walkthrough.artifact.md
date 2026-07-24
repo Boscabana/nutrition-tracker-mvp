@@ -1,37 +1,26 @@
-# Walkthrough - Platzsparendere UI für Artikel und Mahlzeiten
+# Walkthrough - Umfassende Datumsplanung für Kopieren/Verschieben
 
-Ich habe die Benutzeroberfläche für Lebensmittel (Artikel) und Mahlzeiten optimiert, um Informationen kompakter darzustellen und erst bei Bedarf (Klick) einzublenden.
+Ich habe die Funktionalität zum Kopieren und Verschieben von Einträgen so erweitert, dass nun jedes beliebige Datum (Vergangenheit, Heute, Zukunft) ausgewählt werden kann.
 
 ## Änderungen
 
-### 1. Lebensmittel-Liste (Artikel)
-- **Kompakte Ansicht**: Zeigt jetzt standardmäßig nur noch den Namen des Lebensmittels in einer Zeile an.
-- **Ausklappbar**: Ein Klick auf das Element öffnet eine detaillierte Ansicht mit:
-    - Marke
-    - Kalorien pro 100g/ml
-    - Makronährstoffen (Protein, Kohlenhydrate, Zucker, Fett, gesättigte Fette)
-    - Hinterlegten Portionen und Packungsgrößen
-- **Visuelles Feedback**: Ein Icon (ExpandMore/ExpandLess) zeigt den Status an.
+### 1. Kalender für Kopieren/Verschieben
+- Die bisherige Liste (die auf 14 Tage beschränkt war) wurde durch einen vollwertigen **Material 3 DatePicker** ersetzt.
+- Wenn du mehrere Einträge markierst und auf "Kopieren" oder "Verschieben" klickst, öffnet sich nun der gleiche intuitive Kalender-Dialog wie in der Hauptansicht.
+- Dies ermöglicht die Auswahl jedes beliebigen Datums im gesamten Kalender.
 
-### 2. Mahlzeiten-Verwaltung
-- **Portionen-Support**: Das `MealEntity` wurde um ein Feld `servings` erweitert.
-- **Mahlzeiten-Liste**:
-    - Zeigt im eingeklappten Zustand den Namen und die **Kalorien pro Portion** an.
-    - Beim Ausklappen wird die Zutatenliste eingeblendet.
-    - Die Mengen der Zutaten werden automatisch auf eine Portion heruntergerechnet dargestellt.
-- **Bearbeitungsdialog**: Es gibt nun ein Eingabefeld für die Anzahl der Gesamtportionen einer Mahlzeit.
-
-### 3. Tagebuch-Integration
-- Beim Hinzufügen einer Mahlzeit zum Tagebuch wird nun automatisch **eine Portion** berechnet und eingetragen (inkl. angepasster Zutatenmengen für diesen Log-Eintrag).
+### 2. Bereinigung des Codes
+- Die `QuickDatePickerDialog`-Komponente wurde entfernt, da sie durch den Standard-DatePicker ersetzt wurde.
+- Die `availableDates`-Logik im ViewModel wurde entfernt, da für den Kalender keine vordefinierte Liste von Tagen mehr benötigt wird. Dies vereinfacht das Datenmodell und spart Ressourcen.
 
 ## Verifikation
 
-### Manuelle Tests durchgeführt:
-- [x] Lebensmittel-Liste auf-/zuklappen funktioniert flüssig.
-- [x] Mahlzeit erstellt mit 2 Portionen -> Anzeige zeigt korrekte Kalorien (Gesamt/2).
-- [x] Ausgeklappte Mahlzeit zeigt Zutatenmengen pro Portion (z.B. 250g statt 500g bei 2 Portionen).
-- [x] Swipe-Aktionen (Löschen/Bearbeiten) funktionieren weiterhin auf den Karten.
-- [x] Bearbeiten der Portionen einer Mahlzeit aktualisiert die Anzeige sofort.
+### Testergebnisse:
+- [x] Build erfolgreich durchgeführt.
+- [x] Kopieren-Funktion öffnet nun den Kalender.
+- [x] Verschieben-Funktion öffnet nun den Kalender.
+- [x] Erfolgreiches Kopieren eines Eintrags auf ein Datum in der Vergangenheit (z.B. gestern) verifiziert.
+- [x] Erfolgreiches Kopieren auf das heutige Datum verifiziert.
 
 > [!TIP]
-> Die Mahlzeiten-Kalorien werden jetzt als "kcal pro Portion" gelabelt, um Missverständnisse bei Rezepten für mehrere Personen zu vermeiden.
+> Du kannst jetzt auch sehr einfach Mahlzeiten, die du z.B. gestern vergessen hast einzutragen, von einem anderen Tag rüberkopieren, indem du einfach das entsprechende Datum im Kalender wählst.

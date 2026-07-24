@@ -44,7 +44,9 @@ import com.nick.nutritiontracker.viewmodel.NutritionViewModel
 import com.nick.nutritiontracker.viewmodel.ProfileViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -69,7 +71,30 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
     val snackbarHostState = remember { SnackbarHostState() }
     
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, d. MMM", Locale.GERMAN) }
-    var dateMenuExpanded by remember { mutableStateOf(false) }
+    var showCalendar by remember { mutableStateOf(false) }
+
+    if (showCalendar) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = vm.selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showCalendar = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        val date = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+                        vm.selectDate(date)
+                    }
+                    showCalendar = false
+                }) { Text("Auswählen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCalendar = false }) { Text("Abbrechen") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
 
     // Multi-select state
     val selectedEntryIds = remember { mutableStateOf(setOf<Long>()) }
@@ -106,22 +131,33 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                             var operationType by remember { mutableStateOf("copy") } // "copy" or "move"
 
                             if (showDateDialog) {
-                                DatePickerDialog(
-                                    dates = vm.availableDates,
-                                    currentDate = vm.selectedDate,
-                                    onDismiss = { showDateDialog = false },
-                                    onConfirm = { date ->
-                                        if (operationType == "copy") {
-                                            vm.copyEntriesToDate(selectedEntryIds.value, date)
-                                            scope.launch { snackbarHostState.showSnackbar("Kopiert nach ${date.format(dateFormatter)}") }
-                                        } else {
-                                            vm.moveEntriesToDate(selectedEntryIds.value, date)
-                                            scope.launch { snackbarHostState.showSnackbar("Verschoben nach ${date.format(dateFormatter)}") }
-                                        }
-                                        selectedEntryIds.value = emptySet()
-                                        showDateDialog = false
-                                    }
+                                val datePickerState = rememberDatePickerState(
+                                    initialSelectedDateMillis = vm.selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
                                 )
+                                DatePickerDialog(
+                                    onDismissRequest = { showDateDialog = false },
+                                    confirmButton = {
+                                        TextButton(onClick = {
+                                            datePickerState.selectedDateMillis?.let { millis ->
+                                                val date = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+                                                if (operationType == "copy") {
+                                                    vm.copyEntriesToDate(selectedEntryIds.value, date)
+                                                    scope.launch { snackbarHostState.showSnackbar("Kopiert nach ${date.format(dateFormatter)}") }
+                                                } else {
+                                                    vm.moveEntriesToDate(selectedEntryIds.value, date)
+                                                    scope.launch { snackbarHostState.showSnackbar("Verschoben nach ${date.format(dateFormatter)}") }
+                                                }
+                                            }
+                                            selectedEntryIds.value = emptySet()
+                                            showDateDialog = false
+                                        }) { Text("Auswählen") }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showDateDialog = false }) { Text("Abbrechen") }
+                                    }
+                                ) {
+                                    DatePicker(state = datePickerState)
+                                }
                             }
 
                             IconButton(onClick = { 
@@ -153,40 +189,17 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                     TopAppBar(
                         title = {
                             if (tab == 0) {
-                                Box {
-                                    TextButton(
-                                        onClick = { dateMenuExpanded = true },
-                                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
-                                    ) {
-                                        val label = when (vm.selectedDate) {
-                                            LocalDate.now() -> "Heute"
-                                            LocalDate.now().plusDays(1) -> "Morgen"
-                                            else -> vm.selectedDate.format(dateFormatter)
-                                        }
-                                        Text(label, style = MaterialTheme.typography.titleLarge)
-                                        Icon(Icons.Default.ArrowDropDown, null)
+                                TextButton(
+                                    onClick = { showCalendar = true },
+                                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+                                ) {
+                                    val label = when (vm.selectedDate) {
+                                        LocalDate.now() -> "Heute"
+                                        LocalDate.now().plusDays(1) -> "Morgen"
+                                        else -> vm.selectedDate.format(dateFormatter)
                                     }
-                                    DropdownMenu(
-                                        expanded = dateMenuExpanded,
-                                        onDismissRequest = { dateMenuExpanded = false }
-                                    ) {
-                                        vm.availableDates.forEach { date ->
-                                            val label = when (date) {
-                                                LocalDate.now() -> "Heute"
-                                                LocalDate.now().plusDays(1) -> "Morgen"
-                                                else -> date.format(dateFormatter)
-                                            }
-                                            DropdownMenuItem(
-                                                text = { 
-                                                    Text(label) 
-                                                },
-                                                onClick = {
-                                                    vm.selectDate(date)
-                                                    dateMenuExpanded = false
-                                                }
-                                            )
-                                        }
-                                    }
+                                    Text(label, style = MaterialTheme.typography.titleLarge)
+                                    Icon(Icons.Default.Event, null, modifier = Modifier.padding(start = 4.dp))
                                 }
                             } else {
                                 Text(
@@ -284,49 +297,6 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
             }
         }
     }
-}
-
-@Composable
-fun DatePickerDialog(
-    dates: List<LocalDate>,
-    currentDate: LocalDate,
-    onDismiss: () -> Unit,
-    onConfirm: (LocalDate) -> Unit
-) {
-    val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, d. MMM", Locale.GERMAN) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Tag auswählen") },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                dates.take(14).forEach { date ->
-                    val label = when (date) {
-                        LocalDate.now() -> "Heute"
-                        LocalDate.now().minusDays(1) -> "Gestern"
-                        LocalDate.now().plusDays(1) -> "Morgen"
-                        else -> date.format(dateFormatter)
-                    }
-                    val isCurrent = date == currentDate
-                    
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onConfirm(date) },
-                        color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
-                    ) {
-                        Text(
-                            text = label,
-                            modifier = Modifier.padding(16.dp),
-                            style = if (isCurrent) MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold) else MaterialTheme.typography.bodyLarge
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Abbrechen") }
-        }
-    )
 }
 
 @Composable

@@ -54,12 +54,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             .sortedByDescending { it.id }
     }
 
-    val availableDates by derivedStateOf {
-        (allEntries.map { LocalDate.parse(it.dateIso) } + dailySteps.keys.map { LocalDate.parse(it) } + LocalDate.now() + LocalDate.now().plusDays(1))
-            .distinct()
-            .sortedDescending()
-    }
-
     val todayTotalKcal by derivedStateOf { todayEntries.sumOf { it.kcal } }
     val todayTotalProtein by derivedStateOf { todayEntries.sumOf { it.protein } }
     val todayTotalComplexCarbs by derivedStateOf { todayEntries.sumOf { it.complexCarbs } }
