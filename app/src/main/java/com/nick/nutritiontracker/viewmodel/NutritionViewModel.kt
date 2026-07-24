@@ -348,6 +348,25 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         saveEntries()
     }
     
+    fun copyEntriesToDate(entryIds: Set<Long>, targetDate: LocalDate) {
+        val targetDateIso = targetDate.toString()
+        val entriesToCopy = allEntries.filter { it.id in entryIds }
+        val newEntries = entriesToCopy.map { entry ->
+            entry.copy(
+                id = nextEntryId++,
+                dateIso = targetDateIso
+            )
+        }
+        allEntries.addAll(newEntries)
+        saveEntries()
+    }
+
+    fun moveEntriesToDate(entryIds: Set<Long>, targetDate: LocalDate) {
+        copyEntriesToDate(entryIds, targetDate)
+        allEntries.removeAll { it.id in entryIds }
+        saveEntries()
+    }
+
     fun updateSteps(steps: Int) {
         dailySteps[selectedDate.toString()] = steps
         saveSteps()

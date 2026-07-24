@@ -1,11 +1,14 @@
 package com.nick.nutritiontracker.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -68,6 +71,10 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, d. MMM", Locale.GERMAN) }
     var dateMenuExpanded by remember { mutableStateOf(false) }
 
+    // Multi-select state
+    val selectedEntryIds = remember { mutableStateOf(setOf<Long>()) }
+    val isSelectionMode by derivedStateOf { selectedEntryIds.value.isNotEmpty() }
+
     // Health Connect Permission Launcher
     val permissionLauncher = rememberLauncherForActivityResult(
         PermissionController.createRequestPermissionResultContract()
@@ -78,103 +85,165 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
         }
     }
 
+    if (isSelectionMode) {
+        BackHandler { selectedEntryIds.value = emptySet() }
+    }
+
     MaterialTheme {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
-                TopAppBar(
-                    title = {
-                        if (tab == 0) {
-                            Box {
-                                TextButton(
-                                    onClick = { dateMenuExpanded = true },
-                                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
-                                ) {
-                                    val label = when (vm.selectedDate) {
-                                        LocalDate.now() -> "Heute"
-                                        LocalDate.now().plusDays(1) -> "Morgen"
-                                        else -> vm.selectedDate.format(dateFormatter)
+                if (isSelectionMode) {
+                    TopAppBar(
+                        title = { Text("${selectedEntryIds.value.size} ausgewählt") },
+                        navigationIcon = {
+                            IconButton(onClick = { selectedEntryIds.value = emptySet() }) {
+                                Icon(Icons.Default.Close, "Abbrechen")
+                            }
+                        },
+                        actions = {
+                            var showDateDialog by remember { mutableStateOf(false) }
+                            var operationType by remember { mutableStateOf("copy") } // "copy" or "move"
+
+                            if (showDateDialog) {
+                                DatePickerDialog(
+                                    dates = vm.availableDates,
+                                    currentDate = vm.selectedDate,
+                                    onDismiss = { showDateDialog = false },
+                                    onConfirm = { date ->
+                                        if (operationType == "copy") {
+                                            vm.copyEntriesToDate(selectedEntryIds.value, date)
+                                            scope.launch { snackbarHostState.showSnackbar("Kopiert nach ${date.format(dateFormatter)}") }
+                                        } else {
+                                            vm.moveEntriesToDate(selectedEntryIds.value, date)
+                                            scope.launch { snackbarHostState.showSnackbar("Verschoben nach ${date.format(dateFormatter)}") }
+                                        }
+                                        selectedEntryIds.value = emptySet()
+                                        showDateDialog = false
                                     }
-                                    Text(label, style = MaterialTheme.typography.titleLarge)
-                                    Icon(Icons.Default.ArrowDropDown, null)
-                                }
-                                DropdownMenu(
-                                    expanded = dateMenuExpanded,
-                                    onDismissRequest = { dateMenuExpanded = false }
-                                ) {
-                                    vm.availableDates.forEach { date ->
-                                        val label = when (date) {
+                                )
+                            }
+
+                            IconButton(onClick = { 
+                                operationType = "copy"
+                                showDateDialog = true 
+                            }) {
+                                Icon(Icons.Default.ContentCopy, "Kopieren")
+                            }
+                            IconButton(onClick = { 
+                                operationType = "move"
+                                showDateDialog = true 
+                            }) {
+                                Icon(Icons.Default.DriveFileMove, "Verschieben")
+                            }
+                            IconButton(onClick = {
+                                selectedEntryIds.value.forEach { vm.deleteEntry(it) }
+                                selectedEntryIds.value = emptySet()
+                                scope.launch { snackbarHostState.showSnackbar("Einträge gelöscht") }
+                            }) {
+                                Icon(Icons.Default.Delete, "Löschen")
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    )
+                } else {
+                    TopAppBar(
+                        title = {
+                            if (tab == 0) {
+                                Box {
+                                    TextButton(
+                                        onClick = { dateMenuExpanded = true },
+                                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+                                    ) {
+                                        val label = when (vm.selectedDate) {
                                             LocalDate.now() -> "Heute"
                                             LocalDate.now().plusDays(1) -> "Morgen"
-                                            else -> date.format(dateFormatter)
+                                            else -> vm.selectedDate.format(dateFormatter)
                                         }
-                                        DropdownMenuItem(
-                                            text = { 
-                                                Text(label) 
-                                            },
-                                            onClick = {
-                                                vm.selectDate(date)
-                                                dateMenuExpanded = false
+                                        Text(label, style = MaterialTheme.typography.titleLarge)
+                                        Icon(Icons.Default.ArrowDropDown, null)
+                                    }
+                                    DropdownMenu(
+                                        expanded = dateMenuExpanded,
+                                        onDismissRequest = { dateMenuExpanded = false }
+                                    ) {
+                                        vm.availableDates.forEach { date ->
+                                            val label = when (date) {
+                                                LocalDate.now() -> "Heute"
+                                                LocalDate.now().plusDays(1) -> "Morgen"
+                                                else -> date.format(dateFormatter)
                                             }
-                                        )
+                                            DropdownMenuItem(
+                                                text = { 
+                                                    Text(label) 
+                                                },
+                                                onClick = {
+                                                    vm.selectDate(date)
+                                                    dateMenuExpanded = false
+                                                }
+                                            )
+                                        }
                                     }
                                 }
+                            } else {
+                                Text(
+                                    when (tab) {
+                                        1 -> "Lebensmittel"
+                                        2 -> "Mahlzeiten"
+                                        else -> "Profil & Ziele"
+                                    }
+                                )
                             }
-                        } else {
-                            Text(
-                                when (tab) {
-                                    1 -> "Lebensmittel"
-                                    2 -> "Mahlzeiten"
-                                    else -> "Profil & Ziele"
-                                }
-                            )
-                        }
-                    },
-                    actions = {
-                        if (tab == 0) {
-                            IconButton(onClick = {
-                                scope.launch {
-                                    val status = vm.healthConnectManager.getAvailabilityStatus()
-                                    when (status) {
-                                        HealthConnectClient.SDK_AVAILABLE -> {
-                                            if (vm.healthConnectManager.hasAllPermissions()) {
-                                                vm.syncStepsForSelectedDate()
-                                                snackbarHostState.showSnackbar("Schritte aktualisiert")
-                                            } else {
-                                                snackbarHostState.showSnackbar(
-                                                    "Berechtigung erforderlich",
-                                                    actionLabel = "Einstellungen"
-                                                ).also { result ->
-                                                    if (result == SnackbarResult.ActionPerformed) {
-                                                        context.startActivity(vm.healthConnectManager.getSettingsIntent())
-                                                    } else {
-                                                        // Fallback: Dialog versuchen
-                                                        permissionLauncher.launch(vm.healthConnectManager.permissions)
+                        },
+                        actions = {
+                            if (tab == 0) {
+                                IconButton(onClick = {
+                                    scope.launch {
+                                        val status = vm.healthConnectManager.getAvailabilityStatus()
+                                        when (status) {
+                                            HealthConnectClient.SDK_AVAILABLE -> {
+                                                if (vm.healthConnectManager.hasAllPermissions()) {
+                                                    vm.syncStepsForSelectedDate()
+                                                    snackbarHostState.showSnackbar("Schritte aktualisiert")
+                                                } else {
+                                                    snackbarHostState.showSnackbar(
+                                                        "Berechtigung erforderlich",
+                                                        actionLabel = "Einstellungen"
+                                                    ).also { result ->
+                                                        if (result == SnackbarResult.ActionPerformed) {
+                                                            context.startActivity(vm.healthConnectManager.getSettingsIntent())
+                                                        } else {
+                                                            // Fallback: Dialog versuchen
+                                                            permissionLauncher.launch(vm.healthConnectManager.permissions)
+                                                        }
                                                     }
                                                 }
                                             }
-                                        }
-                                        HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> {
-                                            snackbarHostState.showSnackbar(
-                                                "Health Connect Update erforderlich",
-                                                actionLabel = "Update"
-                                            ).also { result ->
-                                                if (result == SnackbarResult.ActionPerformed) {
-                                                    context.startActivity(vm.healthConnectManager.getInstallIntent())
+                                            HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED -> {
+                                                snackbarHostState.showSnackbar(
+                                                    "Health Connect Update erforderlich",
+                                                    actionLabel = "Update"
+                                                ).also { result ->
+                                                    if (result == SnackbarResult.ActionPerformed) {
+                                                        context.startActivity(vm.healthConnectManager.getInstallIntent())
+                                                    }
                                                 }
                                             }
-                                        }
-                                        else -> {
-                                            snackbarHostState.showSnackbar("Health Connect nicht verfügbar")
+                                            else -> {
+                                                snackbarHostState.showSnackbar("Health Connect nicht verfügbar")
+                                            }
                                         }
                                     }
+                                }) {
+                                    Icon(Icons.Default.Sync, contentDescription = "Sync steps")
                                 }
-                            }) {
-                                Icon(Icons.Default.Sync, contentDescription = "Sync steps")
                             }
                         }
-                    }
-                )
+                    )
+                }
             },
             bottomBar = {
                 NavigationBar {
@@ -207,7 +276,7 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
                 when (tab) {
-                    0 -> TodayScreen(userProfile, foods, entries, vm, snackbarHostState)
+                    0 -> TodayScreen(userProfile, foods, entries, vm, snackbarHostState, selectedEntryIds)
                     1 -> FoodsScreen(vm, snackbarHostState)
                     2 -> MealsScreen(vm, snackbarHostState)
                     3 -> ProfileScreen(profileVm, vm)
@@ -218,9 +287,53 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
 }
 
 @Composable
+fun DatePickerDialog(
+    dates: List<LocalDate>,
+    currentDate: LocalDate,
+    onDismiss: () -> Unit,
+    onConfirm: (LocalDate) -> Unit
+) {
+    val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, d. MMM", Locale.GERMAN) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Tag auswählen") },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                dates.take(14).forEach { date ->
+                    val label = when (date) {
+                        LocalDate.now() -> "Heute"
+                        LocalDate.now().minusDays(1) -> "Gestern"
+                        LocalDate.now().plusDays(1) -> "Morgen"
+                        else -> date.format(dateFormatter)
+                    }
+                    val isCurrent = date == currentDate
+                    
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onConfirm(date) },
+                        color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+                    ) {
+                        Text(
+                            text = label,
+                            modifier = Modifier.padding(16.dp),
+                            style = if (isCurrent) MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold) else MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Abbrechen") }
+        }
+    )
+}
+
+@Composable
 fun SwipeActionContainer(
     onDeleteRequest: () -> Unit,
     onEditRequest: () -> Unit,
+    enabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val scope = rememberCoroutineScope()
@@ -271,29 +384,31 @@ fun SwipeActionContainer(
             modifier = Modifier
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
                 .fillMaxWidth()
-                .pointerInput(Unit) {
-                    detectHorizontalDragGestures(
-                        onHorizontalDrag = { change, dragAmount ->
-                            scope.launch {
-                                offsetX.snapTo((offsetX.value + dragAmount).coerceIn(-maxSwipePx, maxSwipePx))
-                            }
-                            change.consume()
-                        },
-                        onDragEnd = {
-                            scope.launch {
-                                if (offsetX.value > maxSwipePx * 0.6f) {
-                                    offsetX.animateTo(0f)
-                                    onEditRequest()
-                                } else if (offsetX.value < -maxSwipePx * 0.6f) {
-                                    offsetX.animateTo(0f)
-                                    onDeleteRequest()
-                                } else {
-                                    offsetX.animateTo(0f)
+                .then(if (enabled) {
+                    Modifier.pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onHorizontalDrag = { change, dragAmount ->
+                                scope.launch {
+                                    offsetX.snapTo((offsetX.value + dragAmount).coerceIn(-maxSwipePx, maxSwipePx))
+                                }
+                                change.consume()
+                            },
+                            onDragEnd = {
+                                scope.launch {
+                                    if (offsetX.value > maxSwipePx * 0.6f) {
+                                        offsetX.animateTo(0f)
+                                        onEditRequest()
+                                    } else if (offsetX.value < -maxSwipePx * 0.6f) {
+                                        offsetX.animateTo(0f)
+                                        onDeleteRequest()
+                                    } else {
+                                        offsetX.animateTo(0f)
+                                    }
                                 }
                             }
-                        }
-                    )
-                },
+                        )
+                    }
+                } else Modifier),
             color = MaterialTheme.colorScheme.surface,
             shape = RoundedCornerShape(12.dp),
             tonalElevation = 1.dp
@@ -309,7 +424,8 @@ private fun TodayScreen(
     foods: List<FoodItemEntity>,
     entries: List<FoodEntryEntity>,
     vm: NutritionViewModel,
-    snackbarHostState: SnackbarHostState
+    snackbarHostState: SnackbarHostState,
+    selectedEntryIds: MutableState<Set<Long>>
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -542,11 +658,24 @@ private fun TodayScreen(
 
             if (expandedStates[slot] ?: true) {
                 items(slotEntries, key = { it.id }) { entry ->
+                    val isSelected = selectedEntryIds.value.contains(entry.id)
                     SwipeActionContainer(
                         onDeleteRequest = { entryToDelete = entry.id },
-                        onEditRequest = { entryToEdit = entry }
+                        onEditRequest = { entryToEdit = entry },
+                        enabled = selectedEntryIds.value.isEmpty()
                     ) {
-                        CompactEntryRow(entry)
+                        CompactEntryRow(
+                            entry = entry,
+                            isSelected = isSelected,
+                            onToggleSelection = {
+                                if (selectedEntryIds.value.contains(entry.id)) {
+                                    selectedEntryIds.value -= entry.id
+                                } else {
+                                    selectedEntryIds.value += entry.id
+                                }
+                            },
+                            isSelectionMode = selectedEntryIds.value.isNotEmpty()
+                        )
                     }
                 }
             }
@@ -981,13 +1110,33 @@ private fun IngredientAdjustRow(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun CompactEntryRow(entry: FoodEntryEntity) {
+private fun CompactEntryRow(
+    entry: FoodEntryEntity,
+    isSelected: Boolean = false,
+    onToggleSelection: () -> Unit = {},
+    isSelectionMode: Boolean = false
+) {
     var isExpanded by remember { mutableStateOf(false) }
 
     Card(
-        modifier = Modifier.fillMaxWidth().clickable { if (entry.isMeal) isExpanded = !isExpanded },
-        shape = RoundedCornerShape(12.dp)
+        modifier = Modifier
+            .fillMaxWidth()
+            .combinedClickable(
+                onClick = { 
+                    if (isSelectionMode) {
+                        onToggleSelection()
+                    } else if (entry.isMeal) {
+                        isExpanded = !isExpanded 
+                    }
+                },
+                onLongClick = onToggleSelection
+            ),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+        )
     ) {
         Column {
             Row(
@@ -995,6 +1144,9 @@ private fun CompactEntryRow(entry: FoodEntryEntity) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                if (isSelectionMode) {
+                    Checkbox(checked = isSelected, onCheckedChange = { onToggleSelection() })
+                }
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (entry.isMeal) {
