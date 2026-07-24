@@ -43,7 +43,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     val allEntries = mutableStateListOf<FoodEntryEntity>()
     val categories = mutableStateListOf<String>()
     
-    // UI State for Foods Screen (to prevent reset on tab switch)
     var foodSearchQuery by mutableStateOf("")
     var selectedFoodCategory by mutableStateOf<String?>(null)
     
@@ -69,10 +68,18 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         loadEntries()
         loadSteps()
         loadCategories()
+        
+        // --- DATA INTEGRITY CHECK ---
+        val hasDuplicateIds = foods.size != foods.map { it.id }.distinct().size
+        val hasMissingParentRefs = foods.any { it.parentId != null && foods.none { p -> p.id == it.parentId } }
+        
+        if (hasDuplicateIds || hasMissingParentRefs) {
+            recalculateIds()
+        }
+        // ----------------------------
+
         if (foods.isEmpty()) {
             createDefaultFoods()
-        } else {
-            recalculateIds()
         }
         if (categories.isEmpty()) {
             createDefaultCategories()
@@ -118,7 +125,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 FoodPortionEntity(0, "L", 63.0)
             ),
             packages = emptyList(),
-            category = "Protein"
+            category = "Protein",
+            isGeneric = true
         )
     }
 
@@ -140,10 +148,20 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         packages: List<FoodPackageEntity>,
         barcode: String? = null,
         brand: String? = null,
-        category: String? = null
+        category: String? = null,
+        isGeneric: Boolean = false,
+        parentId: Long? = null,
+        store: String? = null
     ): FoodItemEntity {
+        val updatedPortions = portions.map { 
+            if (it.id == 0L) it.copy(id = nextPortionId++) else it 
+        }
+        val updatedPackages = packages.mapIndexed { idx, pkg -> 
+            if (pkg.id == 0L) pkg.copy(id = nextFoodId * 100 + idx) else pkg 
+        }
+
         val newFood = FoodItemEntity(
-            id = 0,
+            id = nextFoodId++,
             name = name.trim(),
             brand = brand?.trim()?.takeIf { it.isNotBlank() },
             kcalPer100g = kcal,
@@ -154,55 +172,112 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             saturatedFatPer100g = saturatedFat,
             alcoholPercent = alcoholPercent,
             baseUnit = baseUnit,
-            portions = portions,
-            packages = packages,
+            portions = updatedPortions,
+            packages = updatedPackages,
             barcode = barcode?.trim()?.takeIf { it.isNotBlank() },
-            category = category?.trim()?.takeIf { it.isNotBlank() }
+            category = category?.trim()?.takeIf { it.isNotBlank() },
+            isGeneric = isGeneric,
+            parentId = parentId,
+            store = store?.trim()?.takeIf { it.isNotBlank() }
         )
         foods.add(newFood)
-        recalculateIds()
         saveFoods()
-        return foods.last { 
-            it.name.equals(newFood.name, ignoreCase = true) && 
-            (barcode == null || it.barcode?.equals(barcode, ignoreCase = true) == true) 
-        }
+        return newFood
     }
 
     fun updateFood(updatedFood: FoodItemEntity) {
         val index = foods.indexOfFirst { it.id == updatedFood.id }
         if (index != -1) {
-            foods[index] = updatedFood
-            recalculateIds()
+            val fixedPortions = updatedFood.portions.map { 
+                if (it.id == 0L) it.copy(id = nextPortionId++) else it 
+            }
+            val fixedPackages = updatedFood.packages.mapIndexed { idx, pkg ->
+                if (pkg.id == 0L) pkg.copy(id = updatedFood.id * 100 + idx) else pkg
+            }
+            val finalFood = updatedFood.copy(portions = fixedPortions, packages = fixedPackages)
+            
+            foods[index] = finalFood
             saveFoods()
             
+            // Sync with entries
             for (i in allEntries.indices) {
-                if (allEntries[i].foodItemId == updatedFood.id) {
+                if (allEntries[i].foodItemId == finalFood.id) {
                     allEntries[i] = allEntries[i].copy(
-                        name = updatedFood.name,
-                        brand = updatedFood.brand,
-                        kcalPer100g = updatedFood.kcalPer100g,
-                        proteinPer100g = updatedFood.proteinPer100g,
-                        carbsPer100g = updatedFood.carbsPer100g,
-                        sugarPer100g = updatedFood.sugarPer100g,
-                        fatPer100g = updatedFood.fatPer100g,
-                        saturatedFatPer100g = updatedFood.saturatedFatPer100g,
-                        alcoholPercent = updatedFood.alcoholPercent,
-                        baseUnit = updatedFood.baseUnit
+                        name = finalFood.name,
+                        brand = finalFood.brand,
+                        kcalPer100g = finalFood.kcalPer100g,
+                        proteinPer100g = finalFood.proteinPer100g,
+                        carbsPer100g = finalFood.carbsPer100g,
+                        sugarPer100g = finalFood.sugarPer100g,
+                        fatPer100g = finalFood.fatPer100g,
+                        saturatedFatPer100g = finalFood.saturatedFatPer100g,
+                        alcoholPercent = finalFood.alcoholPercent,
+                        baseUnit = finalFood.baseUnit,
+                        store = finalFood.store
                     )
                 }
             }
             saveEntries()
+
+            // Sync with meals templates
+            for (mIdx in meals.indices) {
+                var mealChanged = false
+                val updatedIngredients = meals[mIdx].ingredients.map { ing ->
+                    if (ing.foodItemId == finalFood.id) {
+                        mealChanged = true
+                        ing.copy(
+                            name = finalFood.name,
+                            kcalPer100g = finalFood.kcalPer100g,
+                            proteinPer100g = finalFood.proteinPer100g,
+                            carbsPer100g = finalFood.carbsPer100g,
+                            sugarPer100g = finalFood.sugarPer100g,
+                            fatPer100g = finalFood.fatPer100g,
+                            saturatedFatPer100g = finalFood.saturatedFatPer100g,
+                            alcoholPercent = finalFood.alcoholPercent,
+                            baseUnit = finalFood.baseUnit,
+                            store = finalFood.store,
+                            brand = finalFood.brand
+                        )
+                    } else ing
+                }
+                if (mealChanged) {
+                    meals[mIdx] = meals[mIdx].copy(ingredients = updatedIngredients)
+                }
+            }
+            saveMeals()
         }
     }
 
     fun deleteFood(id: Long) {
         foods.removeAll { it.id == id }
-        allEntries.removeAll { it.foodItemId == id }
+        
+        for (i in foods.indices) {
+            if (foods[i].parentId == id) {
+                foods[i] = foods[i].copy(parentId = null)
+            }
+        }
+        
+        for (i in allEntries.indices) {
+            if (allEntries[i].foodItemId == id) {
+                allEntries[i] = allEntries[i].copy(foodItemId = -1L)
+            }
+        }
+        
+        // Note: Ingredients in meals are kept but will show as orphaned in UI
         saveFoods()
+        saveMeals()
         saveEntries()
     }
 
-    // --- CATEGORY MANAGEMENT ---
+    fun mergeFoods(targetParentId: Long, childIds: List<Long>) {
+        childIds.forEach { id ->
+            val idx = foods.indexOfFirst { it.id == id }
+            if (idx != -1) {
+                foods[idx] = foods[idx].copy(parentId = targetParentId, isGeneric = false)
+            }
+        }
+        saveFoods()
+    }
 
     fun addCategory(name: String) {
         if (name.isNotBlank() && !categories.contains(name.trim())) {
@@ -222,7 +297,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             categories[idx] = newName.trim()
             saveCategories()
             
-            // Update foods using this category
             foods.forEachIndexed { index, food ->
                 if (food.category == oldName) {
                     foods[index] = food.copy(category = newName.trim())
@@ -250,8 +324,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    // --- MEAL TEMPLATE MANAGEMENT ---
-
     fun addMealTemplate(name: String, ingredients: List<MealIngredientEntity>, servings: Double = 1.0) {
         val newMeal = MealEntity(
             id = nextMealId++,
@@ -276,8 +348,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         saveMeals()
     }
 
-    // --- LOGGING ---
-
     fun addEntry(food: FoodItemEntity, amount: Double, portion: FoodPortionEntity?, mealSlot: String) {
         val grams = if (portion != null) amount * portion.grams else amount
         if (grams <= 0.0) return
@@ -301,7 +371,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             fatPer100g = food.fatPer100g,
             saturatedFatPer100g = food.saturatedFatPer100g,
             alcoholPercent = food.alcoholPercent,
-            baseUnit = food.baseUnit
+            baseUnit = food.baseUnit,
+            store = food.store
         )
         allEntries.add(entry)
         saveEntries()
@@ -315,7 +386,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             amount = 1.0,
             unitLabel = "Meal",
             grams = (meal.ingredients.sumOf { it.grams } / meal.servings).coerceAtLeast(0.0),
-            foodItemId = -1, // Not a single food item
+            foodItemId = -1,
             name = meal.name,
             kcalPer100g = 0.0,
             proteinPer100g = 0.0,
@@ -381,6 +452,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 val loaded = json.decodeFromString<List<FoodItemEntity>>(data)
                 foods.clear()
                 foods.addAll(loaded)
+                nextFoodId = (foods.maxOfOrNull { it.id } ?: 0L) + 1
+                nextPortionId = (foods.flatMap { it.portions }.maxOfOrNull { it.id } ?: 0L) + 1
             } catch (e: Exception) { e.printStackTrace() }
         }
     }
@@ -424,31 +497,23 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun importBackup(jsonString: String): Boolean {
         return try {
             val backup = json.decodeFromString<BackupData>(jsonString)
-            
             var changed = false
-
-            // 1. Import explicit categories
             backup.categories.forEach { cat ->
                 if (cat.isNotBlank() && !categories.contains(cat)) {
                     categories.add(cat)
                     changed = true
                 }
             }
-
-            // 2. Import foods
             backup.foods.forEach { importedFood ->
                 val existing = foods.find { it.name == importedFood.name && it.barcode == importedFood.barcode }
                 if (existing == null) {
                     foods.add(importedFood)
                     changed = true
                 } else if (existing.category == null && importedFood.category != null) {
-                    // Update category if missing locally
                     val idx = foods.indexOf(existing)
                     foods[idx] = existing.copy(category = importedFood.category)
                     changed = true
                 }
-                
-                // Ensure the food's category is in our master list
                 importedFood.category?.let { cat ->
                     if (cat.isNotBlank() && !categories.contains(cat)) {
                         categories.add(cat)
@@ -456,23 +521,18 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                 }
             }
-            
-            // 3. Import meals
             backup.meals.forEach { meal ->
                 if (meals.none { it.name == meal.name }) {
                     meals.add(meal)
                     changed = true
                 }
             }
-
-            // 4. Import entries
             backup.entries.forEach { entry ->
                 if (allEntries.none { it.dateIso == entry.dateIso && it.name == entry.name && it.mealSlot == entry.mealSlot && it.grams == entry.grams }) {
                     allEntries.add(entry)
                     changed = true
                 }
             }
-
             if (changed) {
                 recalculateIds()
                 saveFoods()
@@ -481,10 +541,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 saveCategories()
             }
             true
-        } catch (e: Exception) {
-            e.printStackTrace()
-            false
-        }
+        } catch (e: Exception) { e.printStackTrace(); false }
     }
 
     fun loadEntries() {
@@ -521,18 +578,44 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         var fId = 1L
         var pId = 1L
         var pkgId = 1L
-        val updatedList = foods.map { food ->
+        val oldToNewFoodIdMap = mutableMapOf<Long, Long>()
+        val updatedFoods = foods.map { food ->
+            val newId = fId++
+            oldToNewFoodIdMap[food.id] = newId
             val updatedPortions = food.portions.map { it.copy(id = pId++) }
             val updatedPackages = food.packages.map { it.copy(id = pkgId++) }
-            food.copy(id = fId++, portions = updatedPortions, packages = updatedPackages)
+            food.copy(id = newId, portions = updatedPortions, packages = updatedPackages)
+        }
+        val finalFoods = updatedFoods.map { food ->
+            if (food.parentId != null) food.copy(parentId = oldToNewFoodIdMap[food.parentId]) else food
+        }
+        val updatedMeals = meals.map { meal ->
+            val updatedIngredients = meal.ingredients.filter { ing -> 
+                oldToNewFoodIdMap.containsKey(ing.foodItemId) 
+            }.map { ing ->
+                ing.copy(foodItemId = oldToNewFoodIdMap[ing.foodItemId]!!)
+            }
+            meal.copy(ingredients = updatedIngredients)
+        }
+        val updatedEntries = allEntries.map { entry ->
+            val entryFoodId = if (entry.foodItemId != -1L) oldToNewFoodIdMap[entry.foodItemId] ?: entry.foodItemId else -1L
+            val updatedMealIngredients = entry.mealIngredients?.map { ing ->
+                ing.copy(foodItemId = oldToNewFoodIdMap[ing.foodItemId] ?: ing.foodItemId)
+            }
+            entry.copy(foodItemId = entryFoodId, mealIngredients = updatedMealIngredients)
         }
         foods.clear()
-        foods.addAll(updatedList)
+        foods.addAll(finalFoods)
+        meals.clear()
+        meals.addAll(updatedMeals)
+        allEntries.clear()
+        allEntries.addAll(updatedEntries)
         nextFoodId = fId
         nextPortionId = pId
-
-        // Also update nextMealId and nextEntryId based on current data
         nextMealId = (meals.maxOfOrNull { it.id } ?: 0L) + 1
         nextEntryId = (allEntries.maxOfOrNull { it.id } ?: 0L) + 1
+        saveFoods()
+        saveMeals()
+        saveEntries()
     }
 }

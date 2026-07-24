@@ -1,6 +1,12 @@
-- [ ] ViewModel anpassen (`availableDates` um nächste 14 Tage erweitern)
-- [ ] `NutritionApp.kt` überarbeiten
-    - [ ] `DatePicker` State und Logik für Top-Bar hinzufügen
-    - [ ] Dropdown-Menü durch Kalender-Dialog ersetzen
-    - [ ] Vorhandenen `DatePickerDialog` (für Copy/Move) modernisieren/anpassen
+- [x] Datenmodell `MealIngredientEntity` erweitern (`brand`)
+- [x] ViewModel um `mergeFoods` und Hilfsfunktionen erweitern
+- [x] `NutritionApp.kt` - `FoodsScreen` "Verwalten"-Modus hinzufügen
+- [x] UI-Verbesserungen für intuitive Hierarchie
+- [x] Zutatentausch in Mahlzeiten implementieren
+- [x] Fehlerbehebung: Dauerhafte Speicherung der Marken-Auswahl
+- [ ] Warnsystem für Rezepte bei Artikel-Löschung implementieren
+    - [ ] `NutritionViewModel.kt` - `deleteFood` Logik anpassen (Zutaten in Mahlzeiten behalten)
+    - [ ] `NutritionApp.kt` - Lösch-Warn-Dialog mit betroffenen Mahlzeiten erweitern
+    - [ ] `MealsScreen.kt` - Warn-Icon für Mahlzeiten mit fehlenden Zutaten hinzufügen
+    - [ ] `MealsScreen.kt` - Warntext in `IngredientRow` anzeigen
 - [ ] Verifikation & Test

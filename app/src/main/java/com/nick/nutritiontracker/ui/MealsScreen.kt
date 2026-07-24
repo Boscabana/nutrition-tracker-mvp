@@ -87,17 +87,26 @@ fun MealsScreen(
 
         items(meals, key = { it.id }) { meal ->
             val expanded = expandedStates[meal.id] ?: false
+            val hasOrphanedIngredients = meal.ingredients.any { ing -> vm.foods.none { f -> f.id == ing.foodItemId } }
+
             SwipeActionContainer(
                 onDeleteRequest = { mealToDelete = meal.id },
                 onEditRequest = { mealToEdit = meal }
             ) {
                 Card(
                     modifier = Modifier.fillMaxWidth().clickable { expandedStates[meal.id] = !expanded },
+                    colors = if (hasOrphanedIngredients) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)) else CardDefaults.cardColors()
                 ) {
                     Column(Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text(meal.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(meal.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    if (hasOrphanedIngredients) {
+                                        Spacer(Modifier.width(8.dp))
+                                        Icon(Icons.Default.Warning, "Fehlende Zutaten", tint = Color.Red, modifier = Modifier.size(18.dp))
+                                    }
+                                }
                                 Text("${meal.kcalPerServing.round0()} kcal pro Portion", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
                             }
                             Icon(
@@ -113,8 +122,9 @@ fun MealsScreen(
                                 Text("Zutaten pro Portion:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                                 meal.ingredients.forEach { ingredient ->
                                     val amountPerServing = ingredient.amount / meal.servings
+                                    val brandInfo = if (!ingredient.brand.isNullOrBlank()) " (${ingredient.brand}${if (!ingredient.store.isNullOrBlank()) " @ ${ingredient.store}" else ""})" else ""
                                     Text(
-                                        "• ${ingredient.name}: ${amountPerServing.roundString()} ${ingredient.unitLabel}",
+                                        "• ${ingredient.name}$brandInfo: ${amountPerServing.roundString()} ${ingredient.unitLabel}",
                                         style = MaterialTheme.typography.bodySmall
                                     )
                                 }
@@ -143,24 +153,31 @@ fun MealEditDialog(
     onDismiss: () -> Unit,
     onSave: (String, List<MealIngredientEntity>, Double) -> Unit
 ) {
-    var name by remember { mutableStateOf(meal?.name ?: "") }
-    var servings by remember { mutableStateOf(meal?.servings?.roundString() ?: "1") }
-    val ingredients = remember { mutableStateListOf<MealIngredientEntity>().apply { 
-        meal?.ingredients?.let { addAll(it) } 
-    } }
+    var name by remember(meal?.id) { mutableStateOf(meal?.name ?: "") }
+    var servings by remember(meal?.id) { mutableStateOf(meal?.servings?.roundString() ?: "1") }
+    val ingredients = remember(meal?.id) { 
+        mutableStateListOf<MealIngredientEntity>().apply { 
+            meal?.ingredients?.let { addAll(it) } 
+        } 
+    }
     
     var searchQuery by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
     var foodToConfigure by remember { mutableStateOf<FoodItemEntity?>(null) }
 
-    val filteredFoods = remember(searchQuery) {
-        if (searchQuery.isBlank()) emptyList()
-        else foods.filter { it.name.contains(searchQuery, ignoreCase = true) }.take(5)
+    val filteredFoods by remember(searchQuery) {
+        derivedStateOf {
+            if (searchQuery.isBlank()) emptyList()
+            else foods.filter { it.name.contains(searchQuery, ignoreCase = true) }
+                .sortedWith(compareByDescending<FoodItemEntity> { it.isGeneric }.thenBy { it.name })
+                .take(10)
+        }
     }
 
     if (foodToConfigure != null) {
         AddIngredientDialog(
             food = foodToConfigure!!,
+            foods = foods,
             onDismiss = { foodToConfigure = null },
             onConfirm = { amount, portion ->
                 ingredients.add(
@@ -177,7 +194,9 @@ fun MealEditDialog(
                         fatPer100g = foodToConfigure!!.fatPer100g,
                         saturatedFatPer100g = foodToConfigure!!.saturatedFatPer100g,
                         alcoholPercent = foodToConfigure!!.alcoholPercent,
-                        baseUnit = foodToConfigure!!.baseUnit
+                        baseUnit = foodToConfigure!!.baseUnit,
+                        store = foodToConfigure!!.store,
+                        brand = foodToConfigure!!.brand
                     )
                 )
                 foodToConfigure = null
@@ -236,7 +255,19 @@ fun MealEditDialog(
                     ) {
                         filteredFoods.forEach { food ->
                             DropdownMenuItem(
-                                text = { Text(food.name) },
+                                text = { 
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        if (food.isGeneric) {
+                                            Icon(Icons.Default.Inventory2, null, modifier = Modifier.size(16.dp).padding(end = 4.dp), tint = MaterialTheme.colorScheme.primary)
+                                        }
+                                        Column {
+                                            Text(food.name)
+                                            if (!food.isGeneric && !food.brand.isNullOrBlank()) {
+                                                Text(food.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                            }
+                                        }
+                                    }
+                                },
                                 onClick = {
                                     foodToConfigure = food
                                     expanded = false
@@ -275,15 +306,26 @@ fun MealEditDialog(
 @Composable
 fun AddIngredientDialog(
     food: FoodItemEntity,
+    foods: List<FoodItemEntity>,
     onDismiss: () -> Unit,
     onConfirm: (Double, FoodPortionEntity?) -> Unit
 ) {
-    var amount by remember { mutableStateOf("100") }
-    var selectedPortion by remember { mutableStateOf<FoodPortionEntity?>(null) }
+    val parent = food.parentId?.let { pId -> foods.find { it.id == pId } }
+    val allPortions = food.getAllPortions(parent)
+    val firstPortion = allPortions.firstOrNull()
+    var amount by remember { mutableStateOf(if (firstPortion != null) "1" else "100") }
+    var selectedPortion by remember { mutableStateOf<FoodPortionEntity?>(firstPortion) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(food.name) },
+        title = { 
+            Column {
+                Text(food.name)
+                if (!food.isGeneric && !food.brand.isNullOrBlank()) {
+                    Text(food.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                }
+            }
+        },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 AutoSelectTextField(
@@ -299,7 +341,7 @@ fun AddIngredientDialog(
                         onClick = { selectedPortion = null },
                         label = { Text(food.baseUnit) }
                     )
-                    food.portions.forEach { portion ->
+                    allPortions.forEach { portion ->
                         FilterChip(
                             selected = selectedPortion == portion,
                             onClick = { selectedPortion = portion },
@@ -328,16 +370,116 @@ fun IngredientRow(
     onRemove: () -> Unit
 ) {
     val food = foods.find { it.id == ingredient.foodItemId }
+    val parent = food?.parentId?.let { pId -> foods.find { it.id == pId } }
+    val allPortions = food?.getAllPortions(parent) ?: emptyList()
+    
     var amountText by remember { mutableStateOf(ingredient.amount.roundString()) }
-    val selectedPortion = food?.portions?.find { it.name == ingredient.unitLabel }
+    val selectedPortion = allPortions.find { it.name == ingredient.unitLabel }
+
+    val relatives = remember(food, foods) {
+        val root = if (food?.isGeneric == true) food else parent
+        val effectiveRoot = root ?: foods.find { it.isGeneric && it.name == ingredient.name }
+        
+        if (effectiveRoot != null) {
+            (listOf(effectiveRoot) + foods.filter { it.parentId == effectiveRoot.id }).filter { it.id != food?.id }
+        } else {
+            foods.filter { it.isGeneric }
+        }
+    }
+    var showSwapMenu by remember { mutableStateOf(false) }
+    val isOrphaned = food == null
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+        colors = if (isOrphaned) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)) 
+                 else CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
     ) {
         Column(Modifier.padding(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(ingredient.name, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = ingredient.name, 
+                            fontWeight = FontWeight.Bold,
+                            color = if (isOrphaned) Color.Red else Color.Unspecified
+                        )
+                        if (isOrphaned) {
+                            Icon(Icons.Default.Error, null, tint = Color.Red, modifier = Modifier.size(14.dp).padding(start = 4.dp))
+                        }
+                        
+                        if (relatives.isNotEmpty()) {
+                            Box {
+                                IconButton(
+                                    onClick = { showSwapMenu = true },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isOrphaned) Icons.Default.FindReplace else Icons.Default.SwapHoriz, 
+                                        contentDescription = "Zutat tauschen", 
+                                        modifier = Modifier.size(16.dp), 
+                                        tint = if (isOrphaned) Color.Red else MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                DropdownMenu(expanded = showSwapMenu, onDismissRequest = { showSwapMenu = false }) {
+                                    if (isOrphaned) {
+                                        DropdownMenuItem(
+                                            text = { Text("Original gelöscht! Bitte Ersatz wählen:", style = MaterialTheme.typography.labelSmall, color = Color.Red) },
+                                            onClick = {},
+                                            enabled = false
+                                        )
+                                    }
+                                    relatives.take(15).forEach { alt ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    if (alt.isGeneric) {
+                                                        Icon(Icons.Default.Inventory2, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                                        Spacer(Modifier.width(8.dp))
+                                                        Text(alt.name + " (Basis)")
+                                                    } else {
+                                                        Icon(Icons.Default.Label, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.tertiary)
+                                                        Spacer(Modifier.width(8.dp))
+                                                        Text("${alt.brand ?: "Unbekannt"} @ ${alt.store ?: "Unbekannt"}")
+                                                    }
+                                                }
+                                            },
+                                            onClick = {
+                                                onUpdate(ingredient.copy(
+                                                    foodItemId = alt.id,
+                                                    name = alt.name,
+                                                    kcalPer100g = alt.kcalPer100g,
+                                                    proteinPer100g = alt.proteinPer100g,
+                                                    carbsPer100g = alt.carbsPer100g,
+                                                    sugarPer100g = alt.sugarPer100g,
+                                                    fatPer100g = alt.fatPer100g,
+                                                    saturatedFatPer100g = alt.saturatedFatPer100g,
+                                                    alcoholPercent = alt.alcoholPercent,
+                                                    baseUnit = alt.baseUnit,
+                                                    store = alt.store,
+                                                    brand = alt.brand
+                                                ))
+                                                showSwapMenu = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (isOrphaned) {
+                        Text("ACHTUNG: Dieser Artikel existiert nicht mehr!", style = MaterialTheme.typography.labelSmall, color = Color.Red)
+                    } else {
+                        food?.let { f ->
+                            if (!f.brand.isNullOrBlank() || !f.store.isNullOrBlank()) {
+                                Text(
+                                    text = "${f.brand ?: ""} @ ${f.store ?: ""}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                            }
+                        }
+                    }
+                }
                 IconButton(onClick = onRemove) { Icon(Icons.Default.Close, null, tint = Color.Red) }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -364,7 +506,7 @@ fun IngredientRow(
                             },
                             label = { Text(food?.baseUnit ?: "g") }
                         )
-                        food?.portions?.forEach { portion ->
+                        allPortions.forEach { portion ->
                             FilterChip(
                                 selected = selectedPortion == portion,
                                 onClick = {

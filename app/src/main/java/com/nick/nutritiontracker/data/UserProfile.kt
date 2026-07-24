@@ -21,7 +21,8 @@ data class UserProfile(
     val sugarPercent: Int = 10,
     val unsaturatedFatPercent: Int = 20,
     val saturatedFatPercent: Int = 10,
-    val activityLevel: Double = 1.2 // PAL factor
+    val activityLevel: Double = 1.2, // PAL factor
+    val stepGoal: Int = 10000
 ) {
     val totalPercent: Int get() = proteinPercent + complexCarbsPercent + sugarPercent + unsaturatedFatPercent + saturatedFatPercent
     val isPercentValid: Boolean get() = totalPercent == 100

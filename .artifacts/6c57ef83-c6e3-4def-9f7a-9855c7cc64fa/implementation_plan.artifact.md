@@ -1,31 +1,44 @@
-# Erweiterte Datumsplanung (Vorausplanung bis zu 2 Wochen)
+# Warnsystem für Rezepte bei Artikel-Löschung
 
-Diese Änderung ermöglicht es, Mahlzeiten bis zu zwei Wochen im Voraus zu planen. Die bisherige einfache Liste zur Datumsauswahl wird durch einen Kalender-Dialog ersetzt.
+Diese Änderung führt ein Sicherheits- und Warnsystem ein, das dich informiert, wenn ein zu löschender Artikel in Mahlzeiten verwendet wird, und betroffene Mahlzeiten visuell kennzeichnet.
 
 ## User Review Required
 
-> [!IMPORTANT]
-> - **Kalender-Ansicht**: Statt einer einfachen Liste im Dropdown wird nun ein vollwertiger Material 3 `DatePicker` verwendet. Dies bietet die gewünschte "Minikalender"-Funktionalität.
-> - **Zeitraum**: Der Kalender erlaubt die Auswahl jedes Datums, wobei wir den Fokus auf den Bereich von "heute" bis "+14 Tage" legen können. Technisch ist jedoch jedes Datum möglich, was maximale Flexibilität bietet.
+> [!WARNING]
+> - **Lösch-Verhalten**: Wenn du einen Artikel löschst, der in Rezepten verwendet wird, wird er **nicht mehr automatisch entfernt**. Stattdessen bleibt er im Rezept erhalten (damit die Kalorien stimmen), wird aber als "gelöscht/verwaist" markiert.
+> - **Warn-Dialog**: Vor dem Löschen wird dir nun angezeigt, in welchen Mahlzeiten der Artikel vorkommt.
 
 ## Proposed Changes
 
 ### UI & UX (NutritionApp.kt)
 
-#### [MODIFY] [NutritionApp.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/NutritionApp.kt)
-- **TopAppBar**: Den `DropdownMenu` für die Datumsauswahl entfernen.
-- **Datumsauswahl**: Ein Klick auf den Datums-Button öffnet nun einen Material 3 `DatePickerDialog`.
-- **DatePicker**: Den `DatePicker` so konfigurieren, dass er standardmäßig das aktuell ausgewählte Datum markiert.
-- **Schnellauswahl**: (Optional) "Heute" und "Morgen" als prominente Buttons im Dialog beibehalten, falls der User schnell wechseln möchte.
+#### [MODIFY] [FoodsScreen Delete Dialog](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/NutritionApp.kt)
+- Vor dem Löschen wird geprüft: `vm.meals.filter { it.ingredients.any { ing -> ing.foodItemId == id } }`.
+- Wenn Treffer gefunden werden: Anzeige einer Liste der betroffenen Mahlzeiten im Dialog mit dem Text: *"Achtung: Dieser Artikel wird in folgenden Mahlzeiten verwendet. Er wird dort als 'verwaist' markiert, falls du ihn löschst."*
 
-### Datenverwaltung (NutritionViewModel.kt)
+### UI & UX (MealsScreen.kt)
+
+#### [MODIFY] [MealsScreen List](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/MealsScreen.kt)
+- Prüfung pro Mahlzeit: Hat eine Zutat eine ID, die nicht mehr in `vm.foods` existiert?
+- Wenn ja: Anzeige eines roten Ausrufezeichens (`Icons.Default.Warning`) neben dem Namen der Mahlzeit in der Hauptliste.
+
+#### [MODIFY] [IngredientRow](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/MealsScreen.kt)
+- Wenn der zugehörige Artikel (`food`) null ist (da gelöscht):
+    - Anzeige eines Warntexts: *"Original-Artikel wurde gelöscht"*.
+    - Das Swap-Icon wird immer angezeigt, damit der Nutzer die verwaiste Zutat durch eine neue (z. B. eine neue Basis-Zutat) ersetzen kann.
+
+### Daten-Logik (NutritionViewModel.kt)
 
 #### [MODIFY] [NutritionViewModel.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/viewmodel/NutritionViewModel.kt)
-- **availableDates**: Diese Liste wird weiterhin für die "Copy/Move"-Funktionalität genutzt. Ich werde sie so anpassen, dass sie zumindest alle Tage der nächsten 14 Tage enthält, damit man beim Verschieben/Kopieren ebenfalls leicht in die Zukunft planen kann.
+- **`deleteFood(id)`**: Die Logik zum Entfernen der Zutat aus `meals` wird entfernt. Die Zutat bleibt im `MealEntity` stehen, verliert aber faktisch ihren Bezug zum aktuellen Lebensmittel-Stamm.
 
 ## Verification Plan
 
 ### Manual Verification
-- **Tagebuch**: Auf das Datum in der Top-Bar klicken. Prüfen, ob sich der Kalender öffnet.
-- **Vorausplanung**: Ein Datum in 10 Tagen auswählen und einen Eintrag hinzufügen. Prüfen, ob der Eintrag gespeichert wird und beim Zurückkehren auf diesen Tag wieder erscheint.
-- **Kopieren/Verschieben**: Mehrere Einträge markieren, "Kopieren" wählen und prüfen, ob im Ziel-Dialog nun auch zukünftige Daten leicht auswählbar sind.
+1. Eine Mahlzeit "Pesto Pasta" mit "ja!-Nudeln" erstellen.
+2. Im Lebensmittel-Screen versuchen, "ja!-Nudeln" zu löschen.
+3. Prüfen, ob der Warn-Dialog "Pesto Pasta" als betroffene Mahlzeit auflistet.
+4. Löschen bestätigen.
+5. Zum Mahlzeiten-Screen wechseln -> Prüfen, ob "Pesto Pasta" ein rotes Ausrufezeichen hat.
+6. Mahlzeit öffnen -> Prüfen, ob bei den Nudeln die Warnung "Original-Artikel wurde gelöscht" steht.
+7. Die Zutat über das Swap-Icon durch eine andere (z.B. Basis-Pasta) ersetzen -> Warnung muss verschwinden.

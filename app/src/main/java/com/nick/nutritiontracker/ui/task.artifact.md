@@ -1,0 +1,6 @@
+- [x] Implement `AddEntryCard` in `NutritionApp.kt`
+    - [x] Create search state and UI
+    - [x] Integrate local food/meal search
+    - [x] Integrate remote search via `BarcodeScannerService`
+    - [x] Handle selection and add callbacks
+- [x] Verify fix by compiling the project

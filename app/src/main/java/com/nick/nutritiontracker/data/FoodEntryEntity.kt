@@ -22,6 +22,7 @@ data class FoodEntryEntity(
     val saturatedFatPer100g: Double,
     val alcoholPercent: Double = 0.0,
     val baseUnit: String = "g",
+    val store: String? = null,
     
     // New fields for meal support
     val isMeal: Boolean = false,
