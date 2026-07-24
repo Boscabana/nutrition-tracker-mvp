@@ -35,10 +35,13 @@ data class MealIngredientEntity(
 data class MealEntity(
     val id: Long = 0,
     val name: String,
-    val ingredients: List<MealIngredientEntity> = emptyList()
+    val ingredients: List<MealIngredientEntity> = emptyList(),
+    val servings: Double = 1.0
 ) {
     val totalKcal: Double get() = ingredients.sumOf { it.kcal }
     val totalProtein: Double get() = ingredients.sumOf { it.protein }
     val totalCarbs: Double get() = ingredients.sumOf { it.carbs }
     val totalFat: Double get() = ingredients.sumOf { it.fat }
+
+    val kcalPerServing: Double get() = if (servings > 0) totalKcal / servings else totalKcal
 }

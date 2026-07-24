@@ -258,11 +258,12 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     // --- MEAL TEMPLATE MANAGEMENT ---
 
-    fun addMealTemplate(name: String, ingredients: List<MealIngredientEntity>) {
+    fun addMealTemplate(name: String, ingredients: List<MealIngredientEntity>, servings: Double = 1.0) {
         val newMeal = MealEntity(
             id = nextMealId++,
             name = name,
-            ingredients = ingredients
+            ingredients = ingredients,
+            servings = servings
         )
         meals.add(newMeal)
         saveMeals()
@@ -319,7 +320,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             mealSlot = mealSlot,
             amount = 1.0,
             unitLabel = "Meal",
-            grams = meal.ingredients.sumOf { it.grams },
+            grams = (meal.ingredients.sumOf { it.grams } / meal.servings).coerceAtLeast(0.0),
             foodItemId = -1, // Not a single food item
             name = meal.name,
             kcalPer100g = 0.0,
@@ -329,7 +330,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             fatPer100g = 0.0,
             saturatedFatPer100g = 0.0,
             isMeal = true,
-            mealIngredients = meal.ingredients
+            mealIngredients = meal.ingredients.map { it.copy(grams = it.grams / meal.servings, amount = it.amount / meal.servings) }
         )
         allEntries.add(entry)
         saveEntries()
@@ -420,7 +421,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val backup = BackupData(
             foods = foods.toList(),
             meals = meals.toList(),
-            categories = categories.toList()
+            categories = categories.toList(),
+            entries = allEntries.toList()
         )
         return json.encodeToString(backup)
     }
@@ -469,10 +471,19 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             }
 
+            // 4. Import entries
+            backup.entries.forEach { entry ->
+                if (allEntries.none { it.dateIso == entry.dateIso && it.name == entry.name && it.mealSlot == entry.mealSlot && it.grams == entry.grams }) {
+                    allEntries.add(entry)
+                    changed = true
+                }
+            }
+
             if (changed) {
                 recalculateIds()
                 saveFoods()
                 saveMeals()
+                saveEntries()
                 saveCategories()
             }
             true
@@ -525,5 +536,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         foods.addAll(updatedList)
         nextFoodId = fId
         nextPortionId = pId
+
+        // Also update nextMealId and nextEntryId based on current data
+        nextMealId = (meals.maxOfOrNull { it.id } ?: 0L) + 1
+        nextEntryId = (allEntries.maxOfOrNull { it.id } ?: 0L) + 1
     }
 }

@@ -1,5 +1,7 @@
 package com.nick.nutritiontracker.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,6 +30,8 @@ fun MealsScreen(
     var mealToDelete by remember { mutableStateOf<Long?>(null) }
     var mealToEdit by remember { mutableStateOf<MealEntity?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
+    
+    val expandedStates = remember { mutableStateMapOf<Long, Boolean>() }
 
     if (mealToDelete != null) {
         AlertDialog(
@@ -54,11 +58,11 @@ fun MealsScreen(
                 showAddDialog = false
                 mealToEdit = null
             },
-            onSave = { name, ingredients ->
+            onSave = { name, ingredients, servings ->
                 if (mealToEdit == null) {
-                    vm.addMealTemplate(name, ingredients)
+                    vm.addMealTemplate(name, ingredients, servings)
                 } else {
-                    vm.updateMealTemplate(mealToEdit!!.copy(name = name, ingredients = ingredients))
+                    vm.updateMealTemplate(mealToEdit!!.copy(name = name, ingredients = ingredients, servings = servings))
                 }
                 showAddDialog = false
                 mealToEdit = null
@@ -82,20 +86,47 @@ fun MealsScreen(
         }
 
         items(meals, key = { it.id }) { meal ->
+            val expanded = expandedStates[meal.id] ?: false
             SwipeActionContainer(
                 onDeleteRequest = { mealToDelete = meal.id },
                 onEditRequest = { mealToEdit = meal }
             ) {
-                Card(modifier = Modifier.fillMaxWidth()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth().clickable { expandedStates[meal.id] = !expanded },
+                ) {
                     Column(Modifier.padding(12.dp)) {
-                        Text(meal.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("${meal.totalKcal.round0()} kcal", color = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.height(4.dp))
-                        meal.ingredients.forEach { ingredient ->
-                            Text(
-                                "• ${ingredient.name}: ${ingredient.amount.roundString()} ${ingredient.unitLabel}",
-                                style = MaterialTheme.typography.bodySmall
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(meal.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Text("${meal.kcalPerServing.round0()} kcal pro Portion", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Icon(
+                                if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.outline
                             )
+                        }
+                        
+                        AnimatedVisibility(visible = expanded) {
+                            Column(Modifier.padding(top = 8.dp)) {
+                                HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                                Text("Zutaten pro Portion:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                meal.ingredients.forEach { ingredient ->
+                                    val amountPerServing = ingredient.amount / meal.servings
+                                    Text(
+                                        "• ${ingredient.name}: ${amountPerServing.roundString()} ${ingredient.unitLabel}",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                }
+                                if (meal.servings != 1.0) {
+                                    Text(
+                                        "Gesamtportionen: ${meal.servings.roundString()}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        modifier = Modifier.padding(top = 4.dp),
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -110,9 +141,10 @@ fun MealEditDialog(
     meal: MealEntity?,
     foods: List<FoodItemEntity>,
     onDismiss: () -> Unit,
-    onSave: (String, List<MealIngredientEntity>) -> Unit
+    onSave: (String, List<MealIngredientEntity>, Double) -> Unit
 ) {
     var name by remember { mutableStateOf(meal?.name ?: "") }
+    var servings by remember { mutableStateOf(meal?.servings?.roundString() ?: "1") }
     val ingredients = remember { mutableStateListOf<MealIngredientEntity>().apply { 
         meal?.ingredients?.let { addAll(it) } 
     } }
@@ -173,6 +205,15 @@ fun MealEditDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                Spacer(Modifier.height(8.dp))
+                
+                AutoSelectTextField(
+                    value = servings,
+                    onValueChange = { servings = it },
+                    label = { Text("Portionen (Gesamt)") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
                 Spacer(Modifier.height(16.dp))
                 Text("Zutaten", fontWeight = FontWeight.Bold)
                 
@@ -223,7 +264,7 @@ fun MealEditDialog(
                     TextButton(onClick = onDismiss) { Text("Abbrechen") }
                     Button(
                         enabled = name.isNotBlank() && ingredients.isNotEmpty(),
-                        onClick = { onSave(name, ingredients.toList()) }
+                        onClick = { onSave(name, ingredients.toList(), servings.replace(',', '.').toDoubleOrNull() ?: 1.0) }
                     ) { Text("Speichern") }
                 }
             }

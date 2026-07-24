@@ -73,7 +73,7 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
 
     // Multi-select state
     val selectedEntryIds = remember { mutableStateOf(setOf<Long>()) }
-    val isSelectionMode by derivedStateOf { selectedEntryIds.value.isNotEmpty() }
+    val isSelectionMode by remember { derivedStateOf { selectedEntryIds.value.isNotEmpty() } }
 
     // Health Connect Permission Launcher
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -1544,6 +1544,8 @@ private fun FoodsScreen(
         }
     }
 
+    val expandedStates = remember { mutableStateMapOf<Long, Boolean>() }
+
     if (foodToDelete != null) {
         AlertDialog(
             onDismissRequest = { foodToDelete = null },
@@ -1684,6 +1686,7 @@ private fun FoodsScreen(
             contentPadding = PaddingValues(bottom = 16.dp)
         ) {
             items(filteredFoods, key = { it.id }) { food ->
+                val expanded = expandedStates[food.id] ?: false
                 SwipeActionContainer(
                     onDeleteRequest = { foodToDelete = food.id },
                     onEditRequest = { 
@@ -1691,36 +1694,46 @@ private fun FoodsScreen(
                         showAddDialog = true 
                     }
                 ) {
-                    Card {
+                    Card(modifier = Modifier.fillMaxWidth().clickable { expandedStates[food.id] = !expanded }) {
                         Column(Modifier.padding(12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(food.name, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                                if (!food.category.isNullOrBlank()) {
+                                if (!expanded && !food.category.isNullOrBlank()) {
                                     SuggestionChip(onClick = {}, label = { Text(food.category, style = MaterialTheme.typography.labelSmall) })
                                 }
+                                Icon(
+                                    if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.outline
+                                )
                             }
-                            if (!food.brand.isNullOrBlank()) {
-                                Text(food.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                            }
-                            Text("${food.kcalPer100g.round0()} kcal / 100 ${food.baseUnit}", style = MaterialTheme.typography.bodySmall)
-                            Spacer(Modifier.height(4.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                MacroNumber(food.proteinPer100g, ProteinGreen)
-                                Separator()
-                                MacroNumber(food.complexCarbsPer100g, CarbOrange)
-                                MacroNumber(food.sugarPer100g, SugarRed)
-                                Separator()
-                                MacroNumber(food.unsaturatedFatPer100g, UnsaturatedYellow)
-                                MacroNumber(food.saturatedFatPer100g, SaturatedGrey)
-                            }
-                            if (food.alcoholPercent > 0) {
-                                Text("Alkohol: ${food.alcoholPercent.round1()}%", style = MaterialTheme.typography.labelSmall, color = Color.Magenta)
-                            }
-                            if (food.portions.isNotEmpty()) {
-                                Text("Portionen: " + food.portions.joinToString(" · ") { "${it.name} (${it.grams.round0()}${food.baseUnit})" }, style = MaterialTheme.typography.labelSmall)
-                            }
-                            if (food.packages.isNotEmpty()) {
-                                Text("Packungen: " + food.packages.joinToString(" · ") { "${it.name} ${it.quantity.round0()} ${it.unit}" }, style = MaterialTheme.typography.labelSmall)
+                            
+                            AnimatedVisibility(visible = expanded) {
+                                Column(Modifier.padding(top = 8.dp)) {
+                                    if (!food.brand.isNullOrBlank()) {
+                                        Text(food.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                    }
+                                    Text("${food.kcalPer100g.round0()} kcal / 100 ${food.baseUnit}", style = MaterialTheme.typography.bodySmall)
+                                    Spacer(Modifier.height(4.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        MacroNumber(food.proteinPer100g, ProteinGreen)
+                                        Separator()
+                                        MacroNumber(food.complexCarbsPer100g, CarbOrange)
+                                        MacroNumber(food.sugarPer100g, SugarRed)
+                                        Separator()
+                                        MacroNumber(food.unsaturatedFatPer100g, UnsaturatedYellow)
+                                        MacroNumber(food.saturatedFatPer100g, SaturatedGrey)
+                                    }
+                                    if (food.alcoholPercent > 0) {
+                                        Text("Alkohol: ${food.alcoholPercent.round1()}%", style = MaterialTheme.typography.labelSmall, color = Color.Magenta)
+                                    }
+                                    if (food.portions.isNotEmpty()) {
+                                        Text("Portionen: " + food.portions.joinToString(" · ") { "${it.name} (${it.grams.round0()}${food.baseUnit})" }, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                    if (food.packages.isNotEmpty()) {
+                                        Text("Packungen: " + food.packages.joinToString(" · ") { "${it.name} ${it.quantity.round0()} ${it.unit}" }, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
                             }
                         }
                     }
