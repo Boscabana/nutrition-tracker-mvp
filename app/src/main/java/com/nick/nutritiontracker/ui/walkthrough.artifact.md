@@ -1,17 +1,21 @@
-# Walkthrough - Fixed Unresolved Reference: AddEntryCard
+# Walkthrough - Macro Input Reordering and UX Improvements
 
-I have implemented the missing `AddEntryCard` component in `NutritionApp.kt`. This fixes the build error and restores the search functionality in the Diary tab.
+I have reorganized the macro nutrient input fields and improved the data entry experience by adding numeric keyboards and better focus navigation.
 
 ## Changes Made
 
-### Nutrition UI
-- **Implemented `AddEntryCard`**: Added a new Composable that provides a search interface for foods and meals.
-- **Search Logic**: Integrated local search (existing foods and meal templates) with remote search (via Open Food Facts API).
-- **Scanning Integration**: Linked the "Scan" button to the existing barcode scanner service.
-- **Selection Handling**:
-    - Selecting a food item opens the `AddAmountDialog`.
-    - Selecting a meal template opens a dialog to select the meal slot (Breakfast, Lunch, etc.) before adding.
-- **UI Enhancements**: Added a search bar with clear button, a scan button, and a results list with type-specific icons (Basis, Markenprodukt, Mahlzeit).
+### Nutrition App & Food Editing
+- **Reordered Macros**: In the `FoodEditDialog`, fields now follow the standard nutritional table format:
+    1. Fett (inkl. gesättigte)
+    2. Kohlenhydrate (inkl. Zucker)
+    3. Eiweiß
+    4. Alkohol
+- **Numeric Keyboards**: Applied `KeyboardType.Decimal` or `KeyboardType.Number` to all numeric input fields (Steps, Amount, Macro values, Barcode).
+- **Navigation (IME Actions)**: Added `ImeAction.Next` to most fields and `ImeAction.Done` or `ImeAction.Search` to final fields. This allows users to jump to the next field using the keyboard button.
+
+### Profile & Goals
+- **Standardized Order**: Updated the macro distribution section in `ProfileScreen` to match the new Fat → Carbs → Protein order.
+- **Enhanced Inputs**: Added numeric keyboards and "Next" actions to personal data (Age, Weight, Height) and goal settings (Calorie budget, Macro percentages).
 
 ## Verification Results
 
@@ -19,4 +23,6 @@ I have implemented the missing `AddEntryCard` component in `NutritionApp.kt`. Th
 - Ran `./gradlew :app:compileDebugKotlin` which completed successfully.
 
 ### Manual Verification
-- The code now compiles and the component is correctly linked in the `TodayScreen`'s `LazyColumn`.
+- Verified the new order in both the Food Creation dialog and the Profile screen.
+- Verified that the numeric keyboard pops up for decimal/number fields.
+- Verified that the "Next" button on the keyboard correctly moves focus through the form.

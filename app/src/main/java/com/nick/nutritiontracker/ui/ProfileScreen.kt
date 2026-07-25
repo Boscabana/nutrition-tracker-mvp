@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -20,6 +21,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.nick.nutritiontracker.data.Gender
@@ -93,7 +96,8 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
                         value = age,
                         onValueChange = { age = it },
                         label = { Text("Alter") },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
                     )
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Geschlecht", style = MaterialTheme.typography.labelSmall)
@@ -110,13 +114,15 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
                         value = weight,
                         onValueChange = { weight = it },
                         label = { Text("Gewicht (kg)") },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
                     )
                     AutoSelectTextField(
                         value = height,
                         onValueChange = { height = it },
                         label = { Text("Größe (cm)") },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
                     )
                 }
                 
@@ -138,7 +144,8 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
                     value = budget,
                     onValueChange = { budget = it },
                     label = { Text("Kalorienbudget (Ziel)") },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
                 )
                 Text("Ihr TDEE (Bürotätigkeit) liegt bei ca. ${userProfile.tdee.toInt()} kcal", style = MaterialTheme.typography.bodySmall)
             }
@@ -147,11 +154,36 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
         Card {
             Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Makroverteilung (%)", fontWeight = FontWeight.Bold)
-                MacroPercentInput("Protein", pPct) { pPct = it }
-                MacroPercentInput("Komplexe KH", cCarbPct) { cCarbPct = it }
-                MacroPercentInput("Zucker", sugarPct) { sugarPct = it }
-                MacroPercentInput("Ungesättigte Fette", uFatPct) { uFatPct = it }
-                MacroPercentInput("Gesättigte Fette", sFatPct) { sFatPct = it }
+                MacroPercentInput(
+                    label = "Ungesättigte Fette", 
+                    value = uFatPct, 
+                    onValueChange = { uFatPct = it },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
+                )
+                MacroPercentInput(
+                    label = "Gesättigte Fette", 
+                    value = sFatPct, 
+                    onValueChange = { sFatPct = it },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
+                )
+                MacroPercentInput(
+                    label = "Komplexe KH", 
+                    value = cCarbPct, 
+                    onValueChange = { cCarbPct = it },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
+                )
+                MacroPercentInput(
+                    label = "Zucker", 
+                    value = sugarPct, 
+                    onValueChange = { sugarPct = it },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
+                )
+                MacroPercentInput(
+                    label = "Protein", 
+                    value = pPct, 
+                    onValueChange = { pPct = it },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)
+                )
                 
                 Spacer(Modifier.height(8.dp))
                 Text(
@@ -313,14 +345,20 @@ private fun CategoryManagementCard(vm: NutritionViewModel) {
 }
 
 @Composable
-private fun MacroPercentInput(label: String, value: String, onValueChange: (String) -> Unit) {
+private fun MacroPercentInput(
+    label: String, 
+    value: String, 
+    onValueChange: (String) -> Unit,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default
+) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, modifier = Modifier.weight(1f))
         AutoSelectTextField(
             value = value,
             onValueChange = { if (it.isEmpty() || it.toIntOrNull() != null) onValueChange(it) },
             modifier = Modifier.width(80.dp),
-            singleLine = true
+            singleLine = true,
+            keyboardOptions = keyboardOptions
         )
     }
 }

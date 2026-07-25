@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -657,7 +658,9 @@ private fun StepInputDialog(
                     value = steps,
                     onValueChange = { steps = it },
                     label = { Text("Schritte") },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { onConfirm(steps.toIntOrNull() ?: 0) })
                 )
             }
         },
@@ -764,7 +767,9 @@ private fun AddAmountDialog(
                     value = amount,
                     onValueChange = { amount = it },
                     label = { Text("Menge") },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { onConfirm(amount.num(), selectedPortion, mealSlot) })
                 )
                 Text("Einheit", style = MaterialTheme.typography.labelMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1038,7 +1043,20 @@ private fun EditEntryDialog(
                     value = amount,
                     onValueChange = { amount = it },
                     label = { Text("Menge") },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = {
+                        val numAmount = amount.num()
+                        val grams = if (selectedPortion != null) numAmount * selectedPortion!!.grams else numAmount
+                        onSave(
+                            entry.copy(
+                                amount = numAmount,
+                                unitLabel = selectedPortion?.name ?: food.baseUnit,
+                                grams = grams,
+                                mealSlot = mealSlot
+                            )
+                        )
+                    })
                 )
                 Text("Einheit", style = MaterialTheme.typography.labelMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1151,7 +1169,9 @@ private fun EditMealEntryDialog(
                         },
                         label = { Text("Zutat hinzufügen...") },
                         modifier = Modifier.fillMaxWidth(),
-                        trailingIcon = { Icon(Icons.Default.Search, null) }
+                        trailingIcon = { Icon(Icons.Default.Search, null) },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { expanded = true })
                     )
                     DropdownMenu(
                         expanded = expanded && filteredFoods.isNotEmpty(),
@@ -1347,7 +1367,8 @@ private fun IngredientAdjustRow(
                         onUpdate(ingredient.copy(amount = amt, grams = grams))
                     },
                     label = { Text("Menge") },
-                    modifier = Modifier.weight(0.3f)
+                    modifier = Modifier.weight(0.3f),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done)
                 )
                 
                 Column(Modifier.weight(0.7f)) {
@@ -2092,19 +2113,54 @@ private fun FoodEditDialog(
                 )
 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AutoSelectTextField(protein, { protein = it }, label = { Text("Protein") }, modifier = Modifier.weight(1f))
-                    AutoSelectTextField(carbs, { carbs = it }, label = { Text("KH ges.") }, modifier = Modifier.weight(1f))
+                    AutoSelectTextField(
+                        fat, { fat = it }, 
+                        label = { Text("Fett ges.") }, 
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
+                    )
+                    AutoSelectTextField(
+                        saturatedFat, { saturatedFat = it }, 
+                        label = { Text("davon ges.") }, 
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
+                    )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AutoSelectTextField(sugar, { sugar = it }, label = { Text("davon Zucker") }, modifier = Modifier.weight(1f))
-                    AutoSelectTextField(alcohol, { alcohol = it }, label = { Text("Alc.-%") }, modifier = Modifier.weight(1f))
+                    AutoSelectTextField(
+                        carbs, { carbs = it }, 
+                        label = { Text("KH ges.") }, 
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
+                    )
+                    AutoSelectTextField(
+                        sugar, { sugar = it }, 
+                        label = { Text("davon Zucker") }, 
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
+                    )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AutoSelectTextField(fat, { fat = it }, label = { Text("Fett ges.") }, modifier = Modifier.weight(1f))
-                    AutoSelectTextField(saturatedFat, { saturatedFat = it }, label = { Text("davon ges.") }, modifier = Modifier.weight(1f))
+                    AutoSelectTextField(
+                        protein, { protein = it }, 
+                        label = { Text("Protein") }, 
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
+                    )
+                    AutoSelectTextField(
+                        alcohol, { alcohol = it }, 
+                        label = { Text("Alc.-%") }, 
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
+                    )
                 }
 
-                AutoSelectTextField(barcode, { barcode = it }, label = { Text("Barcode") }, modifier = Modifier.fillMaxWidth())
+                AutoSelectTextField(
+                    barcode, { barcode = it }, 
+                    label = { Text("Barcode") }, 
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)
+                )
 
                 HorizontalDivider(Modifier.padding(vertical = 8.dp))
                 if (parentId != null && parentFood != null) {
