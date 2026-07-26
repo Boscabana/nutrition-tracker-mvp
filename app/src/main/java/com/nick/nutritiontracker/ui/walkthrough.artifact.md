@@ -1,21 +1,17 @@
-# Walkthrough - Macro Input Reordering and UX Improvements
+# Walkthrough - Shopping List Archive & Dynamic Grouping
 
-I have reorganized the macro nutrient input fields and improved the data entry experience by adding numeric keyboards and better focus navigation.
+I have implemented a smarter shopping list that separates active items from completed ones, with a collapsible archive section.
 
 ## Changes Made
 
-### Nutrition App & Food Editing
-- **Reordered Macros**: In the `FoodEditDialog`, fields now follow the standard nutritional table format:
-    1. Fett (inkl. gesättigte)
-    2. Kohlenhydrate (inkl. Zucker)
-    3. Eiweiß
-    4. Alkohol
-- **Numeric Keyboards**: Applied `KeyboardType.Decimal` or `KeyboardType.Number` to all numeric input fields (Steps, Amount, Macro values, Barcode).
-- **Navigation (IME Actions)**: Added `ImeAction.Next` to most fields and `ImeAction.Done` or `ImeAction.Search` to final fields. This allows users to jump to the next field using the keyboard button.
+### Shopping List Archive
+- **Collapsible Section**: Added a "Zuletzt verwendet" (Recently Used) section at the bottom of the shopping list. This section stays collapsed by default to keep the interface clean.
+- **Smart Reordering**: When you check an item, it instantly moves to the archive. If you uncheck it, it jumps back to its original meal-based group or the aggregated list.
+- **Improved Filtering**: The meal grouping and aggregation logic now only applies to **active** items, making the current shopping task much clearer.
 
-### Profile & Goals
-- **Standardized Order**: Updated the macro distribution section in `ProfileScreen` to match the new Fat → Carbs → Protein order.
-- **Enhanced Inputs**: Added numeric keyboards and "Next" actions to personal data (Age, Weight, Height) and goal settings (Calorie budget, Macro percentages).
+### Interaction Improvements
+- **Group Persistence**: Items "remember" their source (the meal they belong to) even when moved to the archive.
+- **Visual Feedback**: Added dividers and expansion icons to clearly distinguish between the active list and the archive.
 
 ## Verification Results
 
@@ -23,6 +19,6 @@ I have reorganized the macro nutrient input fields and improved the data entry e
 - Ran `./gradlew :app:compileDebugKotlin` which completed successfully.
 
 ### Manual Verification
-- Verified the new order in both the Food Creation dialog and the Profile screen.
-- Verified that the numeric keyboard pops up for decimal/number fields.
-- Verified that the "Next" button on the keyboard correctly moves focus through the form.
+- Items move correctly between the active list and the archive when toggled.
+- Aggregation switch correctly sums up amounts for active items only.
+- The "Zuletzt verwendet" section correctly displays the count of checked items.

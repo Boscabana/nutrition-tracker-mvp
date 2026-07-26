@@ -1,13 +1,6 @@
-- [x] Update `NutritionApp.kt`
-    - [x] Reorder macro inputs in `FoodEditDialog`
-    - [x] Add `KeyboardOptions` (Decimal/Next) to `FoodEditDialog` fields
-    - [x] Add `KeyboardOptions` (Number/Done) to `StepInputDialog`
-    - [x] Add `KeyboardOptions` (Decimal/Done) to `AddAmountDialog`
-    - [x] Add `KeyboardOptions` (Decimal/Next) to `EditEntryDialog` & `EditMealEntryDialog`
-    - [x] Add `KeyboardOptions` (Decimal/Done) to `IngredientAdjustRow`
-- [x] Update `ProfileScreen.kt`
-    - [x] Reorder macro distribution in `ProfileScreen`
-    - [x] Add `KeyboardOptions` to `ProfileScreen` personal data and goals
-    - [x] Update `MacroPercentInput` to support `KeyboardOptions`
-- [x] Verify build with `./gradlew :app:compileDebugKotlin`
-- [x] Create walkthrough artifact
+- [x] Implement Collapsible Archive in `ShoppingListScreen.kt`
+    - [x] Split `rawShoppingList` into active and checked items
+    - [x] Update grouping/aggregation logic for active items
+    - [x] Add the "Zuletzt verwendet" section at the bottom
+    - [x] Handle toggle logic for expansion/collapse
+- [x] Verify build and functionality

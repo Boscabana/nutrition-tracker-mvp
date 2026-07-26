@@ -1,56 +1,28 @@
-# Implementation Plan - Macro Input Reordering and UX Improvements
+# Implementation Plan - Collapsible Shopping List Archive
 
-This plan addresses the user's request to reorder macro inputs in the "FoodEditDialog" to match standard nutritional tables (Fat, then Carbs, then Protein) and to improve the input experience with numeric keyboards and field navigation.
-
-## User Review Required
-
-> [!IMPORTANT]
-> The reordering will be applied to both the Food Creation dialog and the User Profile goal distribution for consistency. I will also apply numeric keyboards to all numeric fields (steps, amounts, portions) throughout the app to improve the overall UX.
+This plan implements an archive for checked shopping items. Items marked as completed will move to a collapsed "Zuletzt verwendet" (Recently Used) section at the bottom of the shopping list.
 
 ## Proposed Changes
 
-### [UI Components]
+### [User Interface]
 
-#### [MODIFY] [NutritionApp.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/NutritionApp.kt)
+#### [MODIFY] [ShoppingListScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/ShoppingListScreen.kt)
 
-- **FoodEditDialog**:
-    - Reorder macro input fields:
-        1. Fat (Fett ges.)
-        2. Saturated Fat (davon ges.)
-        3. Carbohydrates (KH ges.)
-        4. Sugar (davon Zucker)
-        5. Protein (Eiweiß)
-        6. Alcohol (Alc.-%)
-    - Apply `KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)` to all macro fields.
-    - Chain other fields (Name, Brand, Store, Portions) with `ImeAction.Next`.
-    - Set `ImeAction.Done` for the final field (Barcode).
-- **StepInputDialog**:
-    - Apply `KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)` to the steps input.
-- **AddAmountDialog**:
-    - Apply `KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done)` to the amount input.
-- **EditEntryDialog** & **EditMealEntryDialog**:
-    - Apply `KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next/Done)` to amount and ingredient fields.
-- **IngredientAdjustRow**:
-    - Apply `KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done)` to the amount field.
-
-#### [MODIFY] [ProfileScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/ProfileScreen.kt)
-
-- **ProfileScreen**:
-    - Reorder macro distribution inputs to match the new standard:
-        1. Fats (Ungesättigte / Gesättigte)
-        2. Carbs (Komplexe / Zucker)
-        3. Protein
-    - Apply `KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)` to age, weight, height, budget, and macro percentages.
-- **MacroPercentInput**:
-    - Ensure it passes `KeyboardOptions` to the underlying `AutoSelectTextField`.
+- **Archive State**: Add a `var isArchiveExpanded by remember { mutableStateOf(false) }` to track the collapse state of the "Zuletzt verwendet" section.
+- **Item Filtering**:
+    - **Active List**: Filter items where `isChecked == false`. Group or aggregate these according to the current user settings.
+    - **Archive List**: Filter items where `isChecked == true`.
+- **Dynamic Layout**:
+    - Show the **Active List** (grouped by meal or aggregated) at the top.
+    - Add a header/divider for the **Archive**.
+    - Implement a button/header for "Zuletzt verwendet" that toggles `isArchiveExpanded`.
+    - Show the **Archive List** only when expanded.
+- **Sorting**: Ensure that when an item is unchecked, it naturally flows back into the active list's logic (since it retains its `sourceName`).
 
 ## Verification Plan
 
-### Automated Tests
-- Run `./gradlew :app:compileDebugKotlin` to ensure no syntax errors were introduced.
-
 ### Manual Verification
-- Open the "Food Edit" dialog and verify the new order of macros and the numeric keyboard.
-- Verify that pressing "Next" on the keyboard moves to the next logical field.
-- Open the Profile and verify the reordered goals and numeric inputs.
-- Test step input and amount input for numeric keyboard availability.
+1.  **Check-off Action**: Tap a checkbox on "Brokkoli". Verify it disappears from the main list and appears in the "Zuletzt verwendet" section.
+2.  **Expansion**: Verify that the "Zuletzt verwendet" section can be toggled open and closed.
+3.  **Restore Action**: Uncheck "Brokkoli" in the archive. Verify it moves back to the top list, correctly placed under its original meal header (if grouping is active).
+4.  **Aggregation**: Test the "Zusammenfassen" toggle while items are in both lists. Sums should only reflect active items or keep the sections distinct as appropriate for clarity.

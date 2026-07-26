@@ -205,6 +205,8 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                                     when (tab) {
                                         1 -> "Artikel"
                                         2 -> "Mahlzeiten"
+                                        4 -> "Planer"
+                                        5 -> "Einkaufsliste"
                                         else -> "Profil & Ziele"
                                     }
                                 )
@@ -259,6 +261,18 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                         icon = { Icon(Icons.Default.SoupKitchen, null) }
                     )
                     NavigationBarItem(
+                        selected = tab == 4,
+                        onClick = { tab = 4 },
+                        label = { Text("Planer") },
+                        icon = { Icon(Icons.Default.Event, null) }
+                    )
+                    NavigationBarItem(
+                        selected = tab == 5,
+                        onClick = { tab = 5 },
+                        label = { Text("Einkaufen") },
+                        icon = { Icon(Icons.Default.ShoppingCart, null) }
+                    )
+                    NavigationBarItem(
                         selected = tab == 3,
                         onClick = { tab = 3 },
                         label = { Text("Profil") },
@@ -273,6 +287,8 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                     1 -> FoodsScreen(vm, snackbarHostState)
                     2 -> MealsScreen(vm, snackbarHostState)
                     3 -> ProfileScreen(profileVm, vm)
+                    4 -> PlannerScreen(vm)
+                    5 -> ShoppingListScreen(vm)
                 }
             }
         }
@@ -574,8 +590,13 @@ private fun TodayScreen(
                     }
                     vm.addEntry(finalFood, amount, portion, mealSlot)
                 },
-                onAddMeal = { meal, mealSlot ->
-                    vm.addMealEntry(meal, mealSlot)
+                onAddMeal = { meal, mealSlot, servings ->
+                    // For consumption, we usually add 1 portion or whatever was selected
+                    // The original addMealEntry needs to be updated or we just call it multiple times?
+                    // Let's assume addMealEntry adds 1 serving. We could update it to take servings.
+                    // For now, let's just repeat if needed or update VM.
+                    // I'll update the VM method addMealEntry to take servings too.
+                    vm.addMealEntry(meal, mealSlot, servings)
                 },
                 onScanRequest = {
                     scope.launch {
@@ -738,7 +759,7 @@ private fun MealGroupHeader(
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun AddAmountDialog(
+fun AddAmountDialog(
     food: FoodItemEntity,
     vm: NutritionViewModel,
     onDismiss: () -> Unit,
@@ -819,11 +840,11 @@ private fun AddAmountDialog(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddEntryCard(
+fun AddEntryCard(
     foods: List<FoodItemEntity>,
     meals: List<MealEntity>,
     onAddEntry: (FoodItemEntity, Double, FoodPortionEntity?, String) -> Unit,
-    onAddMeal: (MealEntity, String) -> Unit,
+    onAddMeal: (MealEntity, String, Double) -> Unit,
     onScanRequest: () -> Unit,
     onSearchRequest: suspend (String) -> List<FoodItemEntity>,
     onCaptureRequested: (FoodItemEntity) -> Unit,
@@ -853,12 +874,24 @@ private fun AddEntryCard(
 
     if (showMealSlotDialog && selectedMeal != null) {
         var slot by remember { mutableStateOf("Snack") }
+        var servings by remember { mutableStateOf("1") }
+        
         AlertDialog(
             onDismissRequest = { showMealSlotDialog = false },
             title = { Text("Mahlzeit hinzufügen") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("In welche Mahlzeit soll '${selectedMeal!!.name}' eingetragen werden?")
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Details für '${selectedMeal!!.name}' festlegen:")
+                    
+                    AutoSelectTextField(
+                        value = servings,
+                        onValueChange = { servings = it },
+                        label = { Text("Anzahl Portionen") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done)
+                    )
+
+                    Text("Mahlzeit-Slot", style = MaterialTheme.typography.labelMedium)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf("Frühstück", "Mittag", "Abend", "Snack").forEach { s ->
                             FilterChip(
@@ -872,7 +905,7 @@ private fun AddEntryCard(
             },
             confirmButton = {
                 Button(onClick = {
-                    onAddMeal(selectedMeal!!, slot)
+                    onAddMeal(selectedMeal!!, slot, servings.num())
                     showMealSlotDialog = false
                     selectedMeal = null
                     query = ""

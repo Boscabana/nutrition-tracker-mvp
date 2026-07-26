@@ -25,16 +25,25 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import android.util.Log
+import com.google.firebase.auth.FirebaseAuthException
 import com.nick.nutritiontracker.data.Gender
 import com.nick.nutritiontracker.data.UserProfile
+import com.nick.nutritiontracker.data.Household
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
 import com.nick.nutritiontracker.viewmodel.ProfileViewModel
+import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable
 fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionViewModel) {
     val userProfile by viewModel.userProfile.collectAsState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    
+    val firebaseManager = nutritionViewModel.firebaseManager
+    val user by firebaseManager.currentUser.collectAsState()
+    val household by firebaseManager.household.collectAsState()
     
     var firstName by remember(userProfile) { mutableStateOf(userProfile.firstName) }
     var age by remember(userProfile) { mutableStateOf(userProfile.age.toString()) }
@@ -196,6 +205,8 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
 
         CategoryManagementCard(nutritionViewModel)
         
+        HouseholdManagementSection(nutritionViewModel)
+        
         Button(
             onClick = {
                 viewModel.updateProfile(UserProfile(
@@ -341,6 +352,115 @@ private fun CategoryManagementCard(vm: NutritionViewModel) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun HouseholdManagementSection(vm: NutritionViewModel) {
+    val firebaseManager = vm.firebaseManager
+    val user by firebaseManager.currentUser.collectAsState()
+    val household by firebaseManager.household.collectAsState()
+    val scope = rememberCoroutineScope()
+    
+    var householdName by remember { mutableStateOf("") }
+    var inviteCode by remember { mutableStateOf("") }
+    var showJoinDialog by remember { mutableStateOf(false) }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Kollaboration & Haushalt", fontWeight = FontWeight.Bold)
+            
+            if (user == null) {
+                var isLoggingIn by remember { mutableStateOf(false) }
+                val context = LocalContext.current
+                
+                Text("Melde dich an, um Daten mit anderen zu teilen.")
+                
+                if (isLoggingIn) {
+                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                } else {
+                    Button(onClick = { 
+                        isLoggingIn = true
+                        com.google.firebase.auth.FirebaseAuth.getInstance().signInAnonymously()
+                            .addOnSuccessListener {
+                                isLoggingIn = false
+                                Toast.makeText(context, "Erfolgreich angemeldet!", Toast.LENGTH_SHORT).show()
+                            }
+                            .addOnFailureListener { e ->
+                                isLoggingIn = false
+                                val errorCode = (e as? FirebaseAuthException)?.errorCode ?: "Unbekannt"
+                                Log.e("FirebaseAuth", "Login Fehler: ${e.message}, Code: $errorCode", e)
+                                Toast.makeText(context, "Fehler ($errorCode): ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                            }
+                    }) {
+                        Text("Anonym anmelden (MVP)")
+                    }
+                }
+            } else {
+                Text("Haushalt: ${household?.name ?: "Keiner"}")
+                
+                if (household == null) {
+                    Text("Du gehörst aktuell zu keinem Haushalt.")
+                    OutlinedTextField(
+                        value = householdName,
+                        onValueChange = { householdName = it },
+                        label = { Text("Haushaltsname") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Button(onClick = {
+                        scope.launch {
+                            try {
+                                firebaseManager.createHousehold(householdName)
+                            } catch (e: Exception) {
+                                // Error handling
+                            }
+                        }
+                    }, enabled = householdName.isNotBlank()) {
+                        Text("Neuen Haushalt erstellen")
+                    }
+                    
+                    HorizontalDivider()
+                    
+                    Button(onClick = { showJoinDialog = true }) {
+                        Text("Einem Haushalt beitreten")
+                    }
+                } else {
+                    Text("Einladungscode: ${household?.inviteCode}", color = MaterialTheme.colorScheme.primary)
+                    Text("Mitglieder: ${household?.members?.size}")
+                    
+                    Button(onClick = { firebaseManager.signOut() }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+                        Text("Abmelden / Haushalt verlassen")
+                    }
+                }
+            }
+        }
+    }
+
+    if (showJoinDialog) {
+        AlertDialog(
+            onDismissRequest = { showJoinDialog = false },
+            title = { Text("Haushalt beitreten") },
+            text = {
+                OutlinedTextField(
+                    value = inviteCode,
+                    onValueChange = { inviteCode = it },
+                    label = { Text("Einladungscode") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    scope.launch {
+                        try {
+                            firebaseManager.joinHousehold(inviteCode)
+                            showJoinDialog = false
+                        } catch (e: Exception) {
+                            // Error handling
+                        }
+                    }
+                }) { Text("Beitreten") }
+            }
+        )
     }
 }
 
