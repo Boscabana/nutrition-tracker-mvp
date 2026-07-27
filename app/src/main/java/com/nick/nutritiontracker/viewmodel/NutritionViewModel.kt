@@ -56,6 +56,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     var foodSearchQuery by mutableStateOf("")
     var selectedFoodCategory by mutableStateOf<String?>(null)
     
+    var pendingRecipeImport by mutableStateOf<RecipeData?>(null)
+    
     val dailySteps = mutableStateMapOf<String, Int>()
 
     val todayEntries by derivedStateOf {
@@ -491,6 +493,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         saveFoods()
     }
 
+    fun promoteToGeneric(foodId: Long) {
+        val idx = foods.indexOfFirst { it.id == foodId }
+        if (idx != -1) {
+            foods[idx] = foods[idx].copy(isGeneric = true, parentId = null)
+            saveFoods()
+        }
+    }
+
     fun addCategory(name: String) {
         if (name.isNotBlank() && !categories.contains(name.trim())) {
             categories.add(name.trim())
@@ -540,7 +550,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val newMeal = MealEntity(
             id = nextMealId++,
             name = name,
-            ingredients = ingredients,
+            ingredients = ingredients.mapIndexed { idx, it -> it.copy(id = System.currentTimeMillis() + idx) },
             servings = servings
         )
         meals.add(newMeal)
@@ -607,7 +617,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             fatPer100g = 0.0,
             saturatedFatPer100g = 0.0,
             isMeal = true,
-            mealIngredients = meal.ingredients.map { it.copy(grams = it.grams * (servings / meal.servings), amount = it.amount * (servings / meal.servings)) }
+            mealIngredients = meal.ingredients.mapIndexed { idx, it -> 
+                it.copy(
+                    id = System.currentTimeMillis() + idx,
+                    grams = it.grams * (servings / meal.servings), 
+                    amount = it.amount * (servings / meal.servings)
+                ) 
+            }
         )
         allEntries.add(entry)
         saveEntries()
@@ -706,6 +722,24 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         return json.encodeToString(backup)
     }
 
+    fun getCatalogJson(): String {
+        val catalog = BackupData(
+            foods = foods.toList(),
+            meals = meals.toList(),
+            categories = categories.toList(),
+            entries = emptyList() // No diary entries
+        )
+        return json.encodeToString(catalog)
+    }
+
+    fun getRecipeJson(meal: MealEntity): String {
+        val relatedFoods = meal.ingredients.mapNotNull { ing -> 
+            foods.find { it.id == ing.foodItemId } 
+        }
+        val recipe = RecipeData(meal = meal, relatedFoods = relatedFoods)
+        return json.encodeToString(recipe)
+    }
+
     fun importBackup(jsonString: String): Boolean {
         return try {
             val backup = json.decodeFromString<BackupData>(jsonString)
@@ -756,6 +790,57 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         } catch (e: Exception) { e.printStackTrace(); false }
     }
 
+    fun startRecipeImport(jsonString: String): Boolean {
+        return try {
+            val recipe = json.decodeFromString<RecipeData>(jsonString)
+            pendingRecipeImport = recipe
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
+    fun resolveRecipeImport(supplement: Boolean) {
+        val recipe = pendingRecipeImport ?: return
+        var changed = false
+        
+        // 1. Resolve Foods
+        recipe.relatedFoods.forEach { importedFood ->
+            val existing = foods.find { it.name == importedFood.name && it.barcode == importedFood.barcode }
+            if (existing == null) {
+                foods.add(importedFood)
+                changed = true
+            } else if (supplement) {
+                // Supplement: update existing if it lacks data
+                if (existing.category == null && importedFood.category != null) {
+                    val idx = foods.indexOf(existing)
+                    foods[idx] = existing.copy(category = importedFood.category)
+                    changed = true
+                }
+            }
+        }
+
+        // 2. Resolve Meal
+        val existingMeal = meals.find { it.name == recipe.meal.name }
+        if (existingMeal == null) {
+            meals.add(recipe.meal)
+            changed = true
+        } else if (supplement) {
+            // Replace if supplement is true
+            val idx = meals.indexOf(existingMeal)
+            meals[idx] = recipe.meal
+            changed = true
+        }
+
+        if (changed) {
+            recalculateIds()
+            saveFoods()
+            saveMeals()
+        }
+        pendingRecipeImport = null
+    }
+
     fun loadEntries() {
         val data = prefs.getString("entries_json", null)
         if (data != null) {
@@ -790,6 +875,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         var fId = 1L
         var pId = 1L
         var pkgId = 1L
+        var ingId = 1L
         val oldToNewFoodIdMap = mutableMapOf<Long, Long>()
         val updatedFoods = foods.map { food ->
             val newId = fId++
@@ -805,14 +891,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             val updatedIngredients = meal.ingredients.filter { ing -> 
                 oldToNewFoodIdMap.containsKey(ing.foodItemId) 
             }.map { ing ->
-                ing.copy(foodItemId = oldToNewFoodIdMap[ing.foodItemId]!!)
+                ing.copy(id = ingId++, foodItemId = oldToNewFoodIdMap[ing.foodItemId]!!)
             }
             meal.copy(ingredients = updatedIngredients)
         }
         val updatedEntries = allEntries.map { entry ->
             val entryFoodId = if (entry.foodItemId != -1L) oldToNewFoodIdMap[entry.foodItemId] ?: entry.foodItemId else -1L
             val updatedMealIngredients = entry.mealIngredients?.map { ing ->
-                ing.copy(foodItemId = oldToNewFoodIdMap[ing.foodItemId] ?: ing.foodItemId)
+                ing.copy(id = ingId++, foodItemId = oldToNewFoodIdMap[ing.foodItemId] ?: ing.foodItemId)
             }
             entry.copy(foodItemId = entryFoodId, mealIngredients = updatedMealIngredients)
         }

@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class MealIngredientEntity(
+    val id: Long = 0,
     val foodItemId: Long = 0,
     val name: String = "",
     val amount: Double = 0.0,
@@ -55,6 +56,9 @@ data class MealEntity(
     val totalCarbs: Double get() = ingredients.sumOf { it.carbs }
     @get:Exclude
     val totalFat: Double get() = ingredients.sumOf { it.fat }
+
+    @get:Exclude
+    val totalWeight: Double get() = ingredients.sumOf { it.grams }
 
     @get:Exclude
     val kcalPerServing: Double get() = if (servings > 0) totalKcal / servings else totalKcal

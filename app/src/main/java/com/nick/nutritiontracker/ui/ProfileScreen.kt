@@ -14,6 +14,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileUpload
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -233,12 +234,52 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
         Spacer(Modifier.height(8.dp))
         Text("Daten-Sicherung", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        try {
+                            val json = nutritionViewModel.getBackupJson()
+                            val file = File(context.cacheDir, "nutrition_backup_full.json")
+                            file.writeText(json)
+                            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                            
+                            val intent = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/json"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            context.startActivity(Intent.createChooser(intent, "Komplett-Backup exportieren"))
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Export fehlgeschlagen: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                ) {
+                    Icon(Icons.Default.FileUpload, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Komplett-Backup")
+                }
+                
+                Button(
+                    onClick = {
+                        importLauncher.launch("*/*")
+                    },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                ) {
+                    Icon(Icons.Default.FileDownload, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Importieren")
+                }
+            }
+
             Button(
                 onClick = {
                     try {
-                        val json = nutritionViewModel.getBackupJson()
-                        val file = File(context.cacheDir, "nutrition_backup.json")
+                        val json = nutritionViewModel.getCatalogJson()
+                        val file = File(context.cacheDir, "nutrition_catalog.json")
                         file.writeText(json)
                         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
                         
@@ -247,29 +288,17 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
                             putExtra(Intent.EXTRA_STREAM, uri)
                             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                         }
-                        context.startActivity(Intent.createChooser(intent, "Backup exportieren"))
+                        context.startActivity(Intent.createChooser(intent, "Katalog exportieren"))
                     } catch (e: Exception) {
                         Toast.makeText(context, "Export fehlgeschlagen: ${e.message}", Toast.LENGTH_SHORT).show()
                     }
                 },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer)
             ) {
-                Icon(Icons.Default.FileUpload, null)
+                Icon(Icons.Default.Restaurant, null)
                 Spacer(Modifier.width(8.dp))
-                Text("Exportieren")
-            }
-            
-            Button(
-                onClick = {
-                    importLauncher.launch("*/*") // Best practice to use */* or application/json, but some pickers are picky
-                },
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
-            ) {
-                Icon(Icons.Default.FileDownload, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Importieren")
+                Text("Katalog exportieren (Artikel & Rezepte)")
             }
         }
         

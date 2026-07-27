@@ -28,6 +28,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -35,6 +36,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -98,7 +100,22 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
     }
 
     val selectedEntryIds = remember { mutableStateOf(setOf<Long>()) }
-    val isSelectionMode by remember { derivedStateOf { selectedEntryIds.value.isNotEmpty() } }
+    val selectedFoodIds = remember { mutableStateOf(setOf<Long>()) }
+    val selectedMealIds = remember { mutableStateOf(setOf<Long>()) }
+
+    val isDiarySelection = selectedEntryIds.value.isNotEmpty()
+    val isFoodSelection = selectedFoodIds.value.isNotEmpty()
+    val isMealSelection = selectedMealIds.value.isNotEmpty()
+    
+    val isSelectionMode = isDiarySelection || isFoodSelection || isMealSelection
+
+    if (isSelectionMode) {
+        BackHandler { 
+            selectedEntryIds.value = emptySet() 
+            selectedFoodIds.value = emptySet()
+            selectedMealIds.value = emptySet()
+        }
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         PermissionController.createRequestPermissionResultContract()
@@ -109,8 +126,22 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
         }
     }
 
-    if (isSelectionMode) {
-        BackHandler { selectedEntryIds.value = emptySet() }
+    if (vm.pendingRecipeImport != null) {
+        val recipe = vm.pendingRecipeImport!!
+        AlertDialog(
+            onDismissRequest = { vm.pendingRecipeImport = null },
+            title = { Text("Rezept importieren") },
+            text = { Text("Möchtest du '${recipe.meal.name}' zu deinen Mahlzeiten hinzufügen? Falls Artikel oder Mahlzeit bereits existieren, wie soll verfahren werden?") },
+            confirmButton = {
+                Row {
+                    TextButton(onClick = { vm.resolveRecipeImport(supplement = true) }) { Text("Ergänzen/Ersetzen") }
+                    TextButton(onClick = { vm.resolveRecipeImport(supplement = false) }) { Text("Nur Fehlendes") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { vm.pendingRecipeImport = null }) { Text("Abbrechen") }
+            }
+        )
     }
 
     MaterialTheme {
@@ -118,65 +149,27 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 if (isSelectionMode) {
+                    val selectionSize = selectedEntryIds.value.size + selectedFoodIds.value.size + selectedMealIds.value.size
                     TopAppBar(
-                        title = { Text("${selectedEntryIds.value.size} ausgewählt") },
+                        title = { Text("$selectionSize ausgewählt") },
                         navigationIcon = {
-                            IconButton(onClick = { selectedEntryIds.value = emptySet() }) {
+                            IconButton(onClick = { 
+                                selectedEntryIds.value = emptySet() 
+                                selectedFoodIds.value = emptySet()
+                                selectedMealIds.value = emptySet()
+                            }) {
                                 Icon(Icons.Default.Close, "Abbrechen")
                             }
                         },
                         actions = {
-                            var showDateDialog by remember { mutableStateOf(false) }
-                            var operationType by remember { mutableStateOf("copy") }
-
-                            if (showDateDialog) {
-                                val datePickerState = rememberDatePickerState(
-                                    initialSelectedDateMillis = vm.selectedDate.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
-                                )
-                                DatePickerDialog(
-                                    onDismissRequest = { showDateDialog = false },
-                                    confirmButton = {
-                                        TextButton(onClick = {
-                                            datePickerState.selectedDateMillis?.let { millis ->
-                                                val date = Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
-                                                if (operationType == "copy") {
-                                                    vm.copyEntriesToDate(selectedEntryIds.value, date)
-                                                    scope.launch { snackbarHostState.showSnackbar("Kopiert nach ${date.format(dateFormatter)}") }
-                                                } else {
-                                                    vm.moveEntriesToDate(selectedEntryIds.value, date)
-                                                    scope.launch { snackbarHostState.showSnackbar("Verschoben nach ${date.format(dateFormatter)}") }
-                                                }
-                                            }
-                                            selectedEntryIds.value = emptySet()
-                                            showDateDialog = false
-                                        }) { Text("Auswählen") }
-                                    },
-                                    dismissButton = {
-                                        TextButton(onClick = { showDateDialog = false }) { Text("Abbrechen") }
-                                    }
-                                ) {
-                                    DatePicker(state = datePickerState)
-                                }
+                            if (isDiarySelection) {
+                                DiarySelectionActions(vm, selectedEntryIds, scope, snackbarHostState, dateFormatter)
                             }
-
-                            IconButton(onClick = { 
-                                operationType = "copy"
-                                showDateDialog = true 
-                            }) {
-                                Icon(Icons.Default.ContentCopy, "Kopieren")
+                            if (isFoodSelection) {
+                                FoodSelectionActions(vm, selectedFoodIds, scope, snackbarHostState)
                             }
-                            IconButton(onClick = { 
-                                operationType = "move"
-                                showDateDialog = true 
-                            }) {
-                                Icon(Icons.AutoMirrored.Filled.DriveFileMove, "Verschieben")
-                            }
-                            IconButton(onClick = {
-                                selectedEntryIds.value.forEach { vm.deleteEntry(it) }
-                                selectedEntryIds.value = emptySet()
-                                scope.launch { snackbarHostState.showSnackbar("Einträge gelöscht") }
-                            }) {
-                                Icon(Icons.Default.Delete, "Löschen")
+                            if (isMealSelection) {
+                                MealSelectionActions(vm, selectedMealIds, scope, snackbarHostState)
                             }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(
@@ -283,9 +276,9 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
                 when (tab) {
-                    0 -> TodayScreen(userProfile, foods, entries, vm, snackbarHostState, selectedEntryIds)
-                    1 -> FoodsScreen(vm, snackbarHostState)
-                    2 -> MealsScreen(vm, snackbarHostState)
+                    0 -> TodayScreen(userProfile, foods, entries, vm, snackbarHostState, selectedEntryIds, selectedFoodIds, selectedMealIds)
+                    1 -> FoodsScreen(vm, snackbarHostState, selectedFoodIds)
+                    2 -> MealsScreen(vm, snackbarHostState, selectedMealIds)
                     3 -> ProfileScreen(profileVm, vm)
                     4 -> PlannerScreen(vm)
                     5 -> ShoppingListScreen(vm)
@@ -391,7 +384,9 @@ private fun TodayScreen(
     entries: List<FoodEntryEntity>,
     vm: NutritionViewModel,
     snackbarHostState: SnackbarHostState,
-    selectedEntryIds: MutableState<Set<Long>>
+    selectedEntryIds: MutableState<Set<Long>>,
+    selectedFoodIds: MutableState<Set<Long>>,
+    selectedMealIds: MutableState<Set<Long>>
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -591,11 +586,6 @@ private fun TodayScreen(
                     vm.addEntry(finalFood, amount, portion, mealSlot)
                 },
                 onAddMeal = { meal, mealSlot, servings ->
-                    // For consumption, we usually add 1 portion or whatever was selected
-                    // The original addMealEntry needs to be updated or we just call it multiple times?
-                    // Let's assume addMealEntry adds 1 serving. We could update it to take servings.
-                    // For now, let's just repeat if needed or update VM.
-                    // I'll update the VM method addMealEntry to take servings too.
                     vm.addMealEntry(meal, mealSlot, servings)
                 },
                 onScanRequest = {
@@ -853,6 +843,7 @@ fun AddEntryCard(
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Any>>(emptyList()) }
     var isSearching by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(false) }
     
     var selectedFood by remember { mutableStateOf<FoodItemEntity?>(null) }
     var selectedMeal by remember { mutableStateOf<MealEntity?>(null) }
@@ -875,6 +866,9 @@ fun AddEntryCard(
     if (showMealSlotDialog && selectedMeal != null) {
         var slot by remember { mutableStateOf("Snack") }
         var servings by remember { mutableStateOf("1") }
+        var weightByPortion by remember { mutableStateOf(selectedMeal!!.totalWeight / selectedMeal!!.servings) }
+        var entryMode by remember { mutableIntStateOf(0) } // 0: Portions, 1: Grams
+        var weightInput by remember { mutableStateOf(weightByPortion.round0()) }
         
         AlertDialog(
             onDismissRequest = { showMealSlotDialog = false },
@@ -883,13 +877,34 @@ fun AddEntryCard(
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Details für '${selectedMeal!!.name}' festlegen:")
                     
-                    AutoSelectTextField(
-                        value = servings,
-                        onValueChange = { servings = it },
-                        label = { Text("Anzahl Portionen") },
-                        modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done)
-                    )
+                    TabRow(selectedTabIndex = entryMode) {
+                        Tab(selected = entryMode == 0, onClick = { entryMode = 0 }) { Text("Portionen") }
+                        Tab(selected = entryMode == 1, onClick = { entryMode = 1 }) { Text("Gramm (g)") }
+                    }
+
+                    if (entryMode == 0) {
+                        AutoSelectTextField(
+                            value = servings,
+                            onValueChange = { 
+                                servings = it 
+                                weightInput = (it.num() * weightByPortion).round0()
+                            },
+                            label = { Text("Anzahl Portionen") },
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
+                        )
+                    } else {
+                        AutoSelectTextField(
+                            value = weightInput,
+                            onValueChange = { 
+                                weightInput = it
+                                servings = (it.num() / weightByPortion).roundString()
+                            },
+                            label = { Text("Gesamtgewicht (g)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
+                        )
+                    }
 
                     Text("Mahlzeit-Slot", style = MaterialTheme.typography.labelMedium)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -921,6 +936,7 @@ fun AddEntryCard(
     LaunchedEffect(query) {
         if (query.length < 2) {
             results = emptyList()
+            expanded = false
             return@LaunchedEffect
         }
         
@@ -935,6 +951,7 @@ fun AddEntryCard(
         val localMeals = meals.filter { it.name.contains(query, ignoreCase = true) }.take(5)
         
         results = localFoods + localMeals
+        expanded = results.isNotEmpty()
         
         // Remote search
         delay(500) // Debounce
@@ -944,6 +961,7 @@ fun AddEntryCard(
         results = (localFoods + localMeals + filteredRemote).distinctBy { 
             if (it is FoodItemEntity) it.barcode ?: it.name else (it as MealEntity).name 
         }
+        expanded = results.isNotEmpty()
         isSearching = false
     }
 
@@ -953,94 +971,83 @@ fun AddEntryCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    placeholder = { Text("Suchen oder Barcode...") },
-                    modifier = Modifier.weight(1f),
-                    leadingIcon = { Icon(Icons.Default.Search, null) },
-                    trailingIcon = {
-                        if (query.isNotEmpty()) {
-                            IconButton(onClick = { query = "" }) { Icon(Icons.Default.Clear, null) }
-                        }
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    singleLine = true
-                )
-                
-                FilledIconButton(
-                    onClick = onScanRequest,
-                    shape = RoundedCornerShape(12.dp)
+            Box(Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        placeholder = { Text("Suchen oder Barcode...") },
+                        modifier = Modifier.weight(1f),
+                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                        trailingIcon = {
+                            if (query.isNotEmpty()) {
+                                IconButton(onClick = { 
+                                    query = ""
+                                    expanded = false
+                                }) { Icon(Icons.Default.Clear, null) }
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true
+                    )
+                    
+                    FilledIconButton(
+                        onClick = onScanRequest,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.QrCodeScanner, "Barcode scannen")
+                    }
+                }
+
+                DropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false },
+                    properties = PopupProperties(focusable = false),
+                    offset = DpOffset(0.dp, (-340).dp), // Force upward
+                    modifier = Modifier.fillMaxWidth(0.85f).heightIn(max = 300.dp)
                 ) {
-                    Icon(Icons.Default.QrCodeScanner, "Barcode scannen")
+                    results.forEach { item ->
+                        DropdownMenuItem(
+                            text = { 
+                                val (data, color) = when (item) {
+                                    is FoodItemEntity -> {
+                                        if (item.isGeneric) {
+                                            Triple(Icons.Default.Inventory2, item.name, "Basis-Zutat") to MaterialTheme.colorScheme.primary
+                                        } else {
+                                            Triple(Icons.Default.Restaurant, item.name, item.brand ?: "Markenprodukt") to MaterialTheme.colorScheme.secondary
+                                        }
+                                    }
+                                    is MealEntity -> Triple(Icons.Default.SoupKitchen, item.name, "Mahlzeit") to MaterialTheme.colorScheme.tertiary
+                                    else -> Triple(Icons.AutoMirrored.Filled.Help, "Unbekannt", "") to Color.Gray
+                                }
+                                val (icon, title, subtitle) = data
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
+                                    Column {
+                                        Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                        if (subtitle.isNotEmpty()) {
+                                            Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                        }
+                                    }
+                                }
+                            },
+                            onClick = {
+                                if (item is FoodItemEntity) {
+                                    selectedFood = item
+                                } else if (item is MealEntity) {
+                                    selectedMeal = item
+                                    showMealSlotDialog = true
+                                }
+                                expanded = false
+                            }
+                        )
+                    }
                 }
             }
 
             if (isSearching) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(2.dp))
             }
-
-            if (results.isNotEmpty()) {
-                results.forEach { item ->
-                    SearchResultRow(
-                        item = item,
-                        onClick = {
-                            if (item is FoodItemEntity) {
-                                selectedFood = item
-                            } else if (item is MealEntity) {
-                                selectedMeal = item
-                                showMealSlotDialog = true
-                            }
-                        }
-                    )
-                }
-            } else if (query.length >= 2 && !isSearching) {
-                Text(
-                    "Nichts gefunden. Tipp: Klicke auf 'Artikel' um ein neues Lebensmittel anzulegen.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.padding(horizontal = 4.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun SearchResultRow(item: Any, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        color = Color.Transparent
-    ) {
-        Row(
-            Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            val (data, color) = when (item) {
-                is FoodItemEntity -> {
-                    if (item.isGeneric) {
-                        Triple(Icons.Default.Inventory2, item.name, "Basis-Zutat") to MaterialTheme.colorScheme.primary
-                    } else {
-                        Triple(Icons.Default.Restaurant, item.name, item.brand ?: "Markenprodukt") to MaterialTheme.colorScheme.secondary
-                    }
-                }
-                is MealEntity -> Triple(Icons.Default.SoupKitchen, item.name, "Mahlzeit") to MaterialTheme.colorScheme.tertiary
-                else -> Triple(Icons.AutoMirrored.Filled.Help, "Unbekannt", "") to Color.Gray
-            }
-            
-            val (icon, title, subtitle) = data
-            
-            Icon(icon, null, tint = color, modifier = Modifier.size(20.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                if (subtitle.isNotEmpty()) {
-                    Text(subtitle, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                }
-            }
-            Icon(Icons.Default.Add, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
         }
     }
 }
@@ -1077,19 +1084,7 @@ private fun EditEntryDialog(
                     onValueChange = { amount = it },
                     label = { Text("Menge") },
                     modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = {
-                        val numAmount = amount.num()
-                        val grams = if (selectedPortion != null) numAmount * selectedPortion!!.grams else numAmount
-                        onSave(
-                            entry.copy(
-                                amount = numAmount,
-                                unitLabel = selectedPortion?.name ?: food.baseUnit,
-                                grams = grams,
-                                mealSlot = mealSlot
-                            )
-                        )
-                    })
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done)
                 )
                 Text("Einheit", style = MaterialTheme.typography.labelMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1148,7 +1143,7 @@ private fun EditEntryDialog(
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun EditMealEntryDialog(
+fun EditMealEntryDialog(
     entry: FoodEntryEntity,
     foods: List<FoodItemEntity>,
     onDismiss: () -> Unit,
@@ -1161,6 +1156,16 @@ private fun EditMealEntryDialog(
         } 
     }
     
+    // servings calculation based on weight
+    val totalWeight = ingredients.sumOf { it.grams }
+    // We need to know the original meal template to know the weight per portion
+    // but entry already has amount (servings).
+    // Let's assume entry.amount is the number of servings.
+    var entryMode by remember { mutableIntStateOf(0) }
+    var servings by remember(entry.id) { mutableStateOf(entry.amount.roundString()) }
+    var weightInput by remember(entry.id) { mutableStateOf(totalWeight.round0()) }
+    val weightPerPortion = if (entry.amount > 0) totalWeight / entry.amount else totalWeight
+
     var searchQuery by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
 
@@ -1179,7 +1184,38 @@ private fun EditMealEntryDialog(
                 Text(entry.name, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
                 
-                Text("Mahlzeit", style = MaterialTheme.typography.labelMedium)
+                TabRow(selectedTabIndex = entryMode) {
+                    Tab(selected = entryMode == 0, onClick = { entryMode = 0 }) { Text("Portionen") }
+                    Tab(selected = entryMode == 1, onClick = { entryMode = 1 }) { Text("Gramm (g)") }
+                }
+
+                if (entryMode == 0) {
+                    AutoSelectTextField(
+                        value = servings,
+                        onValueChange = { 
+                            servings = it 
+                            weightInput = (it.num() * weightPerPortion).round0()
+                        },
+                        label = { Text("Anzahl Portionen") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
+                    )
+                } else {
+                    AutoSelectTextField(
+                        value = weightInput,
+                        onValueChange = { 
+                            weightInput = it
+                            servings = (it.num() / weightPerPortion).roundString()
+                        },
+                        label = { Text("Gesamtgewicht (g)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
+                    )
+                }
+
+                Spacer(Modifier.height(8.dp))
+                
+                Text("Mahlzeit-Slot", style = MaterialTheme.typography.labelMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("Frühstück", "Mittag", "Abend", "Snack").forEach { slot ->
                         FilterChip(
@@ -1209,7 +1245,8 @@ private fun EditMealEntryDialog(
                     DropdownMenu(
                         expanded = expanded && filteredFoods.isNotEmpty(),
                         onDismissRequest = { expanded = false },
-                        properties = PopupProperties(focusable = false)
+                        properties = PopupProperties(focusable = false),
+                        offset = DpOffset(0.dp, (-300).dp) // Force upward
                     ) {
                         filteredFoods.forEach { food ->
                             DropdownMenuItem(
@@ -1218,6 +1255,7 @@ private fun EditMealEntryDialog(
                                     val firstPortion = food.portions.firstOrNull()
                                     ingredients.add(
                                         MealIngredientEntity(
+                                            id = System.currentTimeMillis() + ingredients.size,
                                             foodItemId = food.id,
                                             name = food.name,
                                             amount = if (firstPortion != null) 1.0 else 100.0,
@@ -1244,15 +1282,15 @@ private fun EditMealEntryDialog(
                 }
 
                 LazyColumn(Modifier.weight(1f).padding(top = 8.dp)) {
-                    items(ingredients) { ingredient ->
+                    items(ingredients, key = { it.id }) { ingredient ->
                         IngredientAdjustRow(
                             ingredient = ingredient,
                             foods = foods,
                             onUpdate = { updated ->
-                                val idx = ingredients.indexOf(ingredient)
+                                val idx = ingredients.indexOfFirst { it.id == ingredient.id }
                                 if (idx != -1) ingredients[idx] = updated
                             },
-                            onRemove = { ingredients.remove(ingredient) }
+                            onRemove = { ingredients.removeAll { it.id == ingredient.id } }
                         )
                     }
                 }
@@ -1260,7 +1298,14 @@ private fun EditMealEntryDialog(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("Abbrechen") }
                     Button(onClick = {
-                        onSave(entry.copy(mealSlot = mealSlot, mealIngredients = ingredients.toList()))
+                        val finalServings = servings.num()
+                        val scale = if (entry.amount > 0) finalServings / entry.amount else 1.0
+                        onSave(entry.copy(
+                            amount = finalServings, 
+                            unitLabel = if (finalServings == 1.0) "Portion" else "Portionen",
+                            mealSlot = mealSlot, 
+                            mealIngredients = ingredients.map { it.copy(grams = it.grams * scale, amount = it.amount * scale) }
+                        ))
                     }) { Text("Speichern") }
                 }
             }
@@ -1270,7 +1315,7 @@ private fun EditMealEntryDialog(
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun IngredientAdjustRow(
+fun IngredientAdjustRow(
     ingredient: MealIngredientEntity,
     foods: List<FoodItemEntity>,
     onUpdate: (MealIngredientEntity) -> Unit,
@@ -1494,7 +1539,11 @@ private fun CompactEntryRow(
                             }
                         }
                     }
-                    Text(entry.displayAmount(), style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    Text(
+                        text = if (entry.isMeal) "${entry.amount.roundString()} ${entry.unitLabel} (${entry.grams.round0()}g)" else entry.displayAmount(),
+                        style = MaterialTheme.typography.labelSmall, 
+                        maxLines = 1
+                    )
                 }
                 Text(entry.kcal.round0(), modifier = Modifier.width(36.dp), fontWeight = FontWeight.Bold)
                 MacroNumber(entry.protein, ProteinGreen)
@@ -1556,9 +1605,10 @@ private fun Separator() {
 }
 
 @Composable
-private fun FoodsScreen(
+fun FoodsScreen(
     vm: NutritionViewModel,
-    snackbarHostState: SnackbarHostState
+    snackbarHostState: SnackbarHostState,
+    selectedFoodIds: MutableState<Set<Long>>
 ) {
     val foods = vm.foods
     val scope = rememberCoroutineScope()
@@ -1584,23 +1634,7 @@ private fun FoodsScreen(
     }
 
     val expandedStates = remember { mutableStateMapOf<Long, Boolean>() }
-    var isManageMode by remember { mutableStateOf(false) }
-    val selectedFoodIds = remember { mutableStateOf(setOf<Long>()) }
-    var showMergeDialog by remember { mutableStateOf(false) }
-
-    if (showMergeDialog) {
-        MergeFoodsDialog(
-            selectedIds = selectedFoodIds.value,
-            foods = foods,
-            onDismiss = { showMergeDialog = false },
-            onMerge = { targetParentId ->
-                vm.mergeFoods(targetParentId, selectedFoodIds.value.toList())
-                selectedFoodIds.value = emptySet()
-                isManageMode = false
-                showMergeDialog = false
-            }
-        )
-    }
+    val isSelectionMode = selectedFoodIds.value.isNotEmpty()
 
     if (foodToDelete != null) {
         val affectedMeals = vm.meals.filter { it.ingredients.any { ing -> ing.foodItemId == foodToDelete } }
@@ -1704,28 +1738,6 @@ private fun FoodsScreen(
                     Spacer(Modifier.width(8.dp))
                     Text("Marke")
                 }
-                
-                Button(
-                    onClick = {
-                        if (isManageMode) {
-                            if (selectedFoodIds.value.isNotEmpty()) showMergeDialog = true
-                        } else {
-                            isManageMode = true
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                    colors = if (isManageMode) ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary) else ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant, contentColor = MaterialTheme.colorScheme.onSurfaceVariant)
-                ) {
-                    Icon(if (isManageMode) Icons.Default.Merge else Icons.Default.Settings, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (isManageMode) "Zusammenführen" else "Verwalten")
-                }
-
-                if (isManageMode) {
-                    IconButton(onClick = { isManageMode = false; selectedFoodIds.value = emptySet() }) {
-                        Icon(Icons.Default.Close, null)
-                    }
-                }
             }
 
             OutlinedTextField(
@@ -1768,9 +1780,10 @@ private fun FoodsScreen(
                 item(key = "gen_${genericFood.id}") {
                     FoodItemRow(
                         food = genericFood,
+                        vm = vm,
                         isExpanded = expandedStates[genericFood.id] ?: false,
                         onExpandToggle = { 
-                            if (isManageMode) {
+                            if (isSelectionMode) {
                                 val current = selectedFoodIds.value
                                 selectedFoodIds.value = if (current.contains(genericFood.id)) current - genericFood.id else current + genericFood.id
                             } else {
@@ -1779,37 +1792,25 @@ private fun FoodsScreen(
                         },
                         onDelete = { foodToDelete = genericFood.id },
                         onEdit = { foodToEdit = genericFood; showAddDialog = true },
-                        onAddVariant = {
-                            foodToEdit = FoodItemEntity(
-                                name = genericFood.name,
-                                kcalPer100g = genericFood.kcalPer100g,
-                                proteinPer100g = genericFood.proteinPer100g,
-                                carbsPer100g = genericFood.carbsPer100g,
-                                sugarPer100g = genericFood.sugarPer100g,
-                                fatPer100g = genericFood.fatPer100g,
-                                saturatedFatPer100g = genericFood.saturatedFatPer100g,
-                                alcoholPercent = genericFood.alcoholPercent,
-                                baseUnit = genericFood.baseUnit,
-                                category = genericFood.category,
-                                parentId = genericFood.id,
-                                isGeneric = false
-                            )
-                            showAddDialog = true
+                        onToggleSelection = {
+                            val current = selectedFoodIds.value
+                            selectedFoodIds.value = if (current.contains(genericFood.id)) current - genericFood.id else current + genericFood.id
                         },
                         isSelected = selectedFoodIds.value.contains(genericFood.id),
-                        isManageMode = isManageMode
+                        isSelectionMode = isSelectionMode
                     )
                 }
                 
                 val children = specificItemsWithParent.filter { it.parentId == genericFood.id }
                 if (expandedStates[genericFood.id] == true || searchQuery.isNotBlank()) {
                     items(children, key = { "child_${it.id}" }) { child ->
-                        Box(Modifier.padding(start = if (isManageMode) 0.dp else 24.dp)) {
+                        Box(Modifier.padding(start = if (isSelectionMode) 0.dp else 24.dp)) {
                             FoodItemRow(
                                 food = child,
+                                vm = vm,
                                 isExpanded = expandedStates[child.id] ?: false,
                                 onExpandToggle = { 
-                                    if (isManageMode) {
+                                    if (isSelectionMode) {
                                         val current = selectedFoodIds.value
                                         selectedFoodIds.value = if (current.contains(child.id)) current - child.id else current + child.id
                                     } else {
@@ -1819,8 +1820,12 @@ private fun FoodsScreen(
                                 onDelete = { foodToDelete = child.id },
                                 onEdit = { foodToEdit = child; showAddDialog = true },
                                 isChild = true,
+                                onToggleSelection = {
+                                    val current = selectedFoodIds.value
+                                    selectedFoodIds.value = if (current.contains(child.id)) current - child.id else current + child.id
+                                },
                                 isSelected = selectedFoodIds.value.contains(child.id),
-                                isManageMode = isManageMode
+                                isSelectionMode = isSelectionMode
                             )
                         }
                     }
@@ -1835,9 +1840,10 @@ private fun FoodsScreen(
                 items(specificItemsNoParent, key = { it.id }) { food ->
                     FoodItemRow(
                         food = food,
+                        vm = vm,
                         isExpanded = expandedStates[food.id] ?: false,
                         onExpandToggle = { 
-                            if (isManageMode) {
+                            if (isSelectionMode) {
                                 val current = selectedFoodIds.value
                                 selectedFoodIds.value = if (current.contains(food.id)) current - food.id else current + food.id
                             } else {
@@ -1846,8 +1852,12 @@ private fun FoodsScreen(
                         },
                         onDelete = { foodToDelete = food.id },
                         onEdit = { foodToEdit = food; showAddDialog = true },
+                        onToggleSelection = {
+                            val current = selectedFoodIds.value
+                            selectedFoodIds.value = if (current.contains(food.id)) current - food.id else current + food.id
+                        },
                         isSelected = selectedFoodIds.value.contains(food.id),
-                        isManageMode = isManageMode
+                        isSelectionMode = isSelectionMode
                     )
                 }
             }
@@ -1855,25 +1865,32 @@ private fun FoodsScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun FoodItemRow(
+fun FoodItemRow(
     food: FoodItemEntity,
+    vm: NutritionViewModel,
     isExpanded: Boolean,
     onExpandToggle: () -> Unit,
     onDelete: () -> Unit,
     onEdit: () -> Unit,
-    onAddVariant: (() -> Unit)? = null,
+    onToggleSelection: () -> Unit,
     isChild: Boolean = false,
     isSelected: Boolean = false,
-    isManageMode: Boolean = false
+    isSelectionMode: Boolean = false
 ) {
     SwipeActionContainer(
         onDeleteRequest = onDelete,
         onEditRequest = onEdit,
-        enabled = !isManageMode
+        enabled = !isSelectionMode
     ) {
         Card(
-            modifier = Modifier.fillMaxWidth().clickable { onExpandToggle() },
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = onExpandToggle,
+                    onLongClick = onToggleSelection
+                ),
             colors = if (isSelected) {
                 CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
             } else if (food.isGeneric) {
@@ -1886,8 +1903,8 @@ private fun FoodItemRow(
         ) {
             Column(Modifier.padding(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (isManageMode) {
-                        Checkbox(checked = isSelected, onCheckedChange = { onExpandToggle() })
+                    if (isSelectionMode) {
+                        Checkbox(checked = isSelected, onCheckedChange = { onToggleSelection() })
                         Spacer(Modifier.width(8.dp))
                     }
 
@@ -1949,20 +1966,6 @@ private fun FoodItemRow(
                         if (!food.barcode.isNullOrBlank()) {
                             Text("EAN: ${food.barcode}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                         }
-
-                        if (food.isGeneric && onAddVariant != null) {
-                            Spacer(Modifier.height(8.dp))
-                            Button(
-                                onClick = onAddVariant,
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)),
-                                contentPadding = PaddingValues(vertical = 4.dp)
-                            ) {
-                                Icon(Icons.Default.Add, null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(8.dp))
-                                Text("Spezifische Marke hinzufügen", style = MaterialTheme.typography.labelMedium)
-                            }
-                        }
                     }
                 }
             }
@@ -1972,7 +1975,7 @@ private fun FoodItemRow(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FoodEditDialog(
+fun FoodEditDialog(
     food: FoodItemEntity?,
     vm: NutritionViewModel,
     onDismiss: () -> Unit,
@@ -2318,6 +2321,164 @@ fun MergeFoodsDialog(
             TextButton(onClick = { onDismiss() }) { Text("Abbrechen") }
         }
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DiarySelectionActions(
+    vm: NutritionViewModel,
+    selectedEntryIds: MutableState<Set<Long>>,
+    scope: kotlinx.coroutines.CoroutineScope,
+    snackbarHostState: SnackbarHostState,
+    dateFormatter: java.time.format.DateTimeFormatter
+) {
+    var showDateDialog by remember { mutableStateOf(false) }
+    var operationType by remember { mutableStateOf("copy") }
+
+    if (showDateDialog) {
+        val datePickerState = rememberDatePickerState(
+            initialSelectedDateMillis = vm.selectedDate.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
+        )
+        DatePickerDialog(
+            onDismissRequest = { showDateDialog = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    datePickerState.selectedDateMillis?.let { millis ->
+                        val date = java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneOffset.UTC).toLocalDate()
+                        if (operationType == "copy") {
+                            vm.copyEntriesToDate(selectedEntryIds.value, date)
+                            scope.launch { snackbarHostState.showSnackbar("Kopiert nach ${date.format(dateFormatter)}") }
+                        } else {
+                            vm.moveEntriesToDate(selectedEntryIds.value, date)
+                            scope.launch { snackbarHostState.showSnackbar("Verschoben nach ${date.format(dateFormatter)}") }
+                        }
+                    }
+                    selectedEntryIds.value = emptySet()
+                    showDateDialog = false
+                }) { Text("Auswählen") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDateDialog = false }) { Text("Abbrechen") }
+            }
+        ) {
+            DatePicker(state = datePickerState)
+        }
+    }
+
+    IconButton(onClick = { 
+        operationType = "copy"
+        showDateDialog = true 
+    }) {
+        Icon(Icons.Default.ContentCopy, "Kopieren")
+    }
+    IconButton(onClick = { 
+        operationType = "move"
+        showDateDialog = true 
+    }) {
+        Icon(Icons.AutoMirrored.Filled.DriveFileMove, "Verschieben")
+    }
+    IconButton(onClick = {
+        selectedEntryIds.value.forEach { vm.deleteEntry(it) }
+        selectedEntryIds.value = emptySet()
+        scope.launch { snackbarHostState.showSnackbar("Einträge gelöscht") }
+    }) {
+        Icon(Icons.Default.Delete, "Löschen")
+    }
+}
+
+@Composable
+private fun FoodSelectionActions(
+    vm: NutritionViewModel,
+    selectedFoodIds: MutableState<Set<Long>>,
+    scope: kotlinx.coroutines.CoroutineScope,
+    snackbarHostState: SnackbarHostState
+) {
+    var showMergeDialog by remember { mutableStateOf(false) }
+
+    if (showMergeDialog) {
+        MergeFoodsDialog(
+            selectedIds = selectedFoodIds.value,
+            foods = vm.foods,
+            onDismiss = { showMergeDialog = false },
+            onMerge = { targetParentId ->
+                vm.mergeFoods(targetParentId, selectedFoodIds.value.toList())
+                selectedFoodIds.value = emptySet()
+                showMergeDialog = false
+            }
+        )
+    }
+
+    if (selectedFoodIds.value.size == 1) {
+        val foodId = selectedFoodIds.value.first()
+        val food = vm.foods.find { it.id == foodId }
+        if (food != null && !food.isGeneric) {
+            IconButton(onClick = {
+                vm.promoteToGeneric(foodId)
+                selectedFoodIds.value = emptySet()
+                scope.launch { snackbarHostState.showSnackbar("${food.name} hochgestuft") }
+            }) {
+                Icon(Icons.Default.Upgrade, "Hochstufen")
+            }
+        }
+    }
+
+    IconButton(onClick = { showMergeDialog = true }) {
+        Icon(Icons.Default.Merge, "Zusammenführen")
+    }
+
+    IconButton(onClick = {
+        selectedFoodIds.value.forEach { vm.deleteFood(it) }
+        selectedFoodIds.value = emptySet()
+        scope.launch { snackbarHostState.showSnackbar("Artikel gelöscht") }
+    }) {
+        Icon(Icons.Default.Delete, "Löschen")
+    }
+}
+
+@Composable
+private fun MealSelectionActions(
+    vm: NutritionViewModel,
+    selectedMealIds: MutableState<Set<Long>>,
+    scope: kotlinx.coroutines.CoroutineScope,
+    snackbarHostState: SnackbarHostState
+) {
+    val context = LocalContext.current
+
+    if (selectedMealIds.value.size == 1) {
+        val mealId = selectedMealIds.value.first()
+        val meal = vm.meals.find { it.id == mealId }
+        if (meal != null) {
+            IconButton(onClick = {
+                try {
+                    val json = vm.getRecipeJson(meal)
+                    val file = java.io.File(context.cacheDir, "recipe_${meal.name.replace(" ", "_")}.json")
+                    file.writeText(json)
+                    val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                    
+                    val intent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "application/json"
+                        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                        putExtra(android.content.Intent.EXTRA_SUBJECT, "Rezept: ${meal.name}")
+                        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    context.startActivity(android.content.Intent.createChooser(intent, "Rezept teilen"))
+                    selectedMealIds.value = emptySet()
+                } catch (e: Exception) {
+                    scope.launch { snackbarHostState.showSnackbar("Teilen fehlgeschlagen: ${e.localizedMessage}") }
+                }
+            }) {
+                Icon(Icons.Default.Share, "Teilen")
+            }
+        }
+    }
+
+    IconButton(onClick = {
+        selectedMealIds.value.forEach { vm.deleteMealTemplate(it) }
+        selectedMealIds.value = emptySet()
+        scope.launch { snackbarHostState.showSnackbar("Mahlzeiten gelöscht") }
+    }) {
+        Icon(Icons.Default.Delete, "Löschen")
+    }
 }
 
 

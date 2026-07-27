@@ -1,6 +1,4 @@
-- [x] Implement Collapsible Archive in `ShoppingListScreen.kt`
-    - [x] Split `rawShoppingList` into active and checked items
-    - [x] Update grouping/aggregation logic for active items
-    - [x] Add the "Zuletzt verwendet" section at the bottom
-    - [x] Handle toggle logic for expansion/collapse
-- [x] Verify build and functionality
+- [ ] Implement `getCatalogJson()` in `NutritionViewModel.kt`
+- [ ] Add "Export Catalog" button in `ProfileScreen.kt`
+- [ ] Update share intent in `ProfileScreen.kt` to handle different export types
+- [ ] Verify functionality

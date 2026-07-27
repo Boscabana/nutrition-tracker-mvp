@@ -1,11 +1,18 @@
 package com.nick.nutritiontracker.ui
 
+import android.content.Intent
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -13,25 +20,50 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.PopupProperties
 import com.nick.nutritiontracker.data.*
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
+import java.io.File
 
 @Composable
 fun MealsScreen(
     vm: NutritionViewModel,
-    @Suppress("UNUSED_PARAMETER") snackbarHostState: SnackbarHostState
+    @Suppress("UNUSED_PARAMETER") snackbarHostState: SnackbarHostState,
+    selectedMealIds: MutableState<Set<Long>>
 ) {
     val meals = vm.meals
     val foods = vm.foods
+    val context = LocalContext.current
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri?.let {
+            try {
+                context.contentResolver.openInputStream(it)?.use { stream ->
+                    val content = stream.bufferedReader().readText()
+                    if (vm.startRecipeImport(content)) {
+                        // Conflict resolution handled by NutritionApp dialog
+                    } else {
+                        Toast.makeText(context, "Fehler beim Importieren.", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            } catch (e: Exception) {
+                Toast.makeText(context, "Fehler: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     var mealToDelete by remember { mutableStateOf<Long?>(null) }
     var mealToEdit by remember { mutableStateOf<MealEntity?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
     
     val expandedStates = remember { mutableStateMapOf<Long, Boolean>() }
+    val isSelectionMode = selectedMealIds.value.isNotEmpty()
 
     if (mealToDelete != null) {
         AlertDialog(
@@ -75,30 +107,65 @@ fun MealsScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
-            Button(
-                onClick = { showAddDialog = true },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.Add, null)
-                Spacer(Modifier.width(8.dp))
-                Text("Neue Mahlzeit erstellen")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { showAddDialog = true },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Add, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Neu")
+                }
+                Button(
+                    onClick = { importLauncher.launch("*/*") },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                ) {
+                    Icon(Icons.Default.FileDownload, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Import")
+                }
             }
         }
 
+        @OptIn(ExperimentalFoundationApi::class)
         items(meals, key = { it.id }) { meal ->
             val expanded = expandedStates[meal.id] ?: false
+            val isSelected = selectedMealIds.value.contains(meal.id)
             val hasOrphanedIngredients = meal.ingredients.any { ing -> vm.foods.none { f -> f.id == ing.foodItemId } }
 
             SwipeActionContainer(
                 onDeleteRequest = { mealToDelete = meal.id },
-                onEditRequest = { mealToEdit = meal }
+                onEditRequest = { mealToEdit = meal },
+                enabled = !isSelectionMode
             ) {
                 Card(
-                    modifier = Modifier.fillMaxWidth().clickable { expandedStates[meal.id] = !expanded },
-                    colors = if (hasOrphanedIngredients) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)) else CardDefaults.cardColors()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .combinedClickable(
+                            onClick = { 
+                                if (isSelectionMode) {
+                                    selectedMealIds.value = if (isSelected) selectedMealIds.value - meal.id else selectedMealIds.value + meal.id
+                                } else {
+                                    expandedStates[meal.id] = !expanded 
+                                }
+                            },
+                            onLongClick = {
+                                selectedMealIds.value = selectedMealIds.value + meal.id
+                            }
+                        ),
+                    colors = if (isSelected) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                             else if (hasOrphanedIngredients) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)) 
+                             else CardDefaults.cardColors()
                 ) {
                     Column(Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (isSelectionMode) {
+                                Checkbox(checked = isSelected, onCheckedChange = { 
+                                    selectedMealIds.value = if (isSelected) selectedMealIds.value - meal.id else selectedMealIds.value + meal.id
+                                })
+                                Spacer(Modifier.width(8.dp))
+                            }
                             Column(Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(meal.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -136,6 +203,11 @@ fun MealsScreen(
                                         color = MaterialTheme.colorScheme.outline
                                     )
                                 }
+                                Text(
+                                    "Gesamtgewicht: ${meal.totalWeight.round0()}g (${(meal.totalWeight / meal.servings).round0()}g pro Portion)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
                             }
                         }
                     }
@@ -182,6 +254,7 @@ fun MealEditDialog(
             onConfirm = { amount, portion ->
                 ingredients.add(
                     MealIngredientEntity(
+                        id = System.currentTimeMillis() + ingredients.size,
                         foodItemId = foodToConfigure!!.id,
                         name = foodToConfigure!!.name,
                         amount = amount,
@@ -230,7 +303,14 @@ fun MealEditDialog(
                     value = servings,
                     onValueChange = { servings = it },
                     label = { Text("Portionen (Gesamt)") },
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
+                )
+
+                Text(
+                    text = "Gesamtgewicht: ${ingredients.sumOf { it.grams }.round0()}g (${(ingredients.sumOf { it.grams } / (servings.num().coerceAtLeast(1.0))).round0()}g pro Portion)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline
                 )
 
                 Spacer(Modifier.height(16.dp))
@@ -251,7 +331,8 @@ fun MealEditDialog(
                     DropdownMenu(
                         expanded = expanded && filteredFoods.isNotEmpty(),
                         onDismissRequest = { expanded = false },
-                        properties = PopupProperties(focusable = false)
+                        properties = PopupProperties(focusable = false),
+                        offset = DpOffset(0.dp, (-320).dp) // Force upward
                     ) {
                         filteredFoods.forEach { food ->
                             DropdownMenuItem(
@@ -278,15 +359,15 @@ fun MealEditDialog(
                 }
 
                 LazyColumn(Modifier.weight(1f).padding(vertical = 8.dp)) {
-                    items(ingredients) { ingredient ->
+                    items(ingredients, key = { it.id }) { ingredient ->
                         IngredientRow(
                             ingredient = ingredient,
                             foods = foods,
                             onUpdate = { updated ->
-                                val idx = ingredients.indexOf(ingredient)
+                                val idx = ingredients.indexOfFirst { it.id == ingredient.id }
                                 if (idx != -1) ingredients[idx] = updated
                             },
-                            onRemove = { ingredients.remove(ingredient) }
+                            onRemove = { ingredients.removeAll { it.id == ingredient.id } }
                         )
                     }
                 }
