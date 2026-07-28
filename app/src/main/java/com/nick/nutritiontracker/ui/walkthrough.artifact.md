@@ -1,17 +1,22 @@
-# Walkthrough - Selective Catalog Export
+# Walkthrough - Pantry System & UX Refinement
 
-I have implemented a new export option that allows you to share your setup (Articles, Recipes, and Categories) without including your private Diary entries.
+I have implemented the "Vorratsschrank" (Pantry) system and several UX improvements to the shopping list and planner.
 
 ## Changes Made
 
-### Nutrition View Model
-- **Implemented `getCatalogJson()`**: Added a new method to generate a JSON export that includes all your foods, meal templates, and categories, but excludes the `entries` list. This ensures your consumption history remains private when sharing your catalog.
+### Pantry System (Vorratsschrank)
+- **Staple Items**: You can now mark any article (Basis or Brand) as a **Vorratsartikel** (Pantry item). These are items you usually have in stock (e.g., salt, water).
+- **Silent Shopping List**: When planning meals, pantry items are still added to the cloud shopping list but are **hidden by default**. This keeps your list focused on what you actually need to buy.
+- **Pantry Toggle**: Added a "Vorrat anzeigen" switch to the shopping list to reveal these hidden items whenever you need to check their stock.
+- **Dedicated View**: A new "Vorratsschrank" button in the Articles tab opens a view where you can manage all your staples in one place.
 
-### Profile Screen Improvements
-- **Two Export Options**: Replaced the single "Export" button with two distinct choices in the **Daten-Sicherung** section:
-    - **Komplett-Backup**: Exports everything, including your personal diary entries. Best for device transfers.
-    - **Katalog exportieren**: Exports only your foods and recipes. Perfect for sharing your setup with friends or your girlfriend without exposing your private tracking data.
-- **Improved File Naming**: The exports now use descriptive filenames (`nutrition_backup_full.json` and `nutrition_catalog.json`) to make them easier to identify.
+### Shopping List UX
+- **One-Tap Check & Archive**: Clicking anywhere on a shopping item card now marks it as completed and moves it to the "Zuletzt verwendet" (archive) section.
+- **Visual Feedback**: Pantry items are clearly labeled on the shopping list when visible.
+
+### Planner Enhancements
+- **Swipe-to-Edit**: You can now **swipe right** on a planned meal to edit its portions or meal type (Breakfast, Lunch, etc.), just like in the actual diary. This makes adjusting your future plans much faster.
+- **Stable ID Mapping**: Refined the internal ID logic to ensure that swiping and editing always target the correct entry, preventing UI confusion.
 
 ## Verification Results
 
@@ -19,6 +24,7 @@ I have implemented a new export option that allows you to share your setup (Arti
 - Ran `./gradlew :app:compileDebugKotlin` which completed successfully.
 
 ### Manual Verification
-- Verified that the "Katalog exportieren" button appears in the Profile tab.
-- Confirmed that the sharing dialog is correctly triggered with the distinct catalog filename.
-- The existing import logic remains compatible and will correctly supplement the database with the shared articles and recipes.
+- Verified the "Vorratsartikel" toggle in the food editor correctly updates the item.
+- Confirmed that pantry items are filtered on the shopping list until the "Vorrat anzeigen" switch is toggled.
+- Verified that clicking a shopping card triggers the check-off and moves it to the collapsible archive.
+- Confirmed that planned entries can now be swiped and edited via the standard dialogs.

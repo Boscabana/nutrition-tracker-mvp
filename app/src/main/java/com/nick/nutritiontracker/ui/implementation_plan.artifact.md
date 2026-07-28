@@ -1,31 +1,45 @@
-# Implementation Plan - Selective Export (Catalog Only)
+# Implementation Plan - Pantry System and UX Enhancements
 
-This plan allows users to export only their articles and meals (the "Catalog") without including their personal diary entries. This is useful for sharing a setup with friends without sharing private consumption data.
+This plan introduces a "Pantry" (Vorratsschrank) system to track items that are always in stock, improves the shopping list workflow, and adds gesture-based editing to the meal planner.
 
 ## Proposed Changes
+
+### [Data Models]
+
+#### [MODIFY] [FoodItemEntity.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/data/FoodItemEntity.kt)
+- Add `val isPantryItem: Boolean = false` to track if an item should be considered a staple.
+
+#### [MODIFY] [ShoppingItem.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/data/ShoppingItem.kt)
+- Add `val isPantryItem: Boolean = false`.
+- This will allow filtering these items on the shopping list even if they were added via the planner.
 
 ### [Business Logic]
 
 #### [MODIFY] [NutritionViewModel.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/viewmodel/NutritionViewModel.kt)
-- Add a new method `getCatalogJson(): String`.
-    - This will generate a `BackupData` object containing `foods`, `meals`, and `categories`, but leaving `entries` empty.
-- Since the existing `importBackup` already checks for item existence and doesn't delete existing data (it supplements), no changes to the import logic are required.
+- **State**: Add `var showPantryInShoppingList by mutableStateOf(false)`.
+- **Planned Entries**: Update `addPlannedEntry` and `addPlannedMeal` to set `isPantryItem` on the resulting `ShoppingItem` if the source food item is marked as a pantry item.
+- **Toggle Action**: Update `toggleShoppingItem` to handle the "Check & Archive" logic as requested. Clicking an item will mark it as checked, moving it to the archive section.
 
 ### [User Interface]
 
-#### [MODIFY] [ProfileScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/ProfileScreen.kt)
-- **Export Options**: Add a second export button or a selection dialog to the "Daten-Sicherung" section.
-- **Button 1**: "Komplett-Backup" (Backup including diary).
-- **Button 2**: "Katalog exportieren" (Foods & Recipes only).
-- Update the sharing intent for the Catalog export to use a distinct filename like `nutrition_catalog.json`.
+#### [MODIFY] [NutritionApp.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/NutritionApp.kt)
+- **`FoodEditDialog`**: Add a Switch for "Vorratsartikel" (Pantry Item).
+- **`FoodsScreen`**: Add a "Vorratsschrank" button in the header.
+- **[NEW] `PantryScreen`**: A view that displays only food items marked as `isPantryItem`.
+
+#### [MODIFY] [ShoppingListScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/ShoppingListScreen.kt)
+- **Filtering**: By default, hide active items where `isPantryItem == true`.
+- **Toggle**: Add a switch "Vorratsartikel anzeigen" in the header.
+- **Interaction**: Make the entire shopping item card clickable to trigger the check/archive action.
+
+#### [MODIFY] [PlannerScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/PlannerScreen.kt)
+- **Gestures**: Wrap `PlannedEntryRow` with `SwipeActionContainer`.
+- **Actions**: Add an edit action to the swipe (similar to the Today screen) to allow changing portions or meal types for planned entries.
 
 ## Verification Plan
 
 ### Manual Verification
-1.  **Catalog Export**:
-    - Tap "Katalog exportieren".
-    - Share the file with another device.
-    - Import the file.
-    - Verify that all foods, categories, and meals are imported, but the diary remains untouched.
-2.  **Full Backup**:
-    - Verify that the original "Komplett-Backup" still includes diary entries as expected.
+1.  **Pantry Toggle**: Mark "Salz" as a pantry item. Plan a meal with salt. Verify it doesn't appear on the shopping list until "Vorratsartikel anzeigen" is enabled.
+2.  **Pantry View**: Go to "Artikel" -> "Vorratsschrank". Verify "Salz" is listed there.
+3.  **Shopping List Archive**: Click a shopping item (not just the checkbox). Verify it moves instantly to "Zuletzt verwendet".
+4.  **Planner Swipe**: Swipe a planned meal to the right. Verify the edit dialog opens and allows changing servings/slot.

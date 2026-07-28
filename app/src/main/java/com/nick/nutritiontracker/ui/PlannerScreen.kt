@@ -32,12 +32,39 @@ fun PlannerScreen(vm: NutritionViewModel) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val scannerService = remember { BarcodeScannerService(context) }
+    
+    var entryToEdit by remember { mutableStateOf<FoodEntryEntity?>(null) }
 
     if (household == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("Bitte erstelle einen Haushalt im Profil, um den Planer zu nutzen.")
         }
         return
+    }
+
+    if (entryToEdit != null) {
+        val currentEntry = entryToEdit!!
+        if (currentEntry.isMeal) {
+            EditMealEntryDialog(
+                entry = currentEntry,
+                foods = vm.foods,
+                onDismiss = { entryToEdit = null },
+                onSave = { updated ->
+                    vm.updatePlannedEntry(updated)
+                    entryToEdit = null
+                }
+            )
+        } else {
+            EditEntryDialog(
+                entry = currentEntry,
+                foods = vm.foods,
+                onDismiss = { entryToEdit = null },
+                onSave = { updated ->
+                    vm.updatePlannedEntry(updated)
+                    entryToEdit = null
+                }
+            )
+        }
     }
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
@@ -72,7 +99,6 @@ fun PlannerScreen(vm: NutritionViewModel) {
                     if (barcode != null) {
                         val food = scannerService.fetchProduct(barcode)
                         if (food != null) {
-                            // Automatically add as a snack for now if scanned in planner
                             vm.addPlannedEntry(food, 100.0, null, "Snack", plannerDate)
                         }
                     }
@@ -87,8 +113,13 @@ fun PlannerScreen(vm: NutritionViewModel) {
             modifier = Modifier.weight(1f).padding(vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            items(plannedEntries) { entry ->
-                PlannedEntryRow(entry, onDelete = { vm.deletePlannedEntry(entry.id) })
+            items(plannedEntries, key = { it.id }) { entry ->
+                SwipeActionContainer(
+                    onDeleteRequest = { vm.deletePlannedEntry(entry.id) },
+                    onEditRequest = { entryToEdit = entry }
+                ) {
+                    PlannedEntryRow(entry, onDelete = { vm.deletePlannedEntry(entry.id) })
+                }
             }
         }
     }

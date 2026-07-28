@@ -1053,7 +1053,7 @@ fun AddEntryCard(
 }
 
 @Composable
-private fun EditEntryDialog(
+fun EditEntryDialog(
     entry: FoodEntryEntity,
     foods: List<FoodItemEntity>,
     onDismiss: () -> Unit,
@@ -1613,11 +1613,15 @@ fun FoodsScreen(
     val foods = vm.foods
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val scannerService = remember { BarcodeScannerService(context) }
     
     var foodToDelete by remember { mutableStateOf<Long?>(null) }
     var foodToEdit by remember { mutableStateOf<FoodItemEntity?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
+    var showPantry by remember { mutableStateOf(false) }
+
+    if (showPantry) {
+        PantryScreen(vm, onDismiss = { showPantry = false })
+    }
 
     val searchQuery = vm.foodSearchQuery
     val selectedCategory = vm.selectedFoodCategory
@@ -1737,6 +1741,16 @@ fun FoodsScreen(
                     Icon(Icons.AutoMirrored.Filled.Label, null)
                     Spacer(Modifier.width(8.dp))
                     Text("Marke")
+                }
+
+                Button(
+                    onClick = { showPantry = true },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer, contentColor = MaterialTheme.colorScheme.onTertiaryContainer)
+                ) {
+                    Icon(Icons.Default.Kitchen, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Vorrat")
                 }
             }
 
@@ -1995,6 +2009,7 @@ fun FoodEditDialog(
     var isGeneric by remember { mutableStateOf(food?.isGeneric ?: false) }
     var parentId by remember { mutableStateOf(food?.parentId) }
     var store by remember { mutableStateOf(food?.store ?: "") }
+    var isPantryItem by remember { mutableStateOf(food?.isPantryItem ?: false) }
     
     var unitExpanded by remember { mutableStateOf(false) }
     var categoryExpanded by remember { mutableStateOf(false) }
@@ -2082,6 +2097,11 @@ fun FoodEditDialog(
 
                     AutoSelectTextField(brand, { brand = it }, label = { Text("Marke (z.B. ja!, Bio-Zentrale)") }, modifier = Modifier.fillMaxWidth())
                     AutoSelectTextField(store, { store = it }, label = { Text("Laden / Supermarkt") }, modifier = Modifier.fillMaxWidth())
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Text("Vorratsartikel (wird in Liste ausgeblendet)", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    Switch(checked = isPantryItem, onCheckedChange = { isPantryItem = it })
                 }
                 
                 ExposedDropdownMenuBox(
@@ -2262,10 +2282,60 @@ fun FoodEditDialog(
                                 packages = packages.map { FoodPackageEntity(0, it.name, it.quantity.num(), it.unit) },
                                 isGeneric = isGeneric,
                                 parentId = if (!isGeneric) parentId else null,
-                                store = if (!isGeneric) store.takeIf { it.isNotBlank() } else null
+                                store = if (!isGeneric) store.takeIf { it.isNotBlank() } else null,
+                                isPantryItem = isPantryItem
                             )
                         )
                     }) { Text("Speichern") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PantryScreen(vm: NutritionViewModel, onDismiss: () -> Unit) {
+    val pantryItems = remember(vm.foods) { derivedStateOf { vm.foods.filter { it.isPantryItem } } }
+    
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth().fillMaxHeight(0.8f)
+        ) {
+            Column(Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Kitchen, null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Vorratsschrank", style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f))
+                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, null) }
+                }
+                
+                Text("Artikel, die immer da sind und im Planer nicht automatisch auf die Einkaufsliste kommen (außer aktiviert).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                
+                Spacer(Modifier.height(16.dp))
+                
+                if (pantryItems.value.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Keine Vorratsartikel markiert.", color = MaterialTheme.colorScheme.outline)
+                    }
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(pantryItems.value) { food ->
+                            Card(Modifier.fillMaxWidth()) {
+                                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(food.name, fontWeight = FontWeight.Bold)
+                                        if (!food.brand.isNullOrBlank()) Text(food.brand, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                    IconButton(onClick = { 
+                                        vm.updateFood(food.copy(isPantryItem = false))
+                                    }) {
+                                        Icon(Icons.Default.Delete, null, tint = Color.Red)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

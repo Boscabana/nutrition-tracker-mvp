@@ -21,7 +21,8 @@ data class FoodItemEntity(
     val category: String? = null,
     val isGeneric: Boolean = false,
     val parentId: Long? = null,
-    val store: String? = null
+    val store: String? = null,
+    val isPantryItem: Boolean = false
 ) {
     val complexCarbsPer100g: Double
         get() = (carbsPer100g - sugarPer100g).coerceAtLeast(0.0)
