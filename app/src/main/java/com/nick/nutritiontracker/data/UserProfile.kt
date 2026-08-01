@@ -8,38 +8,55 @@ enum class Gender {
 }
 
 @Serializable
+enum class UserGoal {
+    LOSE_WEIGHT, MAINTAIN, BUILD_MUSCLE
+}
+
+@Serializable
 data class UserProfile(
     val firstName: String = "",
-    val age: Int = 31,
-    val weightKg: Double = 84.0,
+    val age: Int = 30,
+    val weightKg: Double = 70.0,
     val heightCm: Int = 175,
     val gender: Gender = Gender.MALE,
-    val goalDescription: String = "Gewicht halten",
-    val calorieBudget: Int = 2000,
+    val goal: UserGoal = UserGoal.MAINTAIN,
+    val goalIntensity: Int = 500, // Deficit or surplus
+    val setupCompleted: Boolean = false,
+    
+    // Macro percentages (kept for now, will be automated later)
     val proteinPercent: Int = 20,
     val complexCarbsPercent: Int = 40,
     val sugarPercent: Int = 10,
     val unsaturatedFatPercent: Int = 20,
     val saturatedFatPercent: Int = 10,
-    val activityLevel: Double = 1.2, // PAL factor
     val stepGoal: Int = 10000
 ) {
     val totalPercent: Int get() = proteinPercent + complexCarbsPercent + sugarPercent + unsaturatedFatPercent + saturatedFatPercent
     val isPercentValid: Boolean get() = totalPercent == 100
 
     /**
-     * Grundumsatz (BMR) nach der Harris-Benedict-Formel (revidiert von Roza und Shizgal, 1984).
+     * Grundumsatz (BMR) nach der Mifflin-St Jeor Formel.
      */
     val bmr: Double get() {
         return if (gender == Gender.MALE) {
-            88.362 + (13.397 * weightKg) + (4.799 * heightCm) - (5.677 * age)
+            (10.0 * weightKg) + (6.25 * heightCm) - (5.0 * age) + 5.0
         } else {
-            447.593 + (9.247 * weightKg) + (3.098 * heightCm) - (4.330 * age)
+            (10.0 * weightKg) + (6.25 * heightCm) - (5.0 * age) - 161.0
         }
     }
 
-    // TDEE (Total Daily Energy Expenditure) without extra activity
-    val tdee: Double get() = bmr * activityLevel
+    /**
+     * Das berechnete Kalorienbudget basierend auf dem Grundumsatz und dem Ziel.
+     * Aktivitätskalorien sind hier NICHT enthalten.
+     */
+    val calorieBudget: Int get() {
+        val adjustment = when (goal) {
+            UserGoal.LOSE_WEIGHT -> -goalIntensity
+            UserGoal.MAINTAIN -> 0
+            UserGoal.BUILD_MUSCLE -> goalIntensity
+        }
+        return (bmr + adjustment).coerceAtLeast(1200.0).toInt()
+    }
 
     // Goals in grams based on calorieBudget
     val proteinGoalGrams: Double get() = (calorieBudget * (proteinPercent / 100.0)) / 4.0

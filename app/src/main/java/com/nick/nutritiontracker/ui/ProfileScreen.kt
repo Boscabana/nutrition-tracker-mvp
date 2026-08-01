@@ -9,16 +9,12 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.FileUpload
-import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -28,17 +24,14 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import android.util.Log
 import com.google.firebase.auth.FirebaseAuthException
-import com.nick.nutritiontracker.data.Gender
-import com.nick.nutritiontracker.data.UserProfile
-import com.nick.nutritiontracker.data.Household
+import com.nick.nutritiontracker.data.*
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
 import com.nick.nutritiontracker.viewmodel.ProfileViewModel
 import kotlinx.coroutines.launch
 import java.io.File
 
 @Composable
-fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionViewModel) {
-    val userProfile by viewModel.userProfile.collectAsState()
+fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionViewModel, userProfile: UserProfile) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     
@@ -51,8 +44,8 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
     var weight by remember(userProfile) { mutableStateOf(userProfile.weightKg.toString()) }
     var height by remember(userProfile) { mutableStateOf(userProfile.heightCm.toString()) }
     var gender by remember(userProfile) { mutableStateOf(userProfile.gender) }
-    var goal by remember(userProfile) { mutableStateOf(userProfile.goalDescription) }
-    var budget by remember(userProfile) { mutableStateOf(userProfile.calorieBudget.toString()) }
+    var goal by remember(userProfile) { mutableStateOf(userProfile.goal) }
+    var intensity by remember(userProfile) { mutableStateOf(userProfile.goalIntensity.toString()) }
     
     var pPct by remember(userProfile) { mutableStateOf(userProfile.proteinPercent.toString()) }
     var cCarbPct by remember(userProfile) { mutableStateOf(userProfile.complexCarbsPercent.toString()) }
@@ -90,7 +83,7 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text("Profil & Ziele", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text("Mein Profil", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
         
         Card {
             Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -135,89 +128,115 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
                     )
                 }
+            }
+        }
+        
+        Card {
+            Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Dein Ziel & Kalorien", fontWeight = FontWeight.Bold)
                 
-                Text("Grundumsatz (BMR): ${userProfile.bmr.toInt()} kcal", style = MaterialTheme.typography.bodySmall)
+                // Goal Selection
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    GoalChip(
+                        selected = goal == UserGoal.LOSE_WEIGHT,
+                        label = "Abnehmen",
+                        onClick = { goal = UserGoal.LOSE_WEIGHT }
+                    )
+                    GoalChip(
+                        selected = goal == UserGoal.MAINTAIN,
+                        label = "Halten",
+                        onClick = { goal = UserGoal.MAINTAIN }
+                    )
+                    GoalChip(
+                        selected = goal == UserGoal.BUILD_MUSCLE,
+                        label = "Aufbauen",
+                        onClick = { goal = UserGoal.BUILD_MUSCLE }
+                    )
+                }
 
-                AutoSelectTextField(
-                    value = goal,
-                    onValueChange = { goal = it },
-                    label = { Text("Ziel (z.B. Muskelaufbau)") },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                if (goal != UserGoal.MAINTAIN) {
+                    Column {
+                        Text("Intensität: ${intensity} kcal", style = MaterialTheme.typography.labelMedium)
+                        Slider(
+                            value = intensity.toFloatOrNull() ?: 500f,
+                            onValueChange = { intensity = it.toInt().toString() },
+                            valueRange = 300f..500f,
+                            steps = 1
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Tagesbudget (BMR + Ziel)", style = MaterialTheme.typography.labelSmall)
+                        Text("${userProfile.calorieBudget} kcal", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    }
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text("Nur Grundumsatz", style = MaterialTheme.typography.labelSmall)
+                        Text("${userProfile.bmr.toInt()} kcal", style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
             }
         }
         
         Card {
+            var expanded by remember { mutableStateOf(false) }
             Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Tagesbudget", fontWeight = FontWeight.Bold)
-                AutoSelectTextField(
-                    value = budget,
-                    onValueChange = { budget = it },
-                    label = { Text("Kalorienbudget (Ziel)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
-                )
-                Text("Ihr TDEE (Bürotätigkeit) liegt bei ca. ${userProfile.tdee.toInt()} kcal", style = MaterialTheme.typography.bodySmall)
-            }
-        }
-        
-        Card {
-            Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Makroverteilung (%)", fontWeight = FontWeight.Bold)
-                MacroPercentInput(
-                    label = "Ungesättigte Fette", 
-                    value = uFatPct, 
-                    onValueChange = { uFatPct = it },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
-                )
-                MacroPercentInput(
-                    label = "Gesättigte Fette", 
-                    value = sFatPct, 
-                    onValueChange = { sFatPct = it },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
-                )
-                MacroPercentInput(
-                    label = "Komplexe KH", 
-                    value = cCarbPct, 
-                    onValueChange = { cCarbPct = it },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
-                )
-                MacroPercentInput(
-                    label = "Zucker", 
-                    value = sugarPct, 
-                    onValueChange = { sugarPct = it },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
-                )
-                MacroPercentInput(
-                    label = "Protein", 
-                    value = pPct, 
-                    onValueChange = { pPct = it },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Makroverteilung (%)", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    IconButton(onClick = { expanded = !expanded }) {
+                        Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
+                    }
+                }
                 
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Gesamt: $totalPct %", 
-                    color = if (isValid) Color(0xFF2E7D32) else Color.Red,
-                    fontWeight = FontWeight.Bold
-                )
+                if (expanded) {
+                    MacroPercentInput(label = "Ungesättigte Fette", value = uFatPct, onValueChange = { uFatPct = it })
+                    MacroPercentInput(label = "Gesättigte Fette", value = sFatPct, onValueChange = { sFatPct = it })
+                    MacroPercentInput(label = "Komplexe KH", value = cCarbPct, onValueChange = { cCarbPct = it })
+                    MacroPercentInput(label = "Zucker", value = sugarPct, onValueChange = { sugarPct = it })
+                    MacroPercentInput(label = "Protein", value = pPct, onValueChange = { pPct = it })
+                    
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Gesamt: $totalPct %", 
+                        color = if (isValid) Color(0xFF2E7D32) else Color.Red,
+                        fontWeight = FontWeight.Bold
+                    )
+                } else {
+                    Text("P: $pPct% · KH: ${(cCarbPct.toIntOrNull() ?: 0) + (sugarPct.toIntOrNull() ?: 0)}% · F: ${(uFatPct.toIntOrNull() ?: 0) + (sFatPct.toIntOrNull() ?: 0)}%", style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
 
         CategoryManagementCard(nutritionViewModel)
-        
         HouseholdManagementSection(nutritionViewModel)
+        
+        Card {
+            Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("App-Einstellungen", fontWeight = FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Tour bei jedem App-Start zeigen", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                    Switch(
+                        checked = nutritionViewModel.forceOnboardingOnStart,
+                        onCheckedChange = { nutritionViewModel.setForceOnboarding(it) },
+                        modifier = Modifier.scale(0.8f)
+                    )
+                }
+            }
+        }
         
         Button(
             onClick = {
-                viewModel.updateProfile(UserProfile(
+                viewModel.updateProfile(userProfile.copy(
                     firstName = firstName,
                     age = age.toIntOrNull() ?: userProfile.age,
                     weightKg = weight.toDoubleOrNull() ?: userProfile.weightKg,
                     heightCm = height.toIntOrNull() ?: userProfile.heightCm,
                     gender = gender,
-                    goalDescription = goal,
-                    calorieBudget = budget.toIntOrNull() ?: userProfile.calorieBudget,
+                    goal = goal,
+                    goalIntensity = intensity.toIntOrNull() ?: userProfile.goalIntensity,
                     proteinPercent = pPct.toIntOrNull() ?: userProfile.proteinPercent,
                     complexCarbsPercent = cCarbPct.toIntOrNull() ?: userProfile.complexCarbsPercent,
                     sugarPercent = sugarPct.toIntOrNull() ?: userProfile.sugarPercent,
@@ -225,11 +244,14 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
                     saturatedFatPercent = sFatPct.toIntOrNull() ?: userProfile.saturatedFatPercent
                 ))
             },
-            enabled = isValid,
+            enabled = isValid && firstName.isNotBlank(),
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Profil speichern")
         }
+
+        // --- DEVELOPER OPTIONS ---
+        DeveloperOptionsSection(viewModel, userProfile)
 
         Spacer(Modifier.height(8.dp))
         Text("Daten-Sicherung", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -259,19 +281,17 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
                 ) {
                     Icon(Icons.Default.FileUpload, null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Komplett-Backup")
+                    Text("Backup")
                 }
                 
                 Button(
-                    onClick = {
-                        importLauncher.launch("*/*")
-                    },
+                    onClick = { importLauncher.launch("*/*") },
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
                 ) {
                     Icon(Icons.Default.FileDownload, null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Importieren")
+                    Text("Import")
                 }
             }
 
@@ -298,11 +318,81 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
             ) {
                 Icon(Icons.Default.Restaurant, null)
                 Spacer(Modifier.width(8.dp))
-                Text("Katalog exportieren (Artikel & Rezepte)")
+                Text("Katalog exportieren")
             }
         }
         
         Spacer(Modifier.height(32.dp))
+    }
+}
+
+@Composable
+private fun GoalChip(selected: Boolean, label: String, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        modifier = Modifier.padding(2.dp)
+    )
+}
+
+@Composable
+private fun DeveloperOptionsSection(
+    profileVm: ProfileViewModel,
+    profile: UserProfile
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(Modifier.fillMaxWidth().padding(top = 16.dp)) {
+        TextButton(
+            onClick = { expanded = !expanded },
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        ) {
+            Text(if (expanded) "Entwickleroptionen ausblenden" else "Entwickleroptionen einblenden", style = MaterialTheme.typography.labelSmall)
+        }
+
+        if (expanded) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("⚙️ Debug & Kalkulation", fontWeight = FontWeight.Bold)
+                    
+                    Button(
+                        onClick = { profileVm.updateProfile(profile.copy(setupCompleted = false)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Setup Wizard jetzt starten")
+                    }
+
+                    HorizontalDivider()
+                    Text("Formel-Inspektor (Mifflin-St Jeor)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    
+                    val constant = if (profile.gender == Gender.MALE) "+5" else "-161"
+                    Text(
+                        "BMR = (10 * ${profile.weightKg}) + (6.25 * ${profile.heightCm}) - (5 * ${profile.age}) $constant",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                    Text(
+                        "= ${profile.bmr.toInt()} kcal Grundumsatz",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    
+                    val goalIntensity = profile.goalIntensity
+                    val goalText = when(profile.goal) {
+                        UserGoal.LOSE_WEIGHT -> "Abnehmen (-$goalIntensity)"
+                        UserGoal.MAINTAIN -> "Halten (0)"
+                        UserGoal.BUILD_MUSCLE -> "Aufbauen (+$goalIntensity)"
+                    }
+                    Text("Ziel: $goalText", style = MaterialTheme.typography.labelSmall)
+                    Text("Finales Budget: ${profile.calorieBudget} kcal", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }
 

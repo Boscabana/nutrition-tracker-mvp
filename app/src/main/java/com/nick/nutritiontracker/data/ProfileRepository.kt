@@ -15,10 +15,14 @@ class ProfileRepository(private val context: Context) {
 
     private object PreferencesKeys {
         val FIRST_NAME = stringPreferencesKey("first_name")
+        val AGE = intPreferencesKey("age")
+        val GENDER = stringPreferencesKey("gender")
         val WEIGHT = doublePreferencesKey("weight")
         val HEIGHT = intPreferencesKey("height")
-        val GOAL_DESC = stringPreferencesKey("goal_description")
-        val CALORIE_BUDGET = intPreferencesKey("calorie_budget")
+        val GOAL = stringPreferencesKey("goal")
+        val GOAL_INTENSITY = intPreferencesKey("goal_intensity")
+        val SETUP_COMPLETED = booleanPreferencesKey("setup_completed")
+        
         val PROTEIN_PCT = intPreferencesKey("protein_percent")
         val COMPLEX_CARBS_PCT = intPreferencesKey("complex_carbs_percent")
         val SUGAR_PCT = intPreferencesKey("sugar_percent")
@@ -37,10 +41,13 @@ class ProfileRepository(private val context: Context) {
         .map { preferences ->
             UserProfile(
                 firstName = preferences[PreferencesKeys.FIRST_NAME] ?: "",
+                age = preferences[PreferencesKeys.AGE] ?: 30,
+                gender = Gender.valueOf(preferences[PreferencesKeys.GENDER] ?: Gender.MALE.name),
                 weightKg = preferences[PreferencesKeys.WEIGHT] ?: 70.0,
                 heightCm = preferences[PreferencesKeys.HEIGHT] ?: 175,
-                goalDescription = preferences[PreferencesKeys.GOAL_DESC] ?: "Gewicht halten",
-                calorieBudget = preferences[PreferencesKeys.CALORIE_BUDGET] ?: 2000,
+                goal = UserGoal.valueOf(preferences[PreferencesKeys.GOAL] ?: UserGoal.MAINTAIN.name),
+                goalIntensity = preferences[PreferencesKeys.GOAL_INTENSITY] ?: 500,
+                setupCompleted = preferences[PreferencesKeys.SETUP_COMPLETED] ?: false,
                 proteinPercent = preferences[PreferencesKeys.PROTEIN_PCT] ?: 20,
                 complexCarbsPercent = preferences[PreferencesKeys.COMPLEX_CARBS_PCT] ?: 40,
                 sugarPercent = preferences[PreferencesKeys.SUGAR_PCT] ?: 10,
@@ -52,10 +59,13 @@ class ProfileRepository(private val context: Context) {
     suspend fun saveProfile(profile: UserProfile) {
         context.dataStore.edit { preferences ->
             preferences[PreferencesKeys.FIRST_NAME] = profile.firstName
+            preferences[PreferencesKeys.AGE] = profile.age
+            preferences[PreferencesKeys.GENDER] = profile.gender.name
             preferences[PreferencesKeys.WEIGHT] = profile.weightKg
             preferences[PreferencesKeys.HEIGHT] = profile.heightCm
-            preferences[PreferencesKeys.GOAL_DESC] = profile.goalDescription
-            preferences[PreferencesKeys.CALORIE_BUDGET] = profile.calorieBudget
+            preferences[PreferencesKeys.GOAL] = profile.goal.name
+            preferences[PreferencesKeys.GOAL_INTENSITY] = profile.goalIntensity
+            preferences[PreferencesKeys.SETUP_COMPLETED] = profile.setupCompleted
             preferences[PreferencesKeys.PROTEIN_PCT] = profile.proteinPercent
             preferences[PreferencesKeys.COMPLEX_CARBS_PCT] = profile.complexCarbsPercent
             preferences[PreferencesKeys.SUGAR_PCT] = profile.sugarPercent

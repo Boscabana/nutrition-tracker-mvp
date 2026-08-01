@@ -1,5 +1,9 @@
-- [ ] Update `MealEditDialog` in `MealsScreen.kt`
-    - [ ] Dynamic title based on meal ID
-    - [ ] Info banner if orphaned items exist
-- [ ] Fix unused variable warning in `NutritionViewModel.kt`
-- [ ] Verify build and functionality
+- [x] **Phase 1: ViewModel Update**
+    - [x] Make `userProfile` nullable in `ProfileViewModel.kt`
+    - [x] Set `initialValue = null`
+- [x] **Phase 2: App Integration**
+    - [x] Add loading check in `NutritionApp.kt`
+    - [x] Refactor onboarding trigger logic to wait for data
+- [x] **Phase 3: Verification**
+    - [x] Verify cold start behavior
+    - [x] Verify first launch behavior

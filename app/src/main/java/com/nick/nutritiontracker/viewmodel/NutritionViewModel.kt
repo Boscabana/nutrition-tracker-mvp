@@ -59,6 +59,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     
     var pendingRecipeImport by mutableStateOf<RecipeData?>(null)
     
+    var forceOnboardingOnStart by mutableStateOf(prefs.getBoolean("force_onboarding", false))
+        private set
+
+    fun setForceOnboarding(force: Boolean) {
+        forceOnboardingOnStart = force
+        prefs.edit().putBoolean("force_onboarding", force).apply()
+    }
+    
     val dailySteps = mutableStateMapOf<String, Int>()
 
     val todayEntries by derivedStateOf {

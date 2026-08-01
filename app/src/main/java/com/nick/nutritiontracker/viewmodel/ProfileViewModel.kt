@@ -11,11 +11,11 @@ import kotlinx.coroutines.launch
 
 class ProfileViewModel(private val repository: ProfileRepository) : ViewModel() {
 
-    val userProfile: StateFlow<UserProfile> = repository.userProfileFlow
+    val userProfile: StateFlow<UserProfile?> = repository.userProfileFlow
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(5000),
-            initialValue = UserProfile()
+            initialValue = null
         )
 
     fun updateProfile(profile: UserProfile) {

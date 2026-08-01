@@ -66,11 +66,45 @@ private val ActionDeleteRed = Color(0xFFD32F2F)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
+    val userProfileState by profileVm.userProfile.collectAsState()
+    
+    // 1. Wait until the profile is loaded from disk
+    val userProfile = userProfileState ?: return // Show nothing while loading (brief flash)
+
+    var showSetup by remember { mutableStateOf(false) }
+    var initialCheckPerformed by remember { mutableStateOf(false) }
+    
+    LaunchedEffect(userProfile.setupCompleted, vm.forceOnboardingOnStart) {
+        if (!initialCheckPerformed) {
+            // Initial app launch: check BOTH setup completion and the force toggle
+            if (!userProfile.setupCompleted || vm.forceOnboardingOnStart) {
+                showSetup = true
+            }
+            initialCheckPerformed = true
+        } else {
+            // App is already running: only trigger if setupCompleted is explicitly set to false (e.g. by reset button)
+            if (!userProfile.setupCompleted) {
+                showSetup = true
+            } else {
+                showSetup = false
+            }
+        }
+    }
+
+    if (showSetup) {
+        SetupWizard(profileVm, vm)
+    } else {
+        MainApp(vm, profileVm, userProfile)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userProfile: UserProfile) {
     val scope = rememberCoroutineScope()
     var tab by remember { mutableIntStateOf(0) }
     val foods = vm.foods
     val entries = vm.todayEntries
-    val userProfile by profileVm.userProfile.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, d. MMM", Locale.GERMAN) }
@@ -279,7 +313,7 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
                     0 -> TodayScreen(userProfile, foods, entries, vm, snackbarHostState, selectedEntryIds, selectedFoodIds, selectedMealIds)
                     1 -> FoodsScreen(vm, snackbarHostState, selectedFoodIds)
                     2 -> MealsScreen(vm, snackbarHostState, selectedMealIds)
-                    3 -> ProfileScreen(profileVm, vm)
+                    3 -> ProfileScreen(profileVm, vm, userProfile)
                     4 -> PlannerScreen(vm)
                     5 -> ShoppingListScreen(vm)
                 }
@@ -1077,26 +1111,22 @@ fun EditEntryDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Eintrag bearbeiten")
-                    Text(entry.name, style = MaterialTheme.typography.labelSmall, color = if (isOrphaned) Color.Red else MaterialTheme.colorScheme.outline)
+                    Text(entry.name, style = MaterialTheme.typography.labelSmall, color = if (isOrphaned) ProteinGreen else MaterialTheme.colorScheme.outline)
                 }
                 if (isOrphaned) {
-                    Icon(Icons.Default.Save, "Wird automatisch gespeichert", tint = ProteinGreen, modifier = Modifier.size(20.dp))
+                    Icon(Icons.Default.Save, "Wird automatisch gespeichert", tint = ProteinGreen, modifier = Modifier.size(18.dp))
                 }
             }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (isOrphaned) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = ProteinGreen.copy(alpha = 0.1f)),
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                    ) {
-                        Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Info, null, tint = ProteinGreen, modifier = Modifier.size(16.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("Dieser Artikel wird beim Speichern automatisch in deine Bibliothek übernommen.", style = MaterialTheme.typography.labelSmall, color = ProteinGreen)
-                        }
-                    }
+                    Text(
+                        "Wird beim Speichern automatisch in die Bibliothek übernommen.", 
+                        style = MaterialTheme.typography.labelSmall, 
+                        color = ProteinGreen,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
                 }
 
                 AutoSelectTextField(
@@ -1131,6 +1161,9 @@ fun EditEntryDialog(
                             )
                         }
                     }
+                } else {
+                    Text("Einheit: ${entry.unitLabel}", style = MaterialTheme.typography.bodySmall, color = Color.Red)
+                    Text("Hinweis: Da der Artikel nicht gespeichert ist, können keine Portionen gewählt werden.", style = MaterialTheme.typography.labelSmall, color = Color.Red)
                 }
 
                 Text("Mahlzeit", style = MaterialTheme.typography.labelMedium)
@@ -1662,7 +1695,7 @@ fun FoodsScreen(
     val selectedCategory = vm.selectedFoodCategory
     val categories = vm.categories.sorted()
 
-    val filteredFoods by remember(searchQuery, selectedCategory) {
+    val filteredFoods by remember(searchQuery, selectedCategory, foods) {
         derivedStateOf {
             foods.filter { food ->
                 val matchesSearch = food.name.contains(searchQuery, ignoreCase = true) || (food.brand?.contains(searchQuery, ignoreCase = true) == true)

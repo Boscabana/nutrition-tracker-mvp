@@ -507,7 +507,7 @@ fun IngredientRow(
                         Text(
                             text = ingredient.name, 
                             fontWeight = FontWeight.Bold,
-                            color = if (isOrphaned) Color.Red else Color.Unspecified
+                            color = if (isOrphaned) Color(0xFF2E7D32) else Color.Unspecified
                         )
                         if (isOrphaned) {
                             Icon(
