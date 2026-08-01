@@ -34,6 +34,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.DpOffset
@@ -220,17 +221,31 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                     TopAppBar(
                         title = {
                             if (tab == 0) {
-                                TextButton(
-                                    onClick = { showCalendar = true },
-                                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
-                                ) {
-                                    val label = when (vm.selectedDate) {
-                                        LocalDate.now() -> "Heute"
-                                        LocalDate.now().plusDays(1) -> "Morgen"
-                                        else -> vm.selectedDate.format(dateFormatter)
+                                val statusColor = Color(vm.getDayStatusColor(vm.selectedDate.toString(), userProfile))
+                                val isVerified = vm.dayVerifications[vm.selectedDate.toString()] ?: false
+                                
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(12.dp)
+                                            .background(statusColor, RoundedCornerShape(2.dp))
+                                    )
+                                    if (isVerified) {
+                                        Icon(Icons.Default.Check, null, modifier = Modifier.size(14.dp).padding(start = 2.dp), tint = statusColor)
                                     }
-                                    Text(label, style = MaterialTheme.typography.titleLarge)
-                                    Icon(Icons.Default.Event, null, modifier = Modifier.padding(start = 4.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    TextButton(
+                                        onClick = { showCalendar = true },
+                                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
+                                    ) {
+                                        val label = when (vm.selectedDate) {
+                                            LocalDate.now() -> "Heute"
+                                            LocalDate.now().plusDays(1) -> "Morgen"
+                                            else -> vm.selectedDate.format(dateFormatter)
+                                        }
+                                        Text(label, style = MaterialTheme.typography.titleLarge)
+                                        Icon(Icons.Default.Event, null, modifier = Modifier.padding(start = 4.dp))
+                                    }
                                 }
                             } else {
                                 Text(
@@ -358,6 +373,12 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                         icon = { Icon(Icons.Default.ShoppingCart, null) }
                     )
                     NavigationBarItem(
+                        selected = tab == 6,
+                        onClick = { tab = 6 },
+                        label = { Text("Gewicht") },
+                        icon = { Icon(Icons.Default.MonitorWeight, null) }
+                    )
+                    NavigationBarItem(
                         selected = tab == 3,
                         onClick = { tab = 3 },
                         label = { Text("Profil") },
@@ -374,8 +395,42 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                     3 -> ProfileScreen(profileVm, vm, userProfile)
                     4 -> PlannerScreen(vm)
                     5 -> ShoppingListScreen(vm)
+                    6 -> WeightScreen(vm, profileVm)
                 }
             }
+        }
+    }
+
+    // Weekly Summary Popup (Sunday)
+    var weeklySummaryAcknowledged by remember { mutableStateOf(false) }
+    val isSunday = LocalDate.now().dayOfWeek == java.time.DayOfWeek.SUNDAY
+    
+    if (isSunday && userProfile.setupCompleted && !weeklySummaryAcknowledged) {
+        val last7Days = (0..6).map { LocalDate.now().minusDays(it.toLong()).toString() }
+        val verifiedDays = last7Days.filter { vm.dayVerifications[it] == true }
+        
+        // Only count days with negative balance (weight loss)
+        val weeklyGrams = verifiedDays.sumOf { date -> 
+            val budget = vm.calculateWeightBudgetGrams(date, userProfile)
+            if (budget > 0) budget else 0.0
+        }
+
+        if (weeklyGrams > 0) {
+            AlertDialog(
+                onDismissRequest = { weeklySummaryAcknowledged = true },
+                title = { Text("Wochenrückblick 📊") },
+                text = {
+                    Column {
+                        Text("Starke Woche, ${userProfile.firstName}!", fontWeight = FontWeight.Bold)
+                        Text("Durch deine Disziplin an ${verifiedDays.size} verifizierten Tagen hast du rechnerisch ca.")
+                        Text("${weeklyGrams.round0()}g Fett", style = MaterialTheme.typography.headlineMedium, color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
+                        Text("verbrannt. Weiter so!")
+                    }
+                },
+                confirmButton = {
+                    Button(onClick = { weeklySummaryAcknowledged = true }) { Text("Super!") }
+                }
+            )
         }
     }
 }
@@ -627,6 +682,9 @@ private fun TodayScreen(
         )
     }
 
+    val weightBudget = vm.calculateWeightBudgetGrams(vm.selectedDate.toString(), userProfile)
+    val isVerified = vm.dayVerifications[vm.selectedDate.toString()] ?: false
+
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -642,8 +700,39 @@ private fun TodayScreen(
                     currentSugar = vm.todayTotalSugar,
                     currentUnsaturatedFat = vm.todayTotalUnsaturatedFat,
                     currentSaturatedFat = vm.todayTotalSaturatedFat,
-                    steps = vm.todaySteps
+                    steps = vm.todaySteps,
+                    weightBudgetGrams = weightBudget
                 )
+            }
+        }
+        
+        if (!isVerified) {
+            item {
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("Tag noch nicht verifiziert", fontWeight = FontWeight.Bold)
+                        Text("Hast du heute bereits alles ehrlich eingetragen?", style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = { vm.verifyDay(vm.selectedDate.toString(), true) }) {
+                            Text("Ja, alles eingetragen!")
+                        }
+                    }
+                }
+            }
+        } else {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF2E7D32), modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Tag erfolgreich verifiziert", color = Color(0xFF2E7D32), style = MaterialTheme.typography.labelSmall)
+                }
             }
         }
         item {

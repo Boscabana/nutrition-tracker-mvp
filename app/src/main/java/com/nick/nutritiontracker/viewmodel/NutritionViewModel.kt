@@ -66,6 +66,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     
     var pendingRecipeImport by mutableStateOf<RecipeData?>(null)
     
+    val weightHistory = mutableStateListOf<WeightEntry>()
+    val dayVerifications = mutableStateMapOf<String, Boolean>()
+    
     var forceOnboardingOnStart by mutableStateOf(prefs.getBoolean("force_onboarding", false))
         private set
 
@@ -90,12 +93,54 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     
     val todaySteps by derivedStateOf { dailySteps[selectedDate.toString()] ?: 0 }
 
+    /**
+     * Berechnet das Abnehmbudget in Gramm für den ausgewählten Tag.
+     * Basierend auf (BMR + Aktivität) - Aufnahme.
+     * 7000 kcal Defizit = 1kg Fettverlust.
+     */
+    fun calculateWeightBudgetGrams(dateIso: String, userProfile: UserProfile): Double {
+        val dateEntries = allEntries.filter { it.dateIso == dateIso }
+        if (dateEntries.isEmpty()) return 0.0 // Handled separately by color logic
+        
+        val intake = dateEntries.sumOf { it.kcal }
+        val steps = dailySteps[dateIso] ?: 0
+        
+        // Activity calories (MET formula)
+        val activity = DailyActivity(dateIso, steps)
+        val activityKcal = activity.calculateCalories(userProfile.weightKg, userProfile.heightCm / 100.0)
+        
+        val totalAllowed = userProfile.bmr + activityKcal
+        val deficit = totalAllowed - intake
+        return (deficit / 7000.0) * 1000.0
+    }
+
+    fun getDayStatusColor(dateIso: String, profile: UserProfile): Int {
+        val entries = allEntries.filter { it.dateIso == dateIso }
+        if (entries.isEmpty()) return 0xFFFF0000.toInt() // Red (No entries)
+        
+        val intake = entries.sumOf { it.kcal }
+        val steps = dailySteps[dateIso] ?: 0
+        val activity = DailyActivity(dateIso, steps)
+        val activityKcal = activity.calculateCalories(profile.weightKg, profile.heightCm / 100.0)
+        
+        val bmrLimit = profile.bmr + activityKcal
+        val deficitLimit = (profile.bmr - profile.goalIntensity) + activityKcal
+        
+        return when {
+            intake <= deficitLimit -> 0xFF2196F3.toInt() // Blue (Goal met)
+            intake <= bmrLimit -> 0xFF4CAF50.toInt()    // Green (Under BMR)
+            else -> 0xFFFFC107.toInt()                 // Yellow (Over BMR)
+        }
+    }
+
     init {
         loadFoods()
         loadMeals()
         loadEntries()
         loadSteps()
         loadCategories()
+        loadWeightHistory()
+        loadVerifications()
         
         // --- DATA INTEGRITY CHECK ---
         val hasDuplicateIds = foods.size != foods.map { it.id }.distinct().size
@@ -870,6 +915,92 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun updateSteps(steps: Int) {
         dailySteps[selectedDate.toString()] = steps
         saveSteps()
+    }
+
+    fun addWeightEntry(weight: Double, profile: UserProfile) {
+        val today = LocalDate.now().toString()
+        val entry = WeightEntry(today, weight)
+        val existingIdx = weightHistory.indexOfFirst { it.dateIso == today }
+        if (existingIdx != -1) {
+            weightHistory[existingIdx] = entry
+        } else {
+            weightHistory.add(entry)
+        }
+        saveWeightHistory()
+        
+        // Background metabolic analysis (secret)
+        calculateMetabolicFactorForProfile(profile)
+    }
+
+    fun calculateMetabolicFactorForProfile(profile: UserProfile): Double {
+        if (weightHistory.size < 3) return profile.metabolicFactor
+        
+        val sorted = weightHistory.sortedBy { it.dateIso }
+        val start = sorted.first()
+        val end = sorted.last()
+        
+        val actualLossKg = start.weight - end.weight
+        if (actualLossKg <= 0) return profile.metabolicFactor // Need actual loss to calculate
+        
+        var predictedLossGrams = 0.0
+        val startDate = LocalDate.parse(start.dateIso)
+        val endDate = LocalDate.parse(end.dateIso)
+        
+        var curr = startDate
+        while (!curr.isAfter(endDate)) {
+            val dateStr = curr.toString()
+            if (dayVerifications[dateStr] == true) {
+                predictedLossGrams += calculateWeightBudgetGrams(dateStr, profile)
+            }
+            curr = curr.plusDays(1)
+        }
+        
+        val predictedLossKg = predictedLossGrams / 1000.0
+        if (predictedLossKg <= 0.1) return profile.metabolicFactor
+        
+        // The factor is the ratio of real vs predicted
+        return actualLossKg / predictedLossKg
+    }
+
+    fun verifyDay(dateIso: String, isComplete: Boolean) {
+        dayVerifications[dateIso] = isComplete
+        saveVerifications()
+    }
+
+    private fun saveWeightHistory() {
+        try {
+            val data = json.encodeToString(weightHistory.toList())
+            prefs.edit().putString("weight_history_json", data).apply()
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    private fun loadWeightHistory() {
+        val data = prefs.getString("weight_history_json", null)
+        if (data != null) {
+            try {
+                val loaded = json.decodeFromString<List<WeightEntry>>(data)
+                weightHistory.clear()
+                weightHistory.addAll(loaded)
+            } catch (e: Exception) { e.printStackTrace() }
+        }
+    }
+
+    private fun saveVerifications() {
+        try {
+            val data = json.encodeToString(dayVerifications.toMap())
+            prefs.edit().putString("verifications_json", data).apply()
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    private fun loadVerifications() {
+        val data = prefs.getString("verifications_json", null)
+        if (data != null) {
+            try {
+                val loaded = json.decodeFromString<Map<String, Boolean>>(data)
+                dayVerifications.clear()
+                dayVerifications.putAll(loaded)
+            } catch (e: Exception) { e.printStackTrace() }
+        }
     }
 
     fun saveFoods() {

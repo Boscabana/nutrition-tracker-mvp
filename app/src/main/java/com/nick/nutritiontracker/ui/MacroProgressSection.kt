@@ -23,7 +23,8 @@ fun MacroProgressSection(
     currentSugar: Double,
     currentUnsaturatedFat: Double,
     currentSaturatedFat: Double,
-    steps: Int
+    steps: Int,
+    weightBudgetGrams: Double
 ) {
     // Activity calories calculation based on MET formula
     val activity = DailyActivity("", steps)
@@ -39,19 +40,30 @@ fun MacroProgressSection(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("Tagesbudget", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Tagesbudget", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                
+                // Weight Budget Badge
+                Surface(
+                    color = if (weightBudgetGrams >= 0) Color(0xFF2E7D32).copy(alpha = 0.1f) else Color.Red.copy(alpha = 0.1f),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Text(
+                        text = if (weightBudgetGrams >= 0) "${weightBudgetGrams.round0()}g geschmolzen 🔥" else "${(-weightBudgetGrams).round0()}g Aufbau ⚠️",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (weightBudgetGrams >= 0) Color(0xFF2E7D32) else Color.Red,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
 
             // Calories Summary with Activity
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Grundbudget", style = MaterialTheme.typography.bodyMedium)
-                    Text("${userProfile.calorieBudget} kcal")
+                    Text("Basis: ${userProfile.calorieBudget} kcal", style = MaterialTheme.typography.bodySmall)
+                    Text("Aktivität: +${activityKcal.round0()} kcal", style = MaterialTheme.typography.bodySmall, color = Color(0xFF2E7D32))
                 }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Aktivität ($steps Schritte)", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF2E7D32))
-                    Text("+${activityKcal.round0()} kcal", color = Color(0xFF2E7D32))
-                }
-                HorizontalDivider(thickness = 0.5.dp)
                 BudgetSummary(
                     label = "Gesamt Kalorien",
                     current = currentKcal,

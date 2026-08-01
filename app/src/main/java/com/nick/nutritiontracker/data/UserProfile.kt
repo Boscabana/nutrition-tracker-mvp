@@ -34,7 +34,10 @@ data class UserProfile(
     val weighInReminderEnabled: Boolean = false,
     val weighInReminderTime: String = "07:00",
     val breakfastReminderEnabled: Boolean = false,
-    val breakfastReminderTime: String = "09:00"
+    val breakfastReminderTime: String = "09:00",
+    
+    val initialWeight: Double? = null,
+    val metabolicFactor: Double = 1.0
 ) {
     val totalPercent: Int get() = proteinPercent + complexCarbsPercent + sugarPercent + unsaturatedFatPercent + saturatedFatPercent
     val isPercentValid: Boolean get() = totalPercent == 100

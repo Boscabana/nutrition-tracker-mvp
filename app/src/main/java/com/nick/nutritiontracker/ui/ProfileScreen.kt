@@ -418,6 +418,17 @@ private fun DeveloperOptionsSection(
                     }
                     Text("Ziel: $goalText", style = MaterialTheme.typography.labelSmall)
                     Text("Finales Budget: ${profile.calorieBudget} kcal", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+
+                    HorizontalDivider()
+                    Text("Stoffwechsel-Analyse", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    
+                    val factor = profile.metabolicFactor
+                    Text("Aktueller Faktor: ${"%.2f".format(factor)}", style = MaterialTheme.typography.labelSmall)
+                    Text(
+                        "Dieser Faktor vergleicht das theoretische Defizit mit dem realen Gewichtsverlust auf der Waage. 1.0 = exakte Übereinstimmung.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
                 }
             }
         }
