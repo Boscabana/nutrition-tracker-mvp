@@ -29,7 +29,12 @@ data class UserProfile(
     val sugarPercent: Int = 10,
     val unsaturatedFatPercent: Int = 20,
     val saturatedFatPercent: Int = 10,
-    val stepGoal: Int = 10000
+    val stepGoal: Int = 10000,
+
+    val weighInReminderEnabled: Boolean = false,
+    val weighInReminderTime: String = "07:00",
+    val breakfastReminderEnabled: Boolean = false,
+    val breakfastReminderTime: String = "09:00"
 ) {
     val totalPercent: Int get() = proteinPercent + complexCarbsPercent + sugarPercent + unsaturatedFatPercent + saturatedFatPercent
     val isPercentValid: Boolean get() = totalPercent == 100

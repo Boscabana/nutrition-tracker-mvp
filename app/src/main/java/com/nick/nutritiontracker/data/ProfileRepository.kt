@@ -28,6 +28,11 @@ class ProfileRepository(private val context: Context) {
         val SUGAR_PCT = intPreferencesKey("sugar_percent")
         val UNSATURATED_FAT_PCT = intPreferencesKey("unsaturated_fat_percent")
         val SATURATED_FAT_PCT = intPreferencesKey("saturated_fat_percent")
+
+        val WEIGH_IN_REMINDER_ENABLED = booleanPreferencesKey("weigh_in_reminder_enabled")
+        val WEIGH_IN_REMINDER_TIME = stringPreferencesKey("weigh_in_reminder_time")
+        val BREAKFAST_REMINDER_ENABLED = booleanPreferencesKey("breakfast_reminder_enabled")
+        val BREAKFAST_REMINDER_TIME = stringPreferencesKey("breakfast_reminder_time")
     }
 
     val userProfileFlow: Flow<UserProfile> = context.dataStore.data
@@ -52,7 +57,11 @@ class ProfileRepository(private val context: Context) {
                 complexCarbsPercent = preferences[PreferencesKeys.COMPLEX_CARBS_PCT] ?: 40,
                 sugarPercent = preferences[PreferencesKeys.SUGAR_PCT] ?: 10,
                 unsaturatedFatPercent = preferences[PreferencesKeys.UNSATURATED_FAT_PCT] ?: 20,
-                saturatedFatPercent = preferences[PreferencesKeys.SATURATED_FAT_PCT] ?: 10
+                saturatedFatPercent = preferences[PreferencesKeys.SATURATED_FAT_PCT] ?: 10,
+                weighInReminderEnabled = preferences[PreferencesKeys.WEIGH_IN_REMINDER_ENABLED] ?: false,
+                weighInReminderTime = preferences[PreferencesKeys.WEIGH_IN_REMINDER_TIME] ?: "07:00",
+                breakfastReminderEnabled = preferences[PreferencesKeys.BREAKFAST_REMINDER_ENABLED] ?: false,
+                breakfastReminderTime = preferences[PreferencesKeys.BREAKFAST_REMINDER_TIME] ?: "09:00"
             )
         }
 
@@ -71,6 +80,10 @@ class ProfileRepository(private val context: Context) {
             preferences[PreferencesKeys.SUGAR_PCT] = profile.sugarPercent
             preferences[PreferencesKeys.UNSATURATED_FAT_PCT] = profile.unsaturatedFatPercent
             preferences[PreferencesKeys.SATURATED_FAT_PCT] = profile.saturatedFatPercent
+            preferences[PreferencesKeys.WEIGH_IN_REMINDER_ENABLED] = profile.weighInReminderEnabled
+            preferences[PreferencesKeys.WEIGH_IN_REMINDER_TIME] = profile.weighInReminderTime
+            preferences[PreferencesKeys.BREAKFAST_REMINDER_ENABLED] = profile.breakfastReminderEnabled
+            preferences[PreferencesKeys.BREAKFAST_REMINDER_TIME] = profile.breakfastReminderTime
         }
     }
 }

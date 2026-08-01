@@ -43,6 +43,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.PopupProperties
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
+import com.nick.nutritiontracker.ReminderManager
 import com.nick.nutritiontracker.data.*
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
 import com.nick.nutritiontracker.viewmodel.ProfileViewModel
@@ -94,6 +95,10 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
     if (showSetup) {
         SetupWizard(profileVm, vm)
     } else {
+        val context = LocalContext.current
+        LaunchedEffect(userProfile) {
+            ReminderManager.scheduleReminders(context, userProfile)
+        }
         MainApp(vm, profileVm, userProfile)
     }
 }

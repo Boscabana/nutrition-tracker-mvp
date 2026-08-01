@@ -11,7 +11,6 @@ import androidx.core.app.NotificationManagerCompat
 
 object NotificationHelper {
     private const val CHANNEL_ID = "reminder_channel"
-    private const val NOTIFICATION_ID = 1001
 
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -28,6 +27,24 @@ object NotificationHelper {
     }
 
     fun showBreakfastReminder(context: Context) {
+        showNotification(
+            context,
+            1001,
+            "Frühstück vergessen?",
+            "Hey, heute schon gefrühstückt? Schau vorbei und trage es ein."
+        )
+    }
+
+    fun showWeighInReminder(context: Context) {
+        showNotification(
+            context,
+            1002,
+            "Zeit für die Waage",
+            "Guten Morgen! Denk daran, dich heute zu wiegen und den Wert einzutragen."
+        )
+    }
+
+    private fun showNotification(context: Context, notificationId: Int, title: String, text: String) {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         }
@@ -36,16 +53,16 @@ object NotificationHelper {
         )
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info) // Ersetze dies später durch ein eigenes App-Icon
-            .setContentTitle("Frühstück vergessen?")
-            .setContentText("Hey, heute schon gefrühstückt? Schau vorbei und trage es ein.")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
 
         with(NotificationManagerCompat.from(context)) {
             try {
-                notify(NOTIFICATION_ID, builder.build())
+                notify(notificationId, builder.build())
             } catch (e: SecurityException) {
                 // Permission not granted
             }

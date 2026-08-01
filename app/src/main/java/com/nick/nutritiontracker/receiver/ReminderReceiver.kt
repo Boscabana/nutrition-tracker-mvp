@@ -6,24 +6,38 @@ import android.content.Intent
 import com.nick.nutritiontracker.NotificationHelper
 import com.nick.nutritiontracker.ReminderManager
 import com.nick.nutritiontracker.data.FoodEntryEntity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import java.time.LocalDate
 
 class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
-            // Nach Neustart des Geräts den Alarm wieder planen
-            ReminderManager.scheduleReminder(context)
+            val profileRepo = com.nick.nutritiontracker.data.ProfileRepository(context)
+            CoroutineScope(Dispatchers.Main).launch {
+                val profile = profileRepo.userProfileFlow.first()
+                ReminderManager.scheduleReminders(context, profile)
+            }
             return
         }
 
-        // Prüfen, ob für heute bereits ein Frühstück eingetragen wurde
-        if (shouldShowReminder(context)) {
-            NotificationHelper.showBreakfastReminder(context)
+        val type = intent.getStringExtra("reminder_type")
+        when (type) {
+            "breakfast" -> {
+                if (shouldShowBreakfastReminder(context)) {
+                    NotificationHelper.showBreakfastReminder(context)
+                }
+            }
+            "weigh_in" -> {
+                NotificationHelper.showWeighInReminder(context)
+            }
         }
     }
 
-    private fun shouldShowReminder(context: Context): Boolean {
+    private fun shouldShowBreakfastReminder(context: Context): Boolean {
         val prefs = context.getSharedPreferences("nutrition_tracker", Context.MODE_PRIVATE)
         val data = prefs.getString("entries_json", null) ?: return true
         

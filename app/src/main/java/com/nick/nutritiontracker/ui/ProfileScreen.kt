@@ -46,6 +46,11 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
     var gender by remember(userProfile) { mutableStateOf(userProfile.gender) }
     var goal by remember(userProfile) { mutableStateOf(userProfile.goal) }
     var intensity by remember(userProfile) { mutableStateOf(userProfile.goalIntensity.toString()) }
+
+    var weighInEnabled by remember(userProfile) { mutableStateOf(userProfile.weighInReminderEnabled) }
+    var weighInTime by remember(userProfile) { mutableStateOf(userProfile.weighInReminderTime) }
+    var breakfastEnabled by remember(userProfile) { mutableStateOf(userProfile.breakfastReminderEnabled) }
+    var breakfastTime by remember(userProfile) { mutableStateOf(userProfile.breakfastReminderTime) }
     
     var pPct by remember(userProfile) { mutableStateOf(userProfile.proteinPercent.toString()) }
     var cCarbPct by remember(userProfile) { mutableStateOf(userProfile.complexCarbsPercent.toString()) }
@@ -215,7 +220,26 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
         
         Card {
             Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("App-Einstellungen", fontWeight = FontWeight.Bold)
+                Text("App-Einstellungen & Erinnerungen", fontWeight = FontWeight.Bold)
+                
+                ReminderSettingRow(
+                    label = "An Wiegen erinnern",
+                    enabled = weighInEnabled,
+                    time = weighInTime,
+                    onEnabledChange = { weighInEnabled = it },
+                    onTimeChange = { weighInTime = it }
+                )
+
+                ReminderSettingRow(
+                    label = "An Frühstück erinnern",
+                    enabled = breakfastEnabled,
+                    time = breakfastTime,
+                    onEnabledChange = { breakfastEnabled = it },
+                    onTimeChange = { breakfastTime = it }
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Tour bei jedem App-Start zeigen", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                     Switch(
@@ -237,6 +261,10 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
                     gender = gender,
                     goal = goal,
                     goalIntensity = intensity.toIntOrNull() ?: userProfile.goalIntensity,
+                    weighInReminderEnabled = weighInEnabled,
+                    weighInReminderTime = weighInTime,
+                    breakfastReminderEnabled = breakfastEnabled,
+                    breakfastReminderTime = breakfastTime,
                     proteinPercent = pPct.toIntOrNull() ?: userProfile.proteinPercent,
                     complexCarbsPercent = cCarbPct.toIntOrNull() ?: userProfile.complexCarbsPercent,
                     sugarPercent = sugarPct.toIntOrNull() ?: userProfile.sugarPercent,
@@ -581,6 +609,95 @@ private fun HouseholdManagementSection(vm: NutritionViewModel) {
             }
         )
     }
+}
+
+@Composable
+private fun ReminderSettingRow(
+    label: String,
+    enabled: Boolean,
+    time: String,
+    onEnabledChange: (Boolean) -> Unit,
+    onTimeChange: (String) -> Unit
+) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            if (enabled) {
+                Text(text = "Um $time Uhr", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            }
+        }
+        
+        if (enabled) {
+            var showTimePicker by remember { mutableStateOf(false) }
+            if (showTimePicker) {
+                TimePickerDialog(
+                    initialTime = time,
+                    onDismiss = { showTimePicker = false },
+                    onConfirm = { 
+                        onTimeChange(it)
+                        showTimePicker = false
+                    }
+                )
+            }
+            
+            TextButton(onClick = { showTimePicker = true }) {
+                Text(time)
+            }
+        }
+        
+        Switch(
+            checked = enabled,
+            onCheckedChange = onEnabledChange,
+            modifier = Modifier.scale(0.8f)
+        )
+    }
+}
+
+@Composable
+private fun TimePickerDialog(
+    initialTime: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    val parts = initialTime.split(":")
+    var hour by remember { mutableStateOf(parts.getOrNull(0) ?: "08") }
+    var minute by remember { mutableStateOf(parts.getOrNull(1) ?: "00") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Uhrzeit wählen") },
+        text = {
+            Row(
+                Modifier.fillMaxWidth(), 
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = hour,
+                    onValueChange = { if (it.length <= 2) hour = it },
+                    modifier = Modifier.width(64.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+                Text(":", modifier = Modifier.padding(horizontal = 8.dp), style = MaterialTheme.typography.headlineMedium)
+                OutlinedTextField(
+                    value = minute,
+                    onValueChange = { if (it.length <= 2) minute = it },
+                    modifier = Modifier.width(64.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val h = hour.padStart(2, '0')
+                val m = minute.padStart(2, '0')
+                onConfirm("$h:$m")
+            }) { Text("OK") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Abbrechen") }
+        }
+    )
 }
 
 @Composable

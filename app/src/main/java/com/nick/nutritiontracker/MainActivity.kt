@@ -30,7 +30,6 @@ class MainActivity : ComponentActivity() {
         
         // Initialisiere Benachrichtigungen
         NotificationHelper.createNotificationChannel(this)
-        ReminderManager.scheduleReminder(this)
         
         requestNotificationPermission()
 
