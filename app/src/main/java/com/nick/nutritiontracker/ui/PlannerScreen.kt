@@ -47,7 +47,7 @@ fun PlannerScreen(vm: NutritionViewModel) {
         if (currentEntry.isMeal) {
             EditMealEntryDialog(
                 entry = currentEntry,
-                foods = vm.foods,
+                vm = vm,
                 onDismiss = { entryToEdit = null },
                 onSave = { updated ->
                     vm.updatePlannedEntry(updated)
@@ -57,7 +57,7 @@ fun PlannerScreen(vm: NutritionViewModel) {
         } else {
             EditEntryDialog(
                 entry = currentEntry,
-                foods = vm.foods,
+                vm = vm,
                 onDismiss = { entryToEdit = null },
                 onSave = { updated ->
                     vm.updatePlannedEntry(updated)

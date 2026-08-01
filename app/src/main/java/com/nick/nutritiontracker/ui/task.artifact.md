@@ -1,17 +1,5 @@
-- [ ] **Phase 1: Data Models**
-    - [ ] Update `FoodItemEntity.kt` with `isPantryItem`
-    - [ ] Update `ShoppingItem.kt` with `isPantryItem`
-- [ ] **Phase 2: Business Logic**
-    - [ ] Update `addPlannedEntry` and `addPlannedMeal` to set `isPantryItem` in `ShoppingItem`
-    - [ ] Add `showPantryInShoppingList` state to `NutritionViewModel`
-    - [ ] Update `updatePlannedEntry` (to be created) for swipe-to-edit
-- [ ] **Phase 3: Articles & Pantry UI**
-    - [ ] Add "Vorratsartikel" toggle to `FoodEditDialog`
-    - [ ] Implement `PantryScreen` and link it in `FoodsScreen`
-- [ ] **Phase 4: Shopping List UI**
-    - [ ] Implement Pantry toggle switch
-    - [ ] Update card click behavior (Check & Archive)
-- [ ] **Phase 5: Planner UI**
-    - [ ] Add swipe-to-edit to `PlannerScreen`
-    - [ ] Link `EditEntryDialog` and `EditMealEntryDialog` to Planner swiping
+- [ ] Update `MealEditDialog` in `MealsScreen.kt`
+    - [ ] Dynamic title based on meal ID
+    - [ ] Info banner if orphaned items exist
+- [ ] Fix unused variable warning in `NutritionViewModel.kt`
 - [ ] Verify build and functionality

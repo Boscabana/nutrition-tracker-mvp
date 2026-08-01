@@ -85,7 +85,7 @@ fun MealsScreen(
     if (showAddDialog || mealToEdit != null) {
         MealEditDialog(
             meal = mealToEdit,
-            foods = foods,
+            vm = vm,
             onDismiss = {
                 showAddDialog = false
                 mealToEdit = null
@@ -221,10 +221,11 @@ fun MealsScreen(
 @Composable
 fun MealEditDialog(
     meal: MealEntity?,
-    foods: List<FoodItemEntity>,
+    vm: NutritionViewModel,
     onDismiss: () -> Unit,
     onSave: (String, List<MealIngredientEntity>, Double) -> Unit
 ) {
+    val foods = vm.foods
     var name by remember(meal?.id) { mutableStateOf(meal?.name ?: "") }
     var servings by remember(meal?.id) { mutableStateOf(meal?.servings?.roundString() ?: "1") }
     val ingredients = remember(meal?.id) { 
@@ -285,9 +286,32 @@ fun MealEditDialog(
         ) {
             Column(Modifier.padding(16.dp)) {
                 Text(
-                    if (meal == null) "Mahlzeit erstellen" else "Mahlzeit bearbeiten",
+                    text = when {
+                        meal == null -> "Mahlzeit erstellen"
+                        meal.id == 0L -> "Mahlzeit aus Auswahl erstellen"
+                        else -> "Mahlzeit bearbeiten"
+                    },
                     style = MaterialTheme.typography.headlineSmall
                 )
+                
+                val hasOrphans = remember(ingredients.size) { ingredients.any { ing -> foods.none { it.id == ing.foodItemId } } }
+                if (hasOrphans) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    ) {
+                        Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Hinweis: Enthaltene Einzelartikel werden automatisch in deiner Bibliothek gespeichert.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                }
+
                 Spacer(Modifier.height(8.dp))
                 
                 AutoSelectTextField(
@@ -362,7 +386,7 @@ fun MealEditDialog(
                     items(ingredients, key = { it.id }) { ingredient ->
                         IngredientRow(
                             ingredient = ingredient,
-                            foods = foods,
+                            vm = vm,
                             onUpdate = { updated ->
                                 val idx = ingredients.indexOfFirst { it.id == ingredient.id }
                                 if (idx != -1) ingredients[idx] = updated
@@ -446,10 +470,11 @@ fun AddIngredientDialog(
 @Composable
 fun IngredientRow(
     ingredient: MealIngredientEntity,
-    foods: List<FoodItemEntity>,
+    vm: NutritionViewModel,
     onUpdate: (MealIngredientEntity) -> Unit,
     onRemove: () -> Unit
 ) {
+    val foods = vm.foods
     val food = foods.find { it.id == ingredient.foodItemId }
     val parent = food?.parentId?.let { pId -> foods.find { it.id == pId } }
     val allPortions = food?.getAllPortions(parent) ?: emptyList()
@@ -485,7 +510,12 @@ fun IngredientRow(
                             color = if (isOrphaned) Color.Red else Color.Unspecified
                         )
                         if (isOrphaned) {
-                            Icon(Icons.Default.Error, null, tint = Color.Red, modifier = Modifier.size(14.dp).padding(start = 4.dp))
+                            Icon(
+                                imageVector = Icons.Default.Save, 
+                                contentDescription = "Wird automatisch gespeichert", 
+                                tint = Color(0xFF2E7D32), 
+                                modifier = Modifier.size(14.dp).padding(start = 4.dp)
+                            )
                         }
                         
                         if (relatives.isNotEmpty()) {
@@ -548,7 +578,7 @@ fun IngredientRow(
                         }
                     }
                     if (isOrphaned) {
-                        Text("ACHTUNG: Dieser Artikel existiert nicht mehr!", style = MaterialTheme.typography.labelSmall, color = Color.Red)
+                        Text("Wird automatisch gespeichert", style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
                     } else {
                         food?.let { f ->
                             if (!f.brand.isNullOrBlank() || !f.store.isNullOrBlank()) {
@@ -561,7 +591,9 @@ fun IngredientRow(
                         }
                     }
                 }
-                IconButton(onClick = onRemove) { Icon(Icons.Default.Close, null, tint = Color.Red) }
+                IconButton(onClick = onRemove, modifier = Modifier.size(32.dp)) { 
+                    Icon(Icons.Default.Close, null, tint = Color.Red, modifier = Modifier.size(18.dp)) 
+                }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AutoSelectTextField(

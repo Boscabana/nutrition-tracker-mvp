@@ -1,45 +1,36 @@
-# Implementation Plan - Pantry System and UX Enhancements
+# Implementation Plan - Prominent Saving Notice
 
-This plan introduces a "Pantry" (Vorratsschrank) system to track items that are always in stock, improves the shopping list workflow, and adds gesture-based editing to the meal planner.
+This plan adds a clear, dialog-wide hint when creating a meal from the diary that contains articles not yet in the library. This ensures the user is aware that these items will be automatically persisted.
 
 ## Proposed Changes
 
-### [Data Models]
-
-#### [MODIFY] [FoodItemEntity.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/data/FoodItemEntity.kt)
-- Add `val isPantryItem: Boolean = false` to track if an item should be considered a staple.
-
-#### [MODIFY] [ShoppingItem.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/data/ShoppingItem.kt)
-- Add `val isPantryItem: Boolean = false`.
-- This will allow filtering these items on the shopping list even if they were added via the planner.
-
-### [Business Logic]
-
-#### [MODIFY] [NutritionViewModel.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/viewmodel/NutritionViewModel.kt)
-- **State**: Add `var showPantryInShoppingList by mutableStateOf(false)`.
-- **Planned Entries**: Update `addPlannedEntry` and `addPlannedMeal` to set `isPantryItem` on the resulting `ShoppingItem` if the source food item is marked as a pantry item.
-- **Toggle Action**: Update `toggleShoppingItem` to handle the "Check & Archive" logic as requested. Clicking an item will mark it as checked, moving it to the archive section.
-
 ### [User Interface]
 
+#### [MODIFY] [MealsScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/MealsScreen.kt)
+- **`MealEditDialog` Title & Banner**:
+    - Update the title to say "Mahlzeit aus Auswahl erstellen" if `meal?.id == 0L`.
+    - Detect if any ingredient is "orphaned" (id not in library).
+    - If orphans exist, show a **prominent banner** at the top of the dialog (e.g., a `Card` with a primary color background or an info icon) stating: "Hinweis: Enthaltene Einzelartikel werden automatisch in deiner Bibliothek gespeichert."
+- **`IngredientRow`**: Refine the per-row hint to be slightly more subtle now that a global notice exists.
+
 #### [MODIFY] [NutritionApp.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/NutritionApp.kt)
-- **`FoodEditDialog`**: Add a Switch for "Vorratsartikel" (Pantry Item).
-- **`FoodsScreen`**: Add a "Vorratsschrank" button in the header.
-- **[NEW] `PantryScreen`**: A view that displays only food items marked as `isPantryItem`.
+- **`DiarySelectionActions`**: (No change needed here, as the dialog itself will handle the notice).
 
-#### [MODIFY] [ShoppingListScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/ShoppingListScreen.kt)
-- **Filtering**: By default, hide active items where `isPantryItem == true`.
-- **Toggle**: Add a switch "Vorratsartikel anzeigen" in the header.
-- **Interaction**: Make the entire shopping item card clickable to trigger the check/archive action.
+### [Code Quality]
 
-#### [MODIFY] [PlannerScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/PlannerScreen.kt)
-- **Gestures**: Wrap `PlannedEntryRow` with `SwipeActionContainer`.
-- **Actions**: Add an edit action to the swipe (similar to the Today screen) to allow changing portions or meal types for planned entries.
+#### [MODIFY] [NutritionViewModel.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/viewmodel/NutritionViewModel.kt)
+- Fix the `idx` warning in `updateMealTemplate`.
 
 ## Verification Plan
 
 ### Manual Verification
-1.  **Pantry Toggle**: Mark "Salz" as a pantry item. Plan a meal with salt. Verify it doesn't appear on the shopping list until "Vorratsartikel anzeigen" is enabled.
-2.  **Pantry View**: Go to "Artikel" -> "Vorratsschrank". Verify "Salz" is listed there.
-3.  **Shopping List Archive**: Click a shopping item (not just the checkbox). Verify it moves instantly to "Zuletzt verwendet".
-4.  **Planner Swipe**: Swipe a planned meal to the right. Verify the edit dialog opens and allows changing servings/slot.
+1.  **Selection Creation Flow**:
+    - Select unsaved items in the diary.
+    - Tap the "Create Meal" icon.
+    - Verify the dialog title is "Mahlzeit aus Auswahl erstellen".
+    - Verify the prominent info banner is visible at the top.
+2.  **Regular Edit Flow**:
+    - Edit an existing meal that only has saved articles.
+    - Verify the dialog title is "Mahlzeit bearbeiten" and NO banner is shown.
+3.  **Library Sync**:
+    - Save the meal and verify articles are added to the library as before.
