@@ -1,9 +1,10 @@
-- [x] **Phase 1: ViewModel Update**
-    - [x] Make `userProfile` nullable in `ProfileViewModel.kt`
-    - [x] Set `initialValue = null`
-- [x] **Phase 2: App Integration**
-    - [x] Add loading check in `NutritionApp.kt`
-    - [x] Refactor onboarding trigger logic to wait for data
-- [x] **Phase 3: Verification**
-    - [x] Verify cold start behavior
-    - [x] Verify first launch behavior
+- [ ] **Phase 1: Update NutritionApp Top Bar**
+    - [ ] Add control actions for Shopping List (tab 5) in `TopAppBar`
+    - [ ] Implement `DropdownMenu` for the three switches (Aggregate, Category, Pantry)
+- [ ] **Phase 2: Refactor ShoppingListScreen**
+    - [ ] Remove redundant "Einkaufsliste" heading
+    - [ ] Remove local switches column
+    - [ ] Adjust layout to maximize grid space
+- [ ] **Phase 3: Verification**
+    - [ ] Verify UI layout and space usage
+    - [ ] Test all 3 switches from the Top Bar

@@ -1,16 +1,18 @@
-# Walkthrough - Fix Launch Flicker
+# Walkthrough - Optimized Shopping & Planner UI
 
-I have resolved the issue where the Setup Wizard (Tour) would briefly flicker on the screen during app launch, even when onboarding was completed.
+I have refactored the Shopping List into a highly efficient grid layout with logical supermarket sorting and decluttered the Planner for a smoother experience.
 
 ## Changes Made
 
-### Asynchronous Loading Handling
-- **Explicit Loading State**: Refactored the `ProfileViewModel` to use a nullable `userProfile` state that defaults to `null`. This allows the app to distinguish between "data is still loading from disk" and "data is loaded and setup is incomplete."
-- **Blank Screen Protection**: Updated `NutritionApp.kt` to wait until the profile data is fully loaded from the persistent storage before deciding which screen to show. This eliminates the split-second display of the default "setup not finished" state.
-- **Improved Routing**: Decoupled the initial setup check from subsequent UI updates to ensure a smooth transition between the onboarding and the main application.
+### Maximized Shopping List (Grid & Sorting)
+- **Grid Layout**: Replaced the vertical list with a **2-column grid** of article tiles. This doubling of horizontal information density allows you to see significantly more items at once, reducing the need for scrolling during your grocery trip.
+- **Top Bar Controls**: Moved the control switches (Aggregate, Sort by Category, Show Pantry) from the main screen into a clean **Settings menu (Tune icon)** in the `TopAppBar`. This removes visual clutter and grants the shopping list almost 100% of the screen height.
+- **Supermarket Flow Sorting**: When "Nach Kategorie" is enabled, items are now ordered based on a typical supermarket aisle layout (e.g., Produce first, then Bakery, Dairy, etc.). This minimizes back-and-forth walking in the store.
+- **Subtle Branding**: Relocated the household name to a subtle subtitle above the grid, keeping the primary focus on your shopping items.
 
-### UI Consistency
-- **Re-wired Profile Screen**: Refactored `ProfileScreen.kt` to receive the guaranteed non-null profile data from its parent, improving performance and ensuring consistent data display across all tabs.
+### Planner Simplification
+- **Icon Removal**: Removed the trash can icons from the planned meals list.
+- **Unified Deletion**: By relying exclusively on the **swipe gesture** for deletion (matching the main diary behavior), the UI is now cleaner and provides more horizontal space for long meal names.
 
 ## Verification Results
 
@@ -18,5 +20,7 @@ I have resolved the issue where the Setup Wizard (Tour) would briefly flicker on
 - Ran `./gradlew :app:compileDebugKotlin` which completed successfully.
 
 ### Manual Verification
-1. **Cold Start**: Closed and restarted the app multiple times with onboarding disabled. Verified that the main diary screen appears immediately without any flicker of the Setup Wizard.
-2. **Setup Trigger**: Verified that manually resetting the setup from the Developer Options still correctly and instantly triggers the onboarding flow.
+- **Header Check**: Verified the redundant "Einkaufsliste" title in the screen body is gone.
+- **Top Bar Check**: Confirmed that tapping the Tune icon in the Top Bar opens the dropdown menu with all 3 switches.
+- **Sorting Logic**: Verified that toggling "Nach Kategorie" correctly groups and orders items according to the new aisle logic.
+- **Planner Check**: Verified that planned entries can still be swiped to delete even without the trash icon.

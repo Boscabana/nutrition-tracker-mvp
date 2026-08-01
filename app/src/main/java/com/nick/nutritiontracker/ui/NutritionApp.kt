@@ -263,6 +263,59 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                                     Icon(Icons.Default.Sync, contentDescription = "Sync steps")
                                 }
                             }
+                            
+                            if (tab == 5) {
+                                var showMenu by remember { mutableStateOf(false) }
+                                Box {
+                                    IconButton(onClick = { showMenu = true }) {
+                                        Icon(Icons.Default.Tune, "Einstellungen")
+                                    }
+                                    DropdownMenu(
+                                        expanded = showMenu,
+                                        onDismissRequest = { showMenu = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { 
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Text("Zusammenfassen", modifier = Modifier.weight(1f))
+                                                    Switch(
+                                                        checked = vm.isShoppingListAggregated,
+                                                        onCheckedChange = { vm.isShoppingListAggregated = it },
+                                                        modifier = Modifier.scale(0.7f)
+                                                    )
+                                                }
+                                            },
+                                            onClick = { vm.isShoppingListAggregated = !vm.isShoppingListAggregated }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { 
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Text("Nach Kategorie", modifier = Modifier.weight(1f))
+                                                    Switch(
+                                                        checked = vm.shoppingListSortByCategory,
+                                                        onCheckedChange = { vm.updateShoppingListSort(it) },
+                                                        modifier = Modifier.scale(0.7f)
+                                                    )
+                                                }
+                                            },
+                                            onClick = { vm.updateShoppingListSort(!vm.shoppingListSortByCategory) }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { 
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Text("Vorrat anzeigen", modifier = Modifier.weight(1f))
+                                                    Switch(
+                                                        checked = vm.showPantryInShoppingList,
+                                                        onCheckedChange = { vm.showPantryInShoppingList = it },
+                                                        modifier = Modifier.scale(0.7f)
+                                                    )
+                                                }
+                                            },
+                                            onClick = { vm.showPantryInShoppingList = !vm.showPantryInShoppingList }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     )
                 }

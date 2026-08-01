@@ -118,7 +118,7 @@ fun PlannerScreen(vm: NutritionViewModel) {
                     onDeleteRequest = { vm.deletePlannedEntry(entry.id) },
                     onEditRequest = { entryToEdit = entry }
                 ) {
-                    PlannedEntryRow(entry, onDelete = { vm.deletePlannedEntry(entry.id) })
+                    PlannedEntryRow(entry)
                 }
             }
         }
@@ -126,7 +126,7 @@ fun PlannerScreen(vm: NutritionViewModel) {
 }
 
 @Composable
-fun PlannedEntryRow(entry: FoodEntryEntity, onDelete: () -> Unit) {
+fun PlannedEntryRow(entry: FoodEntryEntity) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))
@@ -138,9 +138,6 @@ fun PlannedEntryRow(entry: FoodEntryEntity, onDelete: () -> Unit) {
             Column(Modifier.weight(1f)) {
                 Text(entry.name, fontWeight = FontWeight.Bold)
                 Text("${entry.mealSlot} · ${entry.displayAmount()}", style = MaterialTheme.typography.labelSmall)
-            }
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, "Löschen", tint = Color.Red)
             }
         }
     }

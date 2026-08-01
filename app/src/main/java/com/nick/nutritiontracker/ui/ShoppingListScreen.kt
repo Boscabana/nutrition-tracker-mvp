@@ -1,14 +1,21 @@
 package com.nick.nutritiontracker.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Kitchen
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,6 +48,12 @@ fun ShoppingListScreen(vm: NutritionViewModel) {
         derivedStateOf { rawShoppingList.filter { it.isChecked } } 
     }
 
+    val categoryOrder = listOf(
+        "Obst", "Gemüse", "Backwaren", "Kühlregal", "Fleisch", 
+        "Milchprodukte", "Protein", "Teigwaren", "Convenience", 
+        "Fertiggerichte", "Tiefkühlprodukte", "Süßigkeiten", "Getränke"
+    )
+
     val aggregatedActiveList by remember(activeItems, vm.isShoppingListAggregated) {
         derivedStateOf {
             if (vm.isShoppingListAggregated) {
@@ -65,7 +78,9 @@ fun ShoppingListScreen(vm: NutritionViewModel) {
                                     householdId = first.householdId,
                                     sourceName = if (weightItems.size > 1) "${weightItems.size} Quellen" else first.sourceName,
                                     weightGrams = totalWeight,
-                                    baseUnit = first.baseUnit
+                                    baseUnit = first.baseUnit,
+                                    category = first.category,
+                                    isPantryItem = weightItems.any { it.isPantryItem }
                                 )
                             )
                         }
@@ -85,7 +100,9 @@ fun ShoppingListScreen(vm: NutritionViewModel) {
                                             householdId = first.householdId,
                                             sourceName = if (group.size > 1) "${group.size} Quellen" else first.sourceName,
                                             weightGrams = 0.0,
-                                            baseUnit = first.baseUnit
+                                            baseUnit = first.baseUnit,
+                                            category = first.category,
+                                            isPantryItem = group.any { it.isPantryItem }
                                         )
                                     )
                                 }
@@ -98,12 +115,20 @@ fun ShoppingListScreen(vm: NutritionViewModel) {
         }
     }
 
-    val groupedActiveItems by remember(aggregatedActiveList, vm.isShoppingListAggregated) {
+    val groupedActiveItems by remember(aggregatedActiveList, vm.isShoppingListAggregated, vm.shoppingListSortByCategory) {
         derivedStateOf {
-            if (!vm.isShoppingListAggregated) {
-                aggregatedActiveList.groupBy { it.sourceName ?: "Manuell hinzugefügt" }
+            if (vm.shoppingListSortByCategory) {
+                aggregatedActiveList.groupBy { 
+                    val cat = it.category
+                    if (cat.isNullOrBlank()) "Sonstiges" else cat 
+                }
+                    .toList()
+                    .sortedBy { (cat, _) -> 
+                        val idx = categoryOrder.indexOf(cat)
+                        if (idx == -1) categoryOrder.size else idx
+                    }.toMap()
             } else {
-                emptyMap()
+                aggregatedActiveList.groupBy { it.sourceName ?: "Manuell hinzugefügt" }
             }
         }
     }
@@ -122,112 +147,87 @@ fun ShoppingListScreen(vm: NutritionViewModel) {
             }
         }
     ) { padding ->
-        Column(Modifier.padding(padding).padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Einkaufsliste", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                
-                Column(horizontalAlignment = Alignment.End) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Zusammenfassen", style = MaterialTheme.typography.labelSmall)
-                        Switch(
-                            checked = vm.isShoppingListAggregated,
-                            onCheckedChange = { vm.isShoppingListAggregated = it },
-                            modifier = Modifier.scale(0.6f)
-                        )
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("Vorrat anzeigen", style = MaterialTheme.typography.labelSmall)
-                        Switch(
-                            checked = vm.showPantryInShoppingList,
-                            onCheckedChange = { vm.showPantryInShoppingList = it },
-                            modifier = Modifier.scale(0.6f)
-                        )
-                    }
-                }
+        Column(Modifier.padding(padding).padding(horizontal = 12.dp)) {
+            if (!household?.name.isNullOrBlank()) {
+                Text(
+                    text = "Haushalt: ${household!!.name}", 
+                    style = MaterialTheme.typography.labelSmall, 
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(vertical = 4.dp)
+                )
             }
-            
-            Text(household?.name ?: "", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
 
-            Spacer(Modifier.height(16.dp))
-
-            LazyColumn(
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(2),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(bottom = 80.dp)
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(top = 4.dp, bottom = 80.dp)
             ) {
-                // ACTIVE ITEMS
-                if (vm.isShoppingListAggregated) {
-                    items(aggregatedActiveList) { item ->
-                        ShoppingItemRow(
+                groupedActiveItems.forEach { (header, items) ->
+                    item(key = "header_$header", span = { GridItemSpan(2) }) {
+                        Text(
+                            text = header,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                        )
+                    }
+                    items(items, key = { it.id }) { item ->
+                        ShoppingItemTile(
                             item = item,
                             onToggle = { vm.toggleShoppingItem(item) },
                             onDelete = { 
-                                val isWeightItem = item.weightGrams > 0
-                                val related = activeItems.filter { 
-                                    val nameMatch = it.name.equals(item.name, ignoreCase = true)
-                                    if (isWeightItem) {
-                                        nameMatch && it.weightGrams > 0 && it.baseUnit.equals(item.baseUnit, ignoreCase = true)
-                                    } else {
-                                        nameMatch && it.unit.equals(item.unit, ignoreCase = true)
+                                if (vm.isShoppingListAggregated) {
+                                    val isWeightItem = item.weightGrams > 0
+                                    val related = activeItems.filter { 
+                                        val nameMatch = it.name.equals(item.name, ignoreCase = true)
+                                        if (isWeightItem) {
+                                            nameMatch && it.weightGrams > 0 && it.baseUnit.equals(item.baseUnit, ignoreCase = true)
+                                        } else {
+                                            nameMatch && it.unit.equals(item.unit, ignoreCase = true)
+                                        }
                                     }
+                                    related.forEach { vm.deleteShoppingItem(it.id) }
+                                } else {
+                                    vm.deleteShoppingItem(item.id)
                                 }
-                                related.forEach { vm.deleteShoppingItem(it.id) }
                             }
                         )
                     }
-                } else {
-                    groupedActiveItems.forEach { (source, items) ->
-                        item(key = source) {
-                            Text(
-                                text = source,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
-                            )
-                        }
-                        items(items, key = { it.id }) { item ->
-                            ShoppingItemRow(
-                                item = item,
-                                onToggle = { vm.toggleShoppingItem(item) },
-                                onDelete = { vm.deleteShoppingItem(item.id) }
-                            )
-                        }
-                    }
                 }
 
-                // ARCHIVE SECTION
                 if (checkedItems.isNotEmpty()) {
-                    item {
-                        HorizontalDivider(Modifier.padding(vertical = 16.dp))
-                        Surface(
-                            onClick = { isArchiveExpanded = !isArchiveExpanded },
-                            modifier = Modifier.fillMaxWidth(),
-                            color = Color.Transparent
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                modifier = Modifier.padding(vertical = 8.dp)
+                    item(key = "archive_header", span = { GridItemSpan(2) }) {
+                        Column {
+                            HorizontalDivider(Modifier.padding(vertical = 16.dp))
+                            Surface(
+                                onClick = { isArchiveExpanded = !isArchiveExpanded },
+                                modifier = Modifier.fillMaxWidth(),
+                                color = Color.Transparent
                             ) {
-                                Text(
-                                    "Zuletzt verwendet (${checkedItems.size})",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    color = MaterialTheme.colorScheme.outline
-                                )
-                                Icon(
-                                    imageVector = if (isArchiveExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.outline
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.padding(vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        "Zuletzt verwendet (${checkedItems.size})",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+                                    Icon(
+                                        imageVector = if (isArchiveExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.outline
+                                    )
+                                }
                             }
                         }
                     }
 
                     if (isArchiveExpanded) {
-                        items(checkedItems, key = { "checked_${it.id}" }) { item ->
+                        items(checkedItems, key = { "checked_${it.id}" }, span = { GridItemSpan(2) }) { item ->
                             ShoppingItemRow(
                                 item = item,
                                 onToggle = { vm.toggleShoppingItem(item) },
@@ -252,6 +252,60 @@ fun ShoppingListScreen(vm: NutritionViewModel) {
 }
 
 @Composable
+fun ShoppingItemTile(item: ShoppingItem, onToggle: () -> Unit, onDelete: () -> Unit) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(84.dp) // Fixed height for a uniform grid
+            .clickable { onToggle() },
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    ) {
+        Column(
+            modifier = Modifier.padding(10.dp).fillMaxHeight(),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.Top) {
+                Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = item.name, 
+                        fontWeight = FontWeight.Bold, 
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f, fill = false),
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                    if (item.isPantryItem) {
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.Default.Kitchen, 
+                            contentDescription = "Vorrat", 
+                            tint = Color(0xFF2E7D32),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(24.dp).offset(x = 4.dp, y = (-4).dp)
+                ) {
+                    Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(16.dp))
+                }
+            }
+            
+            if (item.amount > 0) {
+                Text(
+                    text = "${item.amount.roundString()} ${item.unit}", 
+                    style = MaterialTheme.typography.labelSmall, 
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@Composable
 fun ShoppingItemRow(item: ShoppingItem, onToggle: () -> Unit, onDelete: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable { onToggle() },
@@ -263,15 +317,28 @@ fun ShoppingItemRow(item: ShoppingItem, onToggle: () -> Unit, onDelete: () -> Un
         ) {
             Checkbox(checked = item.isChecked, onCheckedChange = { onToggle() })
             Column(Modifier.weight(1f)) {
-                Text(item.name, fontWeight = FontWeight.Bold, style = if (item.isChecked) MaterialTheme.typography.bodyMedium.copy(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else MaterialTheme.typography.bodyMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        item.name, 
+                        fontWeight = FontWeight.Bold, 
+                        style = if (item.isChecked) MaterialTheme.typography.bodyMedium.copy(textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough) else MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                    if (item.isPantryItem) {
+                        Spacer(Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.Default.Kitchen, 
+                            contentDescription = "Vorrat", 
+                            tint = Color(0xFF2E7D32),
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
                 if (item.amount > 0) {
                     Text("${item.amount.roundString()} ${item.unit}", style = MaterialTheme.typography.labelSmall)
                 }
                 if (item.isAutoGenerated) {
                     Text("Auto-generiert aus Planer", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                }
-                if (item.isPantryItem) {
-                    Text("Vorratsschrank", style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
                 }
             }
             IconButton(onClick = onDelete) {
