@@ -1,27 +1,26 @@
-# Walkthrough - Weight Screen UX Optimization
+# Walkthrough - Minimalist App Check Debug Setup
 
-I have optimized the "Gewicht" screen to improve navigation and clarity, ensuring a smoother tracking experience.
+I have configured Firebase App Check with the **Debug Provider**, which allows you to perform a private functional test on your own device and get past the "AI logic config" error.
 
 ## Changes Made
 
-### Unified Scrolling
-- **Full Screen Scroll**: Refactored the layout to use a single, unified `LazyColumn`. This means the entire screen (Entry card, Statistics, Chart, and History) now scrolls together.
-- **Better Visibility**: You can now easily scroll down to see your full weight history and the progress chart on smaller screens without competing scroll areas.
+### 🛡️ App Check Debug Integration
+- **Dependency Added**: Included `firebase-appcheck-debug` in your `build.gradle.kts`.
+- **Application Class**: Created a minimal `NutritionApplication.kt` that initializes App Check specifically with the **Debug Provider Factory**. This ensures your requests are recognized as coming from an authorized development environment.
+- **Manifest Registration**: Registered the new Application class in your `AndroidManifest.xml`.
 
-### Clearer Progress Terminology
-- **"Differenz" instead of "Verlust"**: Changed the wording to be more neutral. Whether you want to lose or gain weight, "Differenz" describes your progress accurately.
-- **Signed Values**: The difference now explicitly shows a `+` for gain or `-` for loss (e.g., `+0.5 kg` or `-1.2 kg`), making it instantly clear in which direction your weight is moving.
-- **Color Coding**: The difference value stays green if your weight is stable or decreasing, and turns red if it increases, providing immediate visual feedback.
+## 🚀 How to get your Debug Token
 
-### Code Cleanup
-- Fixed internal structural issues and redundant code blocks to ensure maximum app stability.
+To finalize the setup and start using the AI features, follow these steps:
 
-## Verification Results
+1.  **Launch the App**: Run the app on your device.
+2.  **Check Logcat**: In Android Studio, open the **Logcat** tab at the bottom.
+3.  **Find the Token**: Enter `AppCheckDebugCritical` in the search filter. You will see a log message like:
+    `D/AppCheckDebugCritical: Enter this debug secret into the allow list in the Firebase Console: 123e4567-e89b-12d3-a456-426614174000`
+4.  **Firebase Console**:
+    - Go to your [Firebase Console](https://console.firebase.google.com/project/nutrition-mvp-aa293/appcheck/apps).
+    - Under **App Check** -> **Apps**, find your Android app.
+    - Click **Manage debug tokens**.
+    - Tap **Add debug token**, give it a name (e.g., "My Phone"), and paste the token from Logcat.
 
-### Automated Tests
-- Ran `./gradlew :app:compileDebugKotlin` which completed successfully.
-
-### Manual Verification
-1. **Scrolling**: Verified that the entire Weight screen scrolls smoothly as a single unit.
-2. **Terminology**: Confirmed that the stats card now displays "Differenz" with a clear `+/-` sign.
-3. **Accuracy**: Verified that the difference is calculated correctly based on your starting weight.
+**Once this is done, wait a few seconds and restart the app. The "AI logic config" error will disappear, and you can test the AI image recognition!** 🥘📸✅

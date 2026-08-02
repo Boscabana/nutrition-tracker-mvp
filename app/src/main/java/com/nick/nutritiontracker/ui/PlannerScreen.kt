@@ -34,6 +34,7 @@ fun PlannerScreen(vm: NutritionViewModel) {
     val scannerService = remember { BarcodeScannerService(context) }
     
     var entryToEdit by remember { mutableStateOf<FoodEntryEntity?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     if (household == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -67,58 +68,62 @@ fun PlannerScreen(vm: NutritionViewModel) {
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(16.dp)) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            IconButton(onClick = { plannerDate = plannerDate.minusDays(1) }) {
-                Icon(Icons.Default.ChevronLeft, null)
-            }
-            Text(plannerDate.format(dateFormatter), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-            IconButton(onClick = { plannerDate = plannerDate.plusDays(1) }) {
-                Icon(Icons.Default.ChevronRight, null)
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { plannerDate = plannerDate.minusDays(1) }) {
+                    Icon(Icons.Default.ChevronLeft, null)
+                }
+                Text(plannerDate.format(dateFormatter), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                IconButton(onClick = { plannerDate = plannerDate.plusDays(1) }) {
+                    Icon(Icons.Default.ChevronRight, null)
+                }
             }
         }
-
-        Spacer(Modifier.height(16.dp))
-
-        AddEntryCard(
-            foods = vm.foods,
-            meals = vm.meals,
-            onAddEntry = { food, amount, portion, mealSlot ->
-                vm.addPlannedEntry(food, amount, portion, mealSlot, plannerDate)
-            },
-            onAddMeal = { meal, mealSlot, servings ->
-                vm.addPlannedMeal(meal, mealSlot, plannerDate, servings)
-            },
-            onScanRequest = {
-                scope.launch {
-                    val barcode = scannerService.startScan()
-                    if (barcode != null) {
-                        val food = scannerService.fetchProduct(barcode)
-                        if (food != null) {
-                            vm.addPlannedEntry(food, 100.0, null, "Snack", plannerDate)
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp)) {
+            AddEntryCard(
+                foods = vm.foods,
+                meals = vm.meals,
+                onAddEntry = { food, amount, portion, mealSlot ->
+                    vm.addPlannedEntry(food, amount, portion, mealSlot, plannerDate)
+                },
+                onAddMeal = { meal, mealSlot, servings ->
+                    vm.addPlannedMeal(meal, mealSlot, plannerDate, servings)
+                },
+                onScanRequest = {
+                    scope.launch {
+                        val barcode = scannerService.startScan()
+                        if (barcode != null) {
+                            val food = scannerService.fetchProduct(barcode)
+                            if (food != null) {
+                                vm.addPlannedEntry(food, 100.0, null, "Snack", plannerDate)
+                            }
                         }
                     }
-                }
-            },
-            onSearchRequest = { query -> scannerService.searchProducts(query) },
-            onCaptureRequested = { /* Handle capture */ },
-            vm = vm
-        )
+                },
+                onSearchRequest = { query -> scannerService.searchProducts(query) },
+                onCaptureRequested = { /* Handle capture */ },
+                vm = vm,
+                snackbarHostState = snackbarHostState
+            )
 
-        LazyColumn(
-            modifier = Modifier.weight(1f).padding(vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(plannedEntries, key = { it.id }) { entry ->
-                SwipeActionContainer(
-                    onDeleteRequest = { vm.deletePlannedEntry(entry.id) },
-                    onEditRequest = { entryToEdit = entry }
-                ) {
-                    PlannedEntryRow(entry)
+            LazyColumn(
+                modifier = Modifier.weight(1f).padding(vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(plannedEntries, key = { it.id }) { entry ->
+                    SwipeActionContainer(
+                        onDeleteRequest = { vm.deletePlannedEntry(entry.id) },
+                        onEditRequest = { entryToEdit = entry }
+                    ) {
+                        PlannedEntryRow(entry)
+                    }
                 }
             }
         }

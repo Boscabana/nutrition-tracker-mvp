@@ -279,7 +279,7 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
         }
 
         // --- DEVELOPER OPTIONS ---
-        DeveloperOptionsSection(viewModel, userProfile)
+        DeveloperOptionsSection(nutritionViewModel, viewModel, userProfile)
 
         Spacer(Modifier.height(8.dp))
         Text("Daten-Sicherung", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -366,6 +366,7 @@ private fun GoalChip(selected: Boolean, label: String, onClick: () -> Unit) {
 
 @Composable
 private fun DeveloperOptionsSection(
+    vm: NutritionViewModel,
     profileVm: ProfileViewModel,
     profile: UserProfile
 ) {
@@ -418,6 +419,67 @@ private fun DeveloperOptionsSection(
                     }
                     Text("Ziel: $goalText", style = MaterialTheme.typography.labelSmall)
                     Text("Finales Budget: ${profile.calorieBudget} kcal", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+
+                    HorizontalDivider()
+                    Text("🤖 Gemini 3.x AI Integration", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    
+                    var keyInput by remember { mutableStateOf(vm.geminiApiKey) }
+                    OutlinedTextField(
+                        value = keyInput,
+                        onValueChange = { 
+                            keyInput = it
+                            vm.updateGeminiApiKey(it)
+                        },
+                        label = { Text("Gemini API Key") },
+                        modifier = Modifier.fillMaxWidth(),
+                        visualTransformation = if (keyInput.isEmpty()) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        singleLine = true
+                    )
+                    Text("Wird benötigt für die Bilderkennung im Tagebuch.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+
+                    Spacer(Modifier.height(8.dp))
+                    
+                    Button(onClick = { vm.probeAiModels() }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Verfügbare AI Modelle prüfen")
+                    }
+
+                    if (vm.availableAiModels.isNotEmpty()) {
+                        Column(modifier = Modifier.padding(top = 8.dp)) {
+                            vm.availableAiModels.forEach { status ->
+                                val model = status.modelName
+                                val isAvailable = status.isAvailable
+                                
+                                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        RadioButton(
+                                            selected = vm.selectedAiModel == model, 
+                                            onClick = { if (isAvailable) vm.updateSelectedAiModel(model) },
+                                            enabled = isAvailable
+                                        )
+                                        Text(
+                                            text = model, 
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (isAvailable) Color.Unspecified else Color.Gray,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (isAvailable) {
+                                            Icon(Icons.Default.Check, null, tint = Color(0xFF2E7D32), modifier = Modifier.size(16.dp))
+                                        } else {
+                                            Icon(Icons.Default.Close, null, tint = Color.Red, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                    if (!isAvailable && !status.errorMessage.isNullOrBlank()) {
+                                        Text(
+                                            text = status.errorMessage,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.Red,
+                                            modifier = Modifier.padding(start = 48.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
 
                     HorizontalDivider()
                     Text("Stoffwechsel-Analyse", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)

@@ -1,17 +1,7 @@
-- [ ] **Phase 1: Data Layer & Models**
-    - [ ] Create `InboxMessage.kt` data model
-    - [ ] Update `UserProfile.kt` with `DietaryPreference`
-    - [ ] Update `FirebaseManager.kt` to sync User profiles to Firestore
-    - [ ] Update `FirestoreRepository.kt` with Inbox and Messaging methods
-- [ ] **Phase 2: Setup & Onboarding**
-    - [ ] Add Dietary Preferences step to `SetupWizard.kt`
-- [ ] **Phase 3: Core UI Infrastructure**
-    - [ ] Add Notification Bell with badge to `NutritionApp.kt`
-    - [ ] Add "Community" tab to main navigation
-- [ ] **Phase 4: Feature Screens**
-    - [ ] Implement `CommunityScreen.kt` (Member list)
-    - [ ] Implement `InboxScreen.kt` (Received items list)
-    - [ ] Add "Send to Member" logic in Article/Meal selection
-- [ ] **Phase 5: Verification**
-    - [ ] Test cross-user messaging
-    - [ ] Verify profile sync and preference storage
+- [ ] **Phase 1: Dependency Migration**
+    - [ ] Replace `firebase-vertexai` with `firebase-ai:17.15.0` in `build.gradle.kts`
+- [ ] **Phase 2: Code Refactoring**
+    - [ ] Update imports and initialization in `GeminiService.kt` to use `FirebaseAI`
+- [ ] **Phase 3: Verification**
+    - [ ] Build and verify no compilation errors
+    - [ ] Confirm with user that Console onboarding is complete

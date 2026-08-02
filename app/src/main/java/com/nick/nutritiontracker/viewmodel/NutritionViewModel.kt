@@ -12,6 +12,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import android.util.Log
 import com.nick.nutritiontracker.data.*
+import android.graphics.Bitmap
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -76,6 +77,71 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     
     var forceOnboardingOnStart by mutableStateOf(prefs.getBoolean("force_onboarding", false))
         private set
+    
+    var geminiApiKey by mutableStateOf(
+        prefs.getString("gemini_api_key", null) ?: com.nick.nutritiontracker.BuildConfig.GEMINI_API_KEY
+    )
+        private set
+    
+    var selectedAiModel by mutableStateOf(prefs.getString("selected_ai_model", "gemini-3.6-flash") ?: "gemini-3.6-flash")
+        private set
+
+    fun updateSelectedAiModel(model: String) {
+        selectedAiModel = model
+        prefs.edit().putString("selected_ai_model", model).apply()
+    }
+
+    fun updateGeminiApiKey(key: String) {
+        geminiApiKey = key
+        prefs.edit().putString("gemini_api_key", key).apply()
+    }
+
+    var isAnalyzingImage by mutableStateOf(false)
+    var aiEstimationResult by mutableStateOf<AiEstimationResult?>(null)
+    var aiErrorMessage by mutableStateOf<String?>(null)
+
+    val availableAiModels = mutableStateListOf<AiModelStatus>()
+
+    fun probeAiModels() {
+        availableAiModels.clear()
+        viewModelScope.launch {
+            val service = GeminiService()
+            val candidates = listOf("gemini-3.6-flash", "gemini-3.1-pro", "gemini-2.0-flash")
+            candidates.forEach { model ->
+                val status = service.testModelAvailability(model)
+                availableAiModels.add(status)
+            }
+        }
+    }
+
+    fun analyzeMealImage(bitmap: Bitmap) {
+        Log.d("NutritionViewModel", "Starting AI analysis with Vertex AI. Selected model: $selectedAiModel")
+        
+        isAnalyzingImage = true
+        aiErrorMessage = null
+        viewModelScope.launch {
+            try {
+                val service = GeminiService()
+                val result = service.estimateNutrition(bitmap, selectedAiModel)
+                if (result != null) {
+                    aiEstimationResult = result
+                } else {
+                    aiErrorMessage = "Das Bild konnte nicht analysiert werden."
+                }
+            } catch (e: Exception) {
+                Log.e("NutritionViewModel", "AI Analysis failed", e)
+                val msg = e.toString().lowercase()
+                aiErrorMessage = when {
+                    msg.contains("404") || msg.contains("not found") -> 
+                        "AI Modell nicht verfügbar. Bitte prüfe die API-Berechtigungen deines Keys im Google AI Studio."
+                    msg.contains("403") -> "API Key ungültig oder keine Berechtigung für die AI-Modelle."
+                    else -> "Fehler bei der Analyse: ${e.localizedMessage}"
+                }
+            } finally {
+                isAnalyzingImage = false
+            }
+        }
+    }
 
     fun setForceOnboarding(force: Boolean) {
         forceOnboardingOnStart = force

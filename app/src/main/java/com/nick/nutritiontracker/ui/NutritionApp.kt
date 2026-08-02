@@ -569,6 +569,51 @@ private fun TodayScreen(
     var foodToCapture by remember { mutableStateOf<FoodItemEntity?>(null) }
     var askToCaptureFood by remember { mutableStateOf<FoodItemEntity?>(null) }
 
+    val localContext = LocalContext.current
+    LaunchedEffect(vm.aiErrorMessage) {
+        vm.aiErrorMessage?.let {
+            android.widget.Toast.makeText(localContext, it, android.widget.Toast.LENGTH_LONG).show()
+            vm.aiErrorMessage = null
+        }
+    }
+
+    if (vm.isAnalyzingImage) {
+        AlertDialog(
+            onDismissRequest = {},
+            confirmButton = {},
+            title = { Text("Analysiere Bild...") },
+            text = {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+        )
+    }
+
+    if (vm.aiEstimationResult != null) {
+        AiEstimationDialog(
+            result = vm.aiEstimationResult!!,
+            onDismiss = { vm.aiEstimationResult = null },
+            onConfirm = { result ->
+                // Create a temporary food item from the estimation
+                val food = FoodItemEntity(
+                    name = result.name,
+                    kcalPer100g = (result.kcal / result.grams) * 100.0,
+                    proteinPer100g = (result.protein / result.grams) * 100.0,
+                    carbsPer100g = (result.carbs / result.grams) * 100.0,
+                    sugarPer100g = (result.sugar / result.grams) * 100.0,
+                    fatPer100g = (result.fat / result.grams) * 100.0,
+                    saturatedFatPer100g = (result.saturatedFat / result.grams) * 100.0,
+                    baseUnit = "g"
+                )
+                // Add as entry (NutritionViewModel's addEntry will handle the rest)
+                vm.addEntry(food, result.grams, null, "Snack")
+                vm.aiEstimationResult = null
+                scope.launch { snackbarHostState.showSnackbar("${result.name} hinzugefügt") }
+            }
+        )
+    }
+
     val mealSlots = listOf("Frühstück", "Mittag", "Abend", "Snack")
     val expandedStates = remember { mutableStateMapOf<String, Boolean>().apply { mealSlots.forEach { put(it, true) } } }
 
@@ -812,7 +857,8 @@ private fun TodayScreen(
                 },
                 onSearchRequest = { query -> scannerService.searchProducts(query) },
                 onCaptureRequested = { food -> askToCaptureFood = food },
-                vm = vm
+                vm = vm,
+                snackbarHostState = snackbarHostState
             ) 
         }
 
@@ -1041,8 +1087,10 @@ fun AddEntryCard(
     onScanRequest: () -> Unit,
     onSearchRequest: suspend (String) -> List<FoodItemEntity>,
     onCaptureRequested: (FoodItemEntity) -> Unit,
-    vm: NutritionViewModel
+    vm: NutritionViewModel,
+    snackbarHostState: SnackbarHostState
 ) {
+    val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<Any>>(emptyList()) }
     var isSearching by remember { mutableStateOf(false) }
@@ -1051,6 +1099,63 @@ fun AddEntryCard(
     var selectedFood by remember { mutableStateOf<FoodItemEntity?>(null) }
     var selectedMeal by remember { mutableStateOf<MealEntity?>(null) }
     var showMealSlotDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    var showImageSourceDialog by remember { mutableStateOf(false) }
+    var tempImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+        onResult = { uri ->
+            uri?.let {
+                try {
+                    val bitmap = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                        android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, it))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        android.graphics.BitmapFactory.decodeStream(context.contentResolver.openInputStream(it))
+                    }
+                    bitmap?.let { b ->
+                        vm.analyzeMealImage(b.copy(android.graphics.Bitmap.Config.ARGB_8888, true))
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    )
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.TakePicture(),
+        onResult = { success ->
+            if (success && tempImageUri != null) {
+                try {
+                    val bitmap = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                        android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(context.contentResolver, tempImageUri!!))
+                    } else {
+                        @Suppress("DEPRECATION")
+                        android.graphics.BitmapFactory.decodeStream(context.contentResolver.openInputStream(tempImageUri!!))
+                    }
+                    bitmap?.let { b ->
+                        vm.analyzeMealImage(b.copy(android.graphics.Bitmap.Config.ARGB_8888, true))
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    )
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted ->
+            if (isGranted) {
+                tempImageUri?.let { cameraLauncher.launch(it) }
+            } else {
+                scope.launch { snackbarHostState.showSnackbar("Kamera-Berechtigung erforderlich") }
+            }
+        }
+    )
 
     if (selectedFood != null) {
         AddAmountDialog(
@@ -1199,6 +1304,64 @@ fun AddEntryCard(
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Icon(Icons.Default.QrCodeScanner, "Barcode scannen")
+                    }
+
+                    if (showImageSourceDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showImageSourceDialog = false },
+                            title = { Text("Bildquelle wählen") },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    ListItem(
+                                        headlineContent = { Text("Kamera") },
+                                        leadingContent = { Icon(Icons.Default.PhotoCamera, null) },
+                                        modifier = Modifier.clickable {
+                                            showImageSourceDialog = false
+                                            val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                            
+                                            try {
+                                                val file = java.io.File(context.cacheDir, "temp_meal_image.jpg")
+                                                if (file.exists()) file.delete()
+                                                file.createNewFile()
+                                                
+                                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                                    context, 
+                                                    "${context.packageName}.fileprovider", 
+                                                    file
+                                                )
+                                                tempImageUri = uri
+                                                
+                                                if (hasPermission) {
+                                                    cameraLauncher.launch(uri)
+                                                } else {
+                                                    permissionLauncher.launch(android.Manifest.permission.CAMERA)
+                                                }
+                                            } catch (e: Exception) {
+                                                android.util.Log.e("AddEntryCard", "Error starting camera", e)
+                                                scope.launch { snackbarHostState.showSnackbar("Kamera konnte nicht gestartet werden") }
+                                            }
+                                        }
+                                    )
+                                    ListItem(
+                                        headlineContent = { Text("Galerie") },
+                                        leadingContent = { Icon(Icons.Default.PhotoLibrary, null) },
+                                        modifier = Modifier.clickable {
+                                            showImageSourceDialog = false
+                                            imagePicker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                                        }
+                                    )
+                                }
+                            },
+                            confirmButton = {}
+                        )
+                    }
+
+                    FilledIconButton(
+                        onClick = { showImageSourceDialog = true },
+                        shape = RoundedCornerShape(12.dp),
+                        colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                    ) {
+                        Icon(Icons.Default.AutoAwesome, "AI Bilderkennung")
                     }
                 }
 
@@ -2990,6 +3153,76 @@ fun SendToUserDialog(
             }
         },
         confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Abbrechen") }
+        }
+    )
+}
+
+@Composable
+fun AiEstimationDialog(
+    result: AiEstimationResult,
+    onDismiss: () -> Unit,
+    onConfirm: (AiEstimationResult) -> Unit
+) {
+    var name by remember { mutableStateOf(result.name) }
+    var kcal by remember { mutableStateOf(result.kcal.roundString()) }
+    var protein by remember { mutableStateOf(result.protein.roundString()) }
+    var carbs by remember { mutableStateOf(result.carbs.roundString()) }
+    var sugar by remember { mutableStateOf(result.sugar.roundString()) }
+    var fat by remember { mutableStateOf(result.fat.roundString()) }
+    var saturatedFat by remember { mutableStateOf(result.saturatedFat.roundString()) }
+    var grams by remember { mutableStateOf(result.grams.roundString()) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("AI Schätzung 🤖") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("Die AI hat folgendes erkannt. Bitte prüfe die Werte:", style = MaterialTheme.typography.bodySmall)
+                
+                AutoSelectTextField(value = name, onValueChange = { name = it }, label = { Text("Gericht") }, modifier = Modifier.fillMaxWidth())
+                
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AutoSelectTextField(value = kcal, onValueChange = { kcal = it }, label = { Text("Kalorien") }, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                    AutoSelectTextField(value = grams, onValueChange = { grams = it }, label = { Text("Gewicht (g)") }, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                }
+
+                Text("Makronährstoffe (Gesamt)", fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AutoSelectTextField(value = protein, onValueChange = { protein = it }, label = { Text("Protein") }, modifier = Modifier.weight(1f))
+                    AutoSelectTextField(value = carbs, onValueChange = { carbs = it }, label = { Text("KH") }, modifier = Modifier.weight(1f))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AutoSelectTextField(value = sugar, onValueChange = { sugar = it }, label = { Text("davon Zucker") }, modifier = Modifier.weight(1f))
+                    AutoSelectTextField(value = fat, onValueChange = { fat = it }, label = { Text("Fett") }, modifier = Modifier.weight(1f))
+                }
+                AutoSelectTextField(value = saturatedFat, onValueChange = { saturatedFat = it }, label = { Text("davon gesättigt") }, modifier = Modifier.fillMaxWidth())
+                
+                if (result.confidence > 0) {
+                    Text("Vertrauen der AI: ${(result.confidence * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                onConfirm(result.copy(
+                    name = name,
+                    kcal = kcal.num(),
+                    protein = protein.num(),
+                    carbs = carbs.num(),
+                    sugar = sugar.num(),
+                    fat = fat.num(),
+                    saturatedFat = saturatedFat.num(),
+                    grams = grams.num()
+                ))
+            }) {
+                Text("Übernehmen")
+            }
+        },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Abbrechen") }
         }

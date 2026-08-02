@@ -1,60 +1,30 @@
-# Implementation Plan - In-App Inbox & Community Integration
+# Implementation Plan - Switching to No-Cost AI Tier
 
-This plan introduces a direct sharing system ("Postfach") within the app, a community screen for managing connections, and enhanced dietary preferences in the onboarding flow.
+This plan addresses the "Your prepayment credits are depleted" error by switching the AI backend from the enterprise Vertex AI (which requires prepaid credits on Blaze) to the **Gemini Developer API** (Google AI) backend, which offers a generous no-cost tier.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> **Authentication**: To enable direct person-to-person sharing, users will eventually need a more permanent account (Email/Google). I will start by building the system on the existing anonymous UID foundation, allowing a seamless transition to full accounts later.
-> **Privacy**: User preferences (vegan, etc.) will be stored in Firestore to enable future community feed features.
+> **Switch to Free Tier**: I am updating the code to use the `googleAI()` backend. This backend is designed for developers and generally stays within a free quota without requiring a prepaid balance.
+> **Firebase Console Action**: After I apply the code changes, you **must** enable the Gemini Developer API in the Firebase Console:
+> 1. Go to the **Firebase AI Logic** page.
+> 2. Go to **Settings** > **Gemini Developer API**.
+> 3. Click **Enable**.
 
 ## Proposed Changes
 
-### [Data Layer]
-
-#### [NEW] [InboxMessage.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/data/InboxMessage.kt)
-- `data class InboxMessage(id, fromUid, fromName, timestamp, type (RECIPE|FOOD), payloadJson, isRead)`
-
-#### [MODIFY] [UserProfile.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/data/UserProfile.kt)
-- Add `dietaryPreference: DietaryPreference = DietaryPreference.NONE`.
-- `enum class DietaryPreference { NONE, VEGETARIAN, VEGAN, PALEO, KETO }`
-
-#### [MODIFY] [FirestoreRepository.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/data/FirestoreRepository.kt)
-- Add `getInbox(uid)`: Flow for real-time message updates.
-- Add `sendMessage(toUid, message)`: Logic to deliver a recipe/article to a specific user.
-- Add `getHouseholdMembers(householdId)`: Fetch names of people in your house.
-
-### [UI Components]
-
-#### [MODIFY] [NutritionApp.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/NutritionApp.kt)
-- **Top Bar**: Add a bell icon with a numeric badge for unread messages.
-- **Navigation**: Add a "Community" tab.
-
-#### [NEW] [InboxScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/InboxScreen.kt)
-- Displays a list of received items.
-- "Vorschau" button: See the recipe details.
-- "Importieren" button: Adds the item directly to the user's library.
-
-#### [NEW] [CommunityScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/CommunityScreen.kt)
-- View current household members.
-- "Freunde" section (Add by email/code).
-
-#### [MODIFY] [SetupWizard.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/SetupWizard.kt)
-- Add a new step: "Deine Ernährungsgewohnheiten" (Vegetarisch, Vegan, etc.).
-
-#### [MODIFY] [ProfileScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/ProfileScreen.kt)
-- Add a section to manage the "Permanent Account" link.
-
 ### [Business Logic]
 
-#### [MODIFY] [NutritionViewModel.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/viewmodel/NutritionViewModel.kt)
-- Implement `sendRecipeToMember(targetUid, recipe)`.
-- Stream unread message count for the badge.
+#### [MODIFY] [GeminiService.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/data/GeminiService.kt)
+- Import `com.google.firebase.ai.GenerativeBackend`.
+- Initialize the AI model using the `googleAI()` backend:
+  ```kotlin
+  Firebase.ai(backend = GenerativeBackend.googleAI(location = region)).generativeModel(modelName)
+  ```
+- This forces the use of the Developer API instead of the Enterprise Vertex AI.
 
 ## Verification Plan
 
 ### Manual Verification
-1. **Sharing Flow**: Use Device A to send a recipe to Device B (same household). Verify Device B shows a badge on the bell icon.
-2. **Import Flow**: Open Inbox on Device B, tap "Importieren", and verify the recipe appears in the "Mahlzeiten" tab.
-3. **Onboarding**: Re-run the tour and verify the new dietary preferences step works and saves correctly.
-4. **Community View**: Verify names of household members appear correctly in the new screen.
+1. **Model Check**: Once the Gemini Developer API is enabled in the console, tap "AI Modelle prüfen" in the app.
+2. **Analysis Test**: Test image recognition. The "credits depleted" error should no longer occur as it's now routing through the no-cost developer tier.

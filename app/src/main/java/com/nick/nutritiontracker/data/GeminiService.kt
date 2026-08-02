@@ -1,0 +1,111 @@
+package com.nick.nutritiontracker.data
+
+import android.graphics.Bitmap
+import android.util.Log
+import com.google.firebase.Firebase
+import com.google.firebase.ai.ai
+import com.google.firebase.ai.type.GenerativeBackend
+import com.google.firebase.ai.type.content
+import kotlinx.serialization.json.Json
+
+class GeminiService() {
+    private val json = Json { ignoreUnknownKeys = true }
+    // Using Frankfurt region for EU compliance
+    private val region = "europe-west3"
+
+    private fun getModel(modelName: String) = Firebase.ai(
+        backend = GenerativeBackend.googleAI()
+    ).generativeModel(
+        modelName = modelName
+    )
+
+    suspend fun estimateNutrition(bitmap: Bitmap, preferredModel: String? = null): AiEstimationResult? {
+        val scaledBitmap = scaleBitmap(bitmap)
+        val modelToUse = preferredModel ?: "gemini-3.6-flash"
+        
+        Log.d("GeminiService", "Analyzing with Firebase AI Logic ($region) model: $modelToUse")
+        return try {
+            callGemini(scaledBitmap, modelToUse)
+        } catch (e: Exception) {
+            Log.e("GeminiService", "AI Logic model failed: $modelToUse", e)
+            throw e
+        }
+    }
+
+    suspend fun testModelAvailability(modelName: String): AiModelStatus {
+        return try {
+            val model = getModel(modelName)
+            model.generateContent("Respond with OK").text?.isNotBlank()
+            AiModelStatus(modelName, true)
+        } catch (e: Exception) {
+            val msg = e.localizedMessage ?: e.toString()
+            Log.w("GeminiService", "Model $modelName check failed: $msg")
+            AiModelStatus(modelName, false, msg)
+        }
+    }
+
+    private suspend fun callGemini(bitmap: Bitmap, modelName: String): AiEstimationResult? {
+        val model = getModel(modelName)
+        
+        val prompt = """
+            Analyse this image of a meal. 
+            Identify the main dish and estimate its weight and nutritional values.
+            Return ONLY a valid JSON object in the following format:
+            {
+              "name": "Dish Name",
+              "kcal": 0.0,
+              "protein": 0.0,
+              "carbs": 0.0,
+              "sugar": 0.0,
+              "fat": 0.0,
+              "saturatedFat": 0.0,
+              "grams": 0.0,
+              "confidence": 0.0
+            }
+            All values should be for the entire portion seen in the image. 
+            If the image does not show food, return an empty object with zero values.
+            Language: German (for the name field)
+        """.trimIndent()
+
+        val response = model.generateContent(
+            content {
+                image(bitmap)
+                text(prompt)
+            }
+        )
+        
+        val responseText = response.text ?: ""
+        Log.d("GeminiService", "Raw AI Logic Response ($modelName): ${responseText.take(100)}...")
+        
+        val cleanJson = extractJson(responseText)
+        if (cleanJson.isBlank()) return null
+        
+        return json.decodeFromString<AiEstimationResult>(cleanJson)
+    }
+
+    private fun scaleBitmap(bitmap: Bitmap): Bitmap {
+        val maxSize = 1024
+        var width = bitmap.width
+        var height = bitmap.height
+
+        val bitmapRatio = width.toFloat() / height.toFloat()
+        if (bitmapRatio > 1) {
+            width = maxSize
+            height = (width / bitmapRatio).toInt()
+        } else {
+            height = maxSize
+            width = (height * bitmapRatio).toInt()
+        }
+        return Bitmap.createScaledBitmap(bitmap, width, height, true)
+    }
+
+    private fun extractJson(text: String): String {
+        val start = text.indexOf("{")
+        val end = text.lastIndexOf("}")
+        return if (start != -1 && end != -1) {
+            text.substring(start, end + 1)
+        } else {
+            text
+        }
+    }
+}
