@@ -1,62 +1,40 @@
-# Implementation Plan - Gamification & Weight Tracking Update
+# Implementation Plan - Refined Budget, Retroactive Weights & Article Swapping
 
-This plan introduces a comprehensive weight tracking system, a gamified "Weight Loss Budget," and an intelligent "Metabolic Factor" to provide users with more accurate progress tracking and motivation.
+This plan implements a strict cap on the daily weight loss budget, adds a date picker for weight tracking, and introduces the ability to "swap" diary entries between generic and brand variants.
 
 ## Proposed Changes
-
-### [Data Layer]
-
-#### [NEW] [WeightEntry.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/data/WeightEntry.kt)
-- `data class WeightEntry(val date: String, val weight: Double)`
-- `data class DayVerification(val date: String, val isComplete: Boolean)`
-
-#### [MODIFY] [UserProfile.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/data/UserProfile.kt)
-- Add `initialWeight: Double?` to help calculate the cumulative metabolic factor.
-- Add `metabolicFactor: Double = 1.0` (Secretly updated).
 
 ### [Business Logic]
 
 #### [MODIFY] [NutritionViewModel.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/viewmodel/NutritionViewModel.kt)
-- **State**:
-    - `weightHistory`: `SnapshotStateList<WeightEntry>` (Local + Household Sync?).
-    - `verifications`: `SnapshotStateMap<String, Boolean>`.
-- **Calculations**:
-    - `currentDayWeightBudget`: Calculate daily weight loss in grams based on `(BMR + Activity) - Intake`.
-    - `metabolicFactor`: Periodically compare `Predicted Weight Loss` (from calorie deficits) vs `Actual Weight Loss` (from scale).
-- **Gamification Logic**:
-    - "Cheat Days": Handle unverified days as ±0 deficit.
-    - End-of-day verification trigger.
-    - Weekly Summary (Sunday popup).
+- **`calculateWeightBudgetGrams`**:
+    - Let `MaxDeficit = UserProfile.goalIntensity`.
+    - Let `CurrentDeficit = (BMR + Activity) - Intake`.
+    - `ResultDeficit = minOf(MaxDeficit, CurrentDeficit)`.
+    - `Grams = (ResultDeficit / 7000.0) * 1000.0`.
+- **`addWeightEntry`**:
+    - Update signature to accept `dateIso: String`.
+    - Handle overwriting existing entries for the same date.
 
 ### [User Interface]
 
-#### [NEW] [WeightScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/WeightScreen.kt)
-- **Header**: Current weight & total loss.
-- **Entry**: Field to log today's weight (updates profile weight).
-- **Chart**: Line chart showing weight progress over time.
-- **List**: History of weight entries.
+#### [MODIFY] [WeightScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/WeightScreen.kt)
+- **Date Selection**:
+    - Add `selectedDate` state and a `DatePickerDialog`.
+    - Add a calendar icon next to the weight input to choose the date.
+- **Logic**:
+    - Only update the global profile weight if the entry date is today or more recent than existing entries.
 
 #### [MODIFY] [NutritionApp.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/NutritionApp.kt)
-- Add "Gewicht" tab to `NavigationBar`.
-- Implement global Popup logic for:
-    1. **End-of-day verification**: "Everything logged today?"
-    2. **Sunday Weekly Update**: Summary of weight loss (only for verified negative-balance days).
-
-#### [MODIFY] [MacroProgressSection.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/MacroProgressSection.kt)
-- Add "Abnehm-Budget" display in grams.
-- Visually show how activity (steps) increases the remaining gram budget.
-
-#### [MODIFY] [TodayScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/NutritionApp.kt) (Inside TodayScreen)
-- Update Calendar view to show color-coded status:
-    - **Blue + Check**: Goal met (Deficit maintained).
-    - **Green**: Under BMR but over deficit goal.
-    - **Yellow**: Over BMR (Gain).
-    - **Red**: No entries.
+- **`EditEntryDialog`**:
+    - Add "Swap" logic (Two arrows icon).
+    - Find relatives (parent/children/generic counterparts) for the entry's food item.
+    - Show a `DropdownMenu` to switch the entry to a different variant (e.g., from "Apple" to "Bio Apple").
+    - Ensure nutrient data is updated to the new variant while preserving the amount/grams if possible.
 
 ## Verification Plan
 
 ### Manual Verification
-1. **Weight Entry**: Log a new weight. Verify `UserProfile` weight updates and the chart reflects the new point.
-2. **Gram Budget**: Eat 500 kcal under BMR. Verify the "Abnehm-Budget" shows ~71g. Add 10,000 steps and verify the budget increases.
-3. **Verification Flow**: Close the day (simulated). Verify the "Cheat Day" logic if unverified.
-4. **Developer Options**: Inspect the "Metabolic Factor" after having 3+ weight entries and deficits logged.
+1.  **Capping Check**: Set deficit to 500. Log 0 intake. Budget must show 71g (max).
+2.  **Retroactive Weight**: Log weight for a past date. Verify history list and chart update.
+3.  **Diary Swap**: Edit a "Generic Pasta" entry. Use the swap icon to change it to "Barilla Pasta". Verify the entry name and nutrients update instantly.

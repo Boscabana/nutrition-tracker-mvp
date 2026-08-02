@@ -1252,13 +1252,85 @@ fun EditEntryDialog(
     var mealSlot by remember { mutableStateOf(entry.mealSlot) }
     val isOrphaned = food == null
 
+    val relatives = remember(food, foods) {
+        val root = if (food?.isGeneric == true) food else parent
+        val effectiveRoot = root ?: foods.find { it.isGeneric && it.name == entry.name }
+        
+        if (effectiveRoot != null) {
+            (listOf(effectiveRoot) + foods.filter { it.parentId == effectiveRoot.id }).filter { it.id != food?.id }
+        } else {
+            foods.filter { it.isGeneric }
+        }
+    }
+    var showSwapMenu by remember { mutableStateOf(false) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Eintrag bearbeiten")
-                    Text(entry.name, style = MaterialTheme.typography.labelSmall, color = if (isOrphaned) ProteinGreen else MaterialTheme.colorScheme.outline)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = entry.name, 
+                            style = MaterialTheme.typography.labelSmall, 
+                            color = if (isOrphaned) ProteinGreen else MaterialTheme.colorScheme.outline,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (relatives.isNotEmpty()) {
+                            Box {
+                                IconButton(
+                                    onClick = { showSwapMenu = true },
+                                    modifier = Modifier.size(24.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.SwapHoriz, 
+                                        contentDescription = "Variante tauschen", 
+                                        modifier = Modifier.size(16.dp), 
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                DropdownMenu(expanded = showSwapMenu, onDismissRequest = { showSwapMenu = false }) {
+                                    relatives.take(15).forEach { alt ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    if (alt.isGeneric) {
+                                                        Icon(Icons.Default.Inventory2, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
+                                                        Spacer(Modifier.width(8.dp))
+                                                        Text(alt.name + " (Basis)")
+                                                    } else {
+                                                        Icon(Icons.AutoMirrored.Filled.Label, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.tertiary)
+                                                        Spacer(Modifier.width(8.dp))
+                                                        Text("${alt.brand ?: "Unbekannt"} @ ${alt.store ?: "Unbekannt"}")
+                                                    }
+                                                }
+                                            },
+                                            onClick = {
+                                                // Swap variant: update entry data to match selected article
+                                                onSave(entry.copy(
+                                                    foodItemId = alt.id,
+                                                    name = alt.name,
+                                                    brand = alt.brand,
+                                                    kcalPer100g = alt.kcalPer100g,
+                                                    proteinPer100g = alt.proteinPer100g,
+                                                    carbsPer100g = alt.carbsPer100g,
+                                                    sugarPer100g = alt.sugarPer100g,
+                                                    fatPer100g = alt.fatPer100g,
+                                                    saturatedFatPer100g = alt.saturatedFatPer100g,
+                                                    alcoholPercent = alt.alcoholPercent,
+                                                    baseUnit = alt.baseUnit,
+                                                    store = alt.store
+                                                ))
+                                                showSwapMenu = false
+                                                onDismiss() // Close current dialog since we saved/swapped
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 if (isOrphaned) {
                     Icon(Icons.Default.Save, "Wird automatisch gespeichert", tint = ProteinGreen, modifier = Modifier.size(18.dp))

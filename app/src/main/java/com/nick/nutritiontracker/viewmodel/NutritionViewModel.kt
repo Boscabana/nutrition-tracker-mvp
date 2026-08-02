@@ -109,9 +109,11 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val activity = DailyActivity(dateIso, steps)
         val activityKcal = activity.calculateCalories(userProfile.weightKg, userProfile.heightCm / 100.0)
         
-        val totalAllowed = userProfile.bmr + activityKcal
-        val deficit = totalAllowed - intake
-        return (deficit / 7000.0) * 1000.0
+        val actualDeficit = (userProfile.bmr + activityKcal) - intake
+        // Cap the deficit at the user's defined goalIntensity
+        val cappedDeficit = minOf(userProfile.goalIntensity.toDouble(), actualDeficit)
+        
+        return (cappedDeficit / 7000.0) * 1000.0
     }
 
     fun getDayStatusColor(dateIso: String, profile: UserProfile): Int {
@@ -917,10 +919,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         saveSteps()
     }
 
-    fun addWeightEntry(weight: Double, profile: UserProfile) {
-        val today = LocalDate.now().toString()
-        val entry = WeightEntry(today, weight)
-        val existingIdx = weightHistory.indexOfFirst { it.dateIso == today }
+    fun addWeightEntry(weight: Double, dateIso: String, profile: UserProfile) {
+        val entry = WeightEntry(dateIso, weight)
+        val existingIdx = weightHistory.indexOfFirst { it.dateIso == dateIso }
         if (existingIdx != -1) {
             weightHistory[existingIdx] = entry
         } else {
