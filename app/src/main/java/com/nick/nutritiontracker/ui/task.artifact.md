@@ -1,13 +1,17 @@
-- [ ] **Phase 1: ViewModel Refinement**
-    - [ ] Cap `calculateWeightBudgetGrams` at `goalIntensity`
-    - [ ] Update `addWeightEntry` to support dates
-- [ ] **Phase 2: Weight Screen Enhancements**
-    - [ ] Add date picker for weight entries
-    - [ ] Implement conditional profile weight updates
-- [ ] **Phase 3: Diary Interaction**
-    - [ ] Add variant swapping (two arrows) to `EditEntryDialog`
-    - [ ] Ensure nutrients update on swap
-- [ ] **Phase 4: Verification**
-    - [ ] Verify budget cap
-    - [ ] Verify retroactive weight
-    - [ ] Verify diary article swap
+- [ ] **Phase 1: Data Layer & Models**
+    - [ ] Create `InboxMessage.kt` data model
+    - [ ] Update `UserProfile.kt` with `DietaryPreference`
+    - [ ] Update `FirebaseManager.kt` to sync User profiles to Firestore
+    - [ ] Update `FirestoreRepository.kt` with Inbox and Messaging methods
+- [ ] **Phase 2: Setup & Onboarding**
+    - [ ] Add Dietary Preferences step to `SetupWizard.kt`
+- [ ] **Phase 3: Core UI Infrastructure**
+    - [ ] Add Notification Bell with badge to `NutritionApp.kt`
+    - [ ] Add "Community" tab to main navigation
+- [ ] **Phase 4: Feature Screens**
+    - [ ] Implement `CommunityScreen.kt` (Member list)
+    - [ ] Implement `InboxScreen.kt` (Received items list)
+    - [ ] Add "Send to Member" logic in Article/Meal selection
+- [ ] **Phase 5: Verification**
+    - [ ] Test cross-user messaging
+    - [ ] Verify profile sync and preference storage

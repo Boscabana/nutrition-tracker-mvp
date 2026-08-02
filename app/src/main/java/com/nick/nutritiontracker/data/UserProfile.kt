@@ -13,6 +13,11 @@ enum class UserGoal {
 }
 
 @Serializable
+enum class DietaryPreference {
+    NONE, VEGETARIAN, VEGAN, PALEO, KETO, LOW_CARB
+}
+
+@Serializable
 data class UserProfile(
     val firstName: String = "",
     val age: Int = 30,
@@ -21,6 +26,7 @@ data class UserProfile(
     val gender: Gender = Gender.MALE,
     val goal: UserGoal = UserGoal.MAINTAIN,
     val goalIntensity: Int = 500, // Deficit or surplus
+    val dietaryPreference: DietaryPreference = DietaryPreference.NONE,
     val setupCompleted: Boolean = false,
     
     // Macro percentages (kept for now, will be automated later)

@@ -21,6 +21,7 @@ class ProfileRepository(private val context: Context) {
         val HEIGHT = intPreferencesKey("height")
         val GOAL = stringPreferencesKey("goal")
         val GOAL_INTENSITY = intPreferencesKey("goal_intensity")
+        val DIETARY_PREF = stringPreferencesKey("dietary_preference")
         val SETUP_COMPLETED = booleanPreferencesKey("setup_completed")
         
         val PROTEIN_PCT = intPreferencesKey("protein_percent")
@@ -52,6 +53,7 @@ class ProfileRepository(private val context: Context) {
                 heightCm = preferences[PreferencesKeys.HEIGHT] ?: 175,
                 goal = UserGoal.valueOf(preferences[PreferencesKeys.GOAL] ?: UserGoal.MAINTAIN.name),
                 goalIntensity = preferences[PreferencesKeys.GOAL_INTENSITY] ?: 500,
+                dietaryPreference = DietaryPreference.valueOf(preferences[PreferencesKeys.DIETARY_PREF] ?: DietaryPreference.NONE.name),
                 setupCompleted = preferences[PreferencesKeys.SETUP_COMPLETED] ?: false,
                 proteinPercent = preferences[PreferencesKeys.PROTEIN_PCT] ?: 20,
                 complexCarbsPercent = preferences[PreferencesKeys.COMPLEX_CARBS_PCT] ?: 40,
@@ -74,6 +76,7 @@ class ProfileRepository(private val context: Context) {
             preferences[PreferencesKeys.HEIGHT] = profile.heightCm
             preferences[PreferencesKeys.GOAL] = profile.goal.name
             preferences[PreferencesKeys.GOAL_INTENSITY] = profile.goalIntensity
+            preferences[PreferencesKeys.DIETARY_PREF] = profile.dietaryPreference.name
             preferences[PreferencesKeys.SETUP_COMPLETED] = profile.setupCompleted
             preferences[PreferencesKeys.PROTEIN_PCT] = profile.proteinPercent
             preferences[PreferencesKeys.COMPLEX_CARBS_PCT] = profile.complexCarbsPercent

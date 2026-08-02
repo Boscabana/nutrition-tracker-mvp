@@ -25,6 +25,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.nick.nutritiontracker.data.DietaryPreference
 import com.nick.nutritiontracker.data.Gender
 import com.nick.nutritiontracker.data.UserGoal
 import com.nick.nutritiontracker.data.UserProfile
@@ -42,6 +43,7 @@ fun SetupWizard(profileVm: ProfileViewModel, vm: NutritionViewModel) {
     var age by remember { mutableStateOf("30") }
     var height by remember { mutableStateOf("175") }
     var weight by remember { mutableStateOf("75") }
+    var diet by remember { mutableStateOf(DietaryPreference.NONE) }
     var goal by remember { mutableStateOf(UserGoal.MAINTAIN) }
     var intensity by remember { mutableIntStateOf(500) }
 
@@ -51,6 +53,7 @@ fun SetupWizard(profileVm: ProfileViewModel, vm: NutritionViewModel) {
         heightCm = height.toIntOrNull() ?: 175,
         weightKg = weight.toDoubleOrNull() ?: 75.0,
         gender = gender,
+        dietaryPreference = diet,
         goal = goal,
         goalIntensity = intensity,
         setupCompleted = false
@@ -67,7 +70,7 @@ fun SetupWizard(profileVm: ProfileViewModel, vm: NutritionViewModel) {
         ) {
             // Progress Bar
             LinearProgressIndicator(
-                progress = { (currentStep + 1) / 6f },
+                progress = { (currentStep + 1) / 7f },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 16.dp),
@@ -90,9 +93,10 @@ fun SetupWizard(profileVm: ProfileViewModel, vm: NutritionViewModel) {
                         0 -> NameStep(name) { name = it }
                         1 -> GenderAgeStep(gender, age, { gender = it }, { age = it })
                         2 -> StatsStep(height, weight, { height = it }, { weight = it })
-                        3 -> GoalStep(goal) { goal = it }
-                        4 -> IntensityStep(goal, intensity) { intensity = it }
-                        5 -> SummaryStep(userProfile)
+                        3 -> DietStep(diet) { diet = it }
+                        4 -> GoalStep(goal) { goal = it }
+                        5 -> IntensityStep(goal, intensity) { intensity = it }
+                        6 -> SummaryStep(userProfile)
                     }
                 }
             }
@@ -114,7 +118,7 @@ fun SetupWizard(profileVm: ProfileViewModel, vm: NutritionViewModel) {
 
                 Button(
                     onClick = {
-                        if (currentStep < 5) {
+                        if (currentStep < 6) {
                             currentStep++
                         } else {
                             vm.setForceOnboarding(false)
@@ -128,8 +132,8 @@ fun SetupWizard(profileVm: ProfileViewModel, vm: NutritionViewModel) {
                         else -> true
                     }
                 ) {
-                    Text(if (currentStep < 5) "Weiter" else "Fertig")
-                    if (currentStep < 5) {
+                    Text(if (currentStep < 6) "Weiter" else "Fertig")
+                    if (currentStep < 6) {
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, null, modifier = Modifier.padding(start = 8.dp))
                     }
                 }
@@ -223,6 +227,56 @@ private fun StatsStep(
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done)
             )
+        }
+    }
+}
+
+@Composable
+private fun DietStep(current: DietaryPreference, onDietChange: (DietaryPreference) -> Unit) {
+    StepContainer(
+        icon = Icons.Default.Restaurant,
+        title = "Deine Ernährung",
+        subtitle = "Hast du besondere Vorlieben oder Einschränkungen?"
+    ) {
+        Column(Modifier.selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            DietOption(
+                selected = current == DietaryPreference.NONE,
+                title = "Allesesser",
+                description = "Keine besonderen Einschränkungen.",
+                onClick = { onDietChange(DietaryPreference.NONE) }
+            )
+            DietOption(
+                selected = current == DietaryPreference.VEGETARIAN,
+                title = "Vegetarisch",
+                description = "Kein Fleisch oder Fisch.",
+                onClick = { onDietChange(DietaryPreference.VEGETARIAN) }
+            )
+            DietOption(
+                selected = current == DietaryPreference.VEGAN,
+                title = "Vegan",
+                description = "Rein pflanzliche Ernährung.",
+                onClick = { onDietChange(DietaryPreference.VEGAN) }
+            )
+            DietOption(
+                selected = current == DietaryPreference.LOW_CARB,
+                title = "Low Carb",
+                description = "Reduzierte Kohlenhydrate.",
+                onClick = { onDietChange(DietaryPreference.LOW_CARB) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun DietOption(selected: Boolean, title: String, description: String, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().selectable(selected = selected, onClick = onClick, role = Role.RadioButton),
+        colors = CardDefaults.cardColors(containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+        border = if (selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null
+    ) {
+        Column(Modifier.padding(16.dp)) {
+            Text(title, fontWeight = FontWeight.Bold)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
         }
     }
 }

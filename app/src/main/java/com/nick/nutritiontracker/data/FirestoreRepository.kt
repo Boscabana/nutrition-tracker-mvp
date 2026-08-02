@@ -91,4 +91,60 @@ class FirestoreRepository {
             .delete()
             .await()
     }
+
+    // --- INBOX & COMMUNITY ---
+
+    fun getInboxMessages(uid: String): Flow<List<InboxMessage>> = callbackFlow {
+        val subscription = db.collection("users")
+            .document(uid)
+            .collection("inbox")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                val messages = snapshot?.documents?.mapNotNull { doc ->
+                    doc.toObject(InboxMessage::class.java)?.copy(id = doc.id)
+                } ?: emptyList<InboxMessage>()
+                trySend(messages)
+            }
+        awaitClose { subscription.remove() }
+    }
+
+    suspend fun sendInboxMessage(toUid: String, message: InboxMessage) {
+        db.collection("users")
+            .document(toUid)
+            .collection("inbox")
+            .add(message)
+            .await()
+    }
+
+    suspend fun markMessageAsRead(uid: String, messageId: String) {
+        db.collection("users")
+            .document(uid)
+            .collection("inbox")
+            .document(messageId)
+            .update("isRead", true)
+            .await()
+    }
+
+    suspend fun deleteInboxMessage(uid: String, messageId: String) {
+        db.collection("users")
+            .document(uid)
+            .collection("inbox")
+            .document(messageId)
+            .delete()
+            .await()
+    }
+
+    suspend fun getHouseholdMembers(uids: List<String>): List<Map<String, String>> {
+        val results = mutableListOf<Map<String, String>>()
+        for (uid in uids) {
+            val doc = db.collection("users").document(uid).get().await()
+            val name = doc.getString("firstName") ?: "Unbekannt"
+            results.add(mapOf("uid" to uid, "name" to name))
+        }
+        return results
+    }
 }

@@ -75,4 +75,25 @@ class FirebaseManager {
     fun signOut() {
         auth.signOut()
     }
+
+    suspend fun syncProfileToFirestore(profile: UserProfile) {
+        val user = auth.currentUser ?: return
+        val profileData = mapOf(
+            "uid" to user.uid,
+            "firstName" to profile.firstName,
+            "goal" to profile.goal.name,
+            "dietaryPreference" to profile.dietaryPreference.name,
+            "lastSeen" to System.currentTimeMillis()
+        )
+        db.collection("users").document(user.uid).set(profileData).await()
+    }
+
+    suspend fun getUserName(uid: String): String {
+        return try {
+            val doc = db.collection("users").document(uid).get().await()
+            doc.getString("firstName") ?: "Unbekannter Nutzer"
+        } catch (e: Exception) {
+            "Unbekannter Nutzer"
+        }
+    }
 }

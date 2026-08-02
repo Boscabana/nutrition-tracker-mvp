@@ -284,6 +284,20 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                                 }
                             }
                             
+                            // Notification Bell
+                            val unreadCount = vm.unreadInboxCount
+                            IconButton(onClick = { tab = 7 }) { // Tab 7 = Inbox
+                                BadgedBox(
+                                    badge = {
+                                        if (unreadCount > 0) {
+                                            Badge { Text(unreadCount.toString()) }
+                                        }
+                                    }
+                                ) {
+                                    Icon(Icons.Default.Notifications, "Postfach")
+                                }
+                            }
+                            
                             if (tab == 5) {
                                 var showMenu by remember { mutableStateOf(false) }
                                 Box {
@@ -384,6 +398,12 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                         label = { Text("Profil") },
                         icon = { Icon(Icons.Default.Person, null) }
                     )
+                    NavigationBarItem(
+                        selected = tab == 8,
+                        onClick = { tab = 8 },
+                        label = { Text("Community") },
+                        icon = { Icon(Icons.Default.Groups, null) }
+                    )
                 }
             }
         ) { padding ->
@@ -396,6 +416,8 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                     4 -> PlannerScreen(vm)
                     5 -> ShoppingListScreen(vm)
                     6 -> WeightScreen(vm, profileVm)
+                    7 -> InboxScreen(vm, onBack = { tab = 0 })
+                    8 -> CommunityScreen(vm)
                 }
             }
         }
@@ -2807,6 +2829,24 @@ private fun FoodSelectionActions(
     snackbarHostState: SnackbarHostState
 ) {
     var showMergeDialog by remember { mutableStateOf(false) }
+    var showSendDialog by remember { mutableStateOf(false) }
+
+    if (showSendDialog) {
+        val foodId = selectedFoodIds.value.firstOrNull()
+        val food = vm.foods.find { it.id == foodId }
+        if (food != null) {
+            SendToUserDialog(
+                members = vm.householdMembers,
+                onDismiss = { showSendDialog = false },
+                onSend = { targetUid ->
+                    vm.sendFoodToUser(targetUid, food)
+                    showSendDialog = false
+                    selectedFoodIds.value = emptySet()
+                    scope.launch { snackbarHostState.showSnackbar("Artikel versendet!") }
+                }
+            )
+        }
+    }
 
     if (showMergeDialog) {
         MergeFoodsDialog(
@@ -2822,6 +2862,10 @@ private fun FoodSelectionActions(
     }
 
     if (selectedFoodIds.value.size == 1) {
+        IconButton(onClick = { showSendDialog = true }) {
+            Icon(Icons.AutoMirrored.Filled.Send, "An Haushaltsmitglied senden")
+        }
+
         val foodId = selectedFoodIds.value.first()
         val food = vm.foods.find { it.id == foodId }
         if (food != null && !food.isGeneric) {
@@ -2856,8 +2900,29 @@ private fun MealSelectionActions(
     snackbarHostState: SnackbarHostState
 ) {
     val context = LocalContext.current
+    var showSendDialog by remember { mutableStateOf(false) }
+
+    if (showSendDialog) {
+        val mealId = selectedMealIds.value.firstOrNull()
+        val meal = vm.meals.find { it.id == mealId }
+        if (meal != null) {
+            SendToUserDialog(
+                members = vm.householdMembers,
+                onDismiss = { showSendDialog = false },
+                onSend = { targetUid ->
+                    vm.sendRecipeToUser(targetUid, meal)
+                    showSendDialog = false
+                    selectedMealIds.value = emptySet()
+                    scope.launch { snackbarHostState.showSnackbar("Rezept versendet!") }
+                }
+            )
+        }
+    }
 
     if (selectedMealIds.value.size == 1) {
+        IconButton(onClick = { showSendDialog = true }) {
+            Icon(Icons.AutoMirrored.Filled.Send, "An Haushaltsmitglied senden")
+        }
         val mealId = selectedMealIds.value.first()
         val meal = vm.meals.find { it.id == mealId }
         if (meal != null) {
@@ -2894,6 +2959,42 @@ private fun MealSelectionActions(
     }
 }
 
+
+@Composable
+fun SendToUserDialog(
+    members: List<Map<String, String>>,
+    onDismiss: () -> Unit,
+    onSend: (String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Empfänger wählen") },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(members) { member ->
+                    val name = member["name"] ?: "Unbekannt"
+                    val uid = member["uid"] ?: ""
+                    
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().clickable { onSend(uid) },
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ) {
+                        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Person, null, modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Text(name)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Abbrechen") }
+        }
+    )
+}
 
 class PortionInputState(nameInitial: String, gramsInitial: String) {
     var name by mutableStateOf(nameInitial)
