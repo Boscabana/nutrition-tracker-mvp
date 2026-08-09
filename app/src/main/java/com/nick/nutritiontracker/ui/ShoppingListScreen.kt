@@ -1,14 +1,13 @@
 package com.nick.nutritiontracker.ui
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -16,25 +15,26 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Kitchen
-import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nick.nutritiontracker.data.ShoppingItem
+import com.nick.nutritiontracker.data.UserProfile
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
+import kotlinx.coroutines.delay
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun ShoppingListScreen(vm: NutritionViewModel) {
+fun ShoppingListScreen(vm: NutritionViewModel, userProfile: UserProfile) {
     val rawShoppingList = vm.shoppingList
     val household by vm.firebaseManager.household.collectAsState()
     
     var showAddItemDialog by remember { mutableStateOf(false) }
+    var itemToEdit by remember { mutableStateOf<ShoppingItem?>(null) }
     var isArchiveExpanded by remember { mutableStateOf(false) }
 
     val activeItems by remember(rawShoppingList, vm.showPantryInShoppingList) { 
@@ -177,6 +177,7 @@ fun ShoppingListScreen(vm: NutritionViewModel) {
                         ShoppingItemTile(
                             item = item,
                             onToggle = { vm.toggleShoppingItem(item) },
+                            onEdit = { itemToEdit = item },
                             onDelete = { 
                                 if (vm.isShoppingListAggregated) {
                                     val isWeightItem = item.weightGrams > 0
@@ -231,6 +232,7 @@ fun ShoppingListScreen(vm: NutritionViewModel) {
                             ShoppingItemRow(
                                 item = item,
                                 onToggle = { vm.toggleShoppingItem(item) },
+                                onEdit = { itemToEdit = item },
                                 onDelete = { vm.deleteShoppingItem(item.id) }
                             )
                         }
@@ -242,22 +244,40 @@ fun ShoppingListScreen(vm: NutritionViewModel) {
 
     if (showAddItemDialog) {
         AddShoppingItemDialog(
+            vm = vm,
+            isPremium = userProfile.isPremium,
             onDismiss = { showAddItemDialog = false },
-            onAdd = { name, amount, unit ->
-                vm.addShoppingItem(name, amount, unit)
+            onAdd = { name, amount, unit, category ->
+                vm.addShoppingItem(name, amount, unit, category, userProfile.isPremium)
                 showAddItemDialog = false
+            }
+        )
+    }
+
+    itemToEdit?.let { item ->
+        EditShoppingItemDialog(
+            item = item,
+            vm = vm,
+            onDismiss = { itemToEdit = null },
+            onConfirm = { updated ->
+                vm.updateShoppingItem(updated)
+                itemToEdit = null
             }
         )
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ShoppingItemTile(item: ShoppingItem, onToggle: () -> Unit, onDelete: () -> Unit) {
+fun ShoppingItemTile(item: ShoppingItem, onToggle: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .height(84.dp) // Fixed height for a uniform grid
-            .clickable { onToggle() },
+            .combinedClickable(
+                onClick = onToggle,
+                onLongClick = onEdit
+            ),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
     ) {
@@ -305,10 +325,14 @@ fun ShoppingItemTile(item: ShoppingItem, onToggle: () -> Unit, onDelete: () -> U
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ShoppingItemRow(item: ShoppingItem, onToggle: () -> Unit, onDelete: () -> Unit) {
+fun ShoppingItemRow(item: ShoppingItem, onToggle: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth().clickable { onToggle() },
+        modifier = Modifier.fillMaxWidth().combinedClickable(
+            onClick = onToggle,
+            onLongClick = onEdit
+        ),
         colors = if (item.isChecked) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant) else CardDefaults.cardColors()
     ) {
         Row(
@@ -348,26 +372,78 @@ fun ShoppingItemRow(item: ShoppingItem, onToggle: () -> Unit, onDelete: () -> Un
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun AddShoppingItemDialog(onDismiss: () -> Unit, onAdd: (String, Double, String) -> Unit) {
+fun AddShoppingItemDialog(
+    vm: NutritionViewModel,
+    isPremium: Boolean,
+    onDismiss: () -> Unit,
+    onAdd: (String, Double, String, String?) -> Unit
+) {
     var name by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
     var unit by remember { mutableStateOf("g") }
+    var category by remember { mutableStateOf<String?>(null) }
+    var isSuggesting by remember { mutableStateOf(false) }
+
+    val matchedFood = remember(name) {
+        vm.foods.find { it.name.equals(name.trim(), ignoreCase = true) }
+    }
+
+    LaunchedEffect(name) {
+        if (name.length > 2 && isPremium) {
+            isSuggesting = true
+            delay(500)
+            category = vm.suggestCategory(name, isPremium)
+            isSuggesting = false
+        } else if (name.length > 2 && !isPremium) {
+            // Local check only for non-premium (no loading indicator)
+            val match = vm.foods.find { it.name.equals(name, ignoreCase = true) }
+            if (match?.category != null) {
+                category = match.category
+            }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Artikel hinzufügen") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") })
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Menge") }, modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = unit, onValueChange = { unit = it }, label = { Text("Einheit") }, modifier = Modifier.weight(1f))
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Menge") }, modifier = Modifier.fillMaxWidth())
+                
+                Text("Einheit", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val defaultUnits = listOf("g", "ml", "Stück", "Packung")
+                    val portions = matchedFood?.portions?.map { it.name } ?: emptyList()
+                    val packages = matchedFood?.packages?.map { it.name } ?: emptyList()
+                    val allUnits = (defaultUnits + portions + packages).distinct()
+                    
+                    allUnits.forEach { u ->
+                        FilterChip(
+                            selected = unit == u,
+                            onClick = { 
+                                unit = u
+                                if ((amount.isEmpty() || amount == "0") && u != "g" && u != "ml") {
+                                    amount = "1"
+                                }
+                            },
+                            label = { Text(u) }
+                        )
+                    }
                 }
+
+                CategoryDropdown(
+                    selectedCategory = category,
+                    categories = vm.categories,
+                    onCategorySelected = { category = it },
+                    isSuggesting = isSuggesting
+                )
             }
         },
         confirmButton = {
-            Button(onClick = { onAdd(name, amount.toDoubleOrNull() ?: 0.0, unit) }) {
+            Button(onClick = { onAdd(name, amount.toDoubleOrNull() ?: 0.0, unit, category) }) {
                 Text("Hinzufügen")
             }
         },
@@ -375,6 +451,134 @@ fun AddShoppingItemDialog(onDismiss: () -> Unit, onAdd: (String, Double, String)
             TextButton(onClick = onDismiss) { Text("Abbrechen") }
         }
     )
+}
+
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+fun EditShoppingItemDialog(
+    item: ShoppingItem,
+    vm: NutritionViewModel,
+    onDismiss: () -> Unit,
+    onConfirm: (ShoppingItem) -> Unit
+) {
+    var name by remember { mutableStateOf(item.name) }
+    var amount by remember { mutableStateOf(item.amount.toString()) }
+    var unit by remember { mutableStateOf(item.unit) }
+    var category by remember { mutableStateOf(item.category) }
+
+    val matchedFood = remember(name) {
+        vm.foods.find { it.name.equals(name.trim(), ignoreCase = true) }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Artikel bearbeiten") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Menge") }, modifier = Modifier.fillMaxWidth())
+
+                Text("Einheit", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val defaultUnits = listOf("g", "ml", "Stück", "Packung")
+                    val portions = matchedFood?.portions?.map { it.name } ?: emptyList()
+                    val packages = matchedFood?.packages?.map { it.name } ?: emptyList()
+                    val allUnits = (defaultUnits + portions + packages).distinct()
+                    
+                    allUnits.forEach { u ->
+                        FilterChip(
+                            selected = unit == u,
+                            onClick = { 
+                                unit = u
+                                if ((amount.isEmpty() || amount == "0" || amount == "0.0") && u != "g" && u != "ml") {
+                                    amount = "1"
+                                }
+                            },
+                            label = { Text(u) }
+                        )
+                    }
+                }
+
+                CategoryDropdown(
+                    selectedCategory = category,
+                    categories = vm.categories,
+                    onCategorySelected = { category = it }
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { 
+                onConfirm(item.copy(
+                    name = name,
+                    amount = amount.toDoubleOrNull() ?: 0.0,
+                    unit = unit,
+                    category = category
+                ))
+            }) {
+                Text("Speichern")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Abbrechen") }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CategoryDropdown(
+    selectedCategory: String?,
+    categories: List<String>,
+    onCategorySelected: (String) -> Unit,
+    isSuggesting: Boolean = false
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded }
+    ) {
+        OutlinedTextField(
+            value = selectedCategory ?: "",
+            onValueChange = {},
+            readOnly = true,
+            label = { 
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Kategorie")
+                    if (isSuggesting) {
+                        Spacer(Modifier.width(8.dp))
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Suchen...", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+            },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+            modifier = Modifier.menuAnchor().fillMaxWidth()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            categories.forEach { cat ->
+                DropdownMenuItem(
+                    text = { Text(cat) },
+                    onClick = {
+                        onCategorySelected(cat)
+                        expanded = false
+                    }
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("Sonstiges") },
+                onClick = {
+                    onCategorySelected("Sonstiges")
+                    expanded = false
+                }
+            )
+        }
+    }
 }
 
 private fun Double.roundString(): String = if (this % 1.0 == 0.0) "%.0f".format(this) else "%.1f".format(this)

@@ -26,6 +26,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import coil.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
@@ -203,7 +205,7 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                         },
                         actions = {
                             if (isDiarySelection) {
-                                DiarySelectionActions(vm, selectedEntryIds, scope, snackbarHostState, dateFormatter)
+                                DiarySelectionActions(vm, selectedEntryIds, scope, snackbarHostState, dateFormatter, userProfile)
                             }
                             if (isFoodSelection) {
                                 FoodSelectionActions(vm, selectedFoodIds, scope, snackbarHostState)
@@ -411,10 +413,10 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                 when (tab) {
                     0 -> TodayScreen(userProfile, foods, entries, vm, snackbarHostState, selectedEntryIds, selectedFoodIds, selectedMealIds)
                     1 -> FoodsScreen(vm, snackbarHostState, selectedFoodIds)
-                    2 -> MealsScreen(vm, snackbarHostState, selectedMealIds)
+                    2 -> MealsScreen(vm, snackbarHostState, selectedMealIds, userProfile)
                     3 -> ProfileScreen(profileVm, vm, userProfile)
-                    4 -> PlannerScreen(vm)
-                    5 -> ShoppingListScreen(vm)
+                    4 -> PlannerScreen(vm, userProfile)
+                    5 -> ShoppingListScreen(vm, userProfile)
                     6 -> WeightScreen(vm, profileVm)
                     7 -> InboxScreen(vm, onBack = { tab = 0 })
                     8 -> CommunityScreen(vm)
@@ -461,12 +463,17 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
 fun SwipeActionContainer(
     onDeleteRequest: () -> Unit,
     onEditRequest: () -> Unit,
+    key: Any? = null,
     enabled: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val maxSwipePx = with(LocalDensity.current) { 80.dp.toPx() }
-    val offsetX = remember { Animatable(0f) }
+    val offsetX = remember(key) { Animatable(0f) }
+    
+    // Ensure lambdas are always fresh inside the pointerInput block
+    val currentOnDelete by rememberUpdatedState(onDeleteRequest)
+    val currentOnEdit by rememberUpdatedState(onEditRequest)
 
     Box(
         modifier = Modifier
@@ -513,7 +520,7 @@ fun SwipeActionContainer(
                 .offset { IntOffset(offsetX.value.roundToInt(), 0) }
                 .fillMaxWidth()
                 .then(if (enabled) {
-                    Modifier.pointerInput(Unit) {
+                    Modifier.pointerInput(key) {
                         detectHorizontalDragGestures(
                             onHorizontalDrag = { change, dragAmount ->
                                 scope.launch {
@@ -525,10 +532,10 @@ fun SwipeActionContainer(
                                 scope.launch {
                                     if (offsetX.value > maxSwipePx * 0.6f) {
                                         offsetX.animateTo(0f)
-                                        onEditRequest()
+                                        currentOnEdit()
                                     } else if (offsetX.value < -maxSwipePx * 0.6f) {
                                         offsetX.animateTo(0f)
-                                        onDeleteRequest()
+                                        currentOnDelete()
                                     } else {
                                         offsetX.animateTo(0f)
                                     }
@@ -668,8 +675,8 @@ private fun TodayScreen(
             food = food,
             vm = vm,
             onDismiss = { scannedFood = null },
-            onConfirm = { amount, portion, mealSlot ->
-                vm.addEntry(food, amount, portion, mealSlot)
+            onConfirm = { amount, portion, pkg, mealSlot ->
+                vm.addEntry(food, amount, portion, mealSlot, pkg)
                 scannedFood = null
             }
         )
@@ -813,7 +820,7 @@ private fun TodayScreen(
             AddEntryCard(
                 foods = foods, 
                 meals = vm.meals,
-                onAddEntry = { food, amount, portion, mealSlot ->
+                onAddEntry = { food, amount, portion, pkg, mealSlot ->
                     var finalFood = food
                     if (food.id == 0L) {
                         val existing = food.barcode?.let { vm.findFoodByBarcode(it) }
@@ -831,7 +838,7 @@ private fun TodayScreen(
                             )
                         }
                     }
-                    vm.addEntry(finalFood, amount, portion, mealSlot)
+                    vm.addEntry(finalFood, amount, portion, mealSlot, pkg)
                 },
                 onAddMeal = { meal, mealSlot, servings ->
                     vm.addMealEntry(meal, mealSlot, servings)
@@ -858,7 +865,8 @@ private fun TodayScreen(
                 onSearchRequest = { query -> scannerService.searchProducts(query) },
                 onCaptureRequested = { food -> askToCaptureFood = food },
                 vm = vm,
-                snackbarHostState = snackbarHostState
+                snackbarHostState = snackbarHostState,
+                isPremium = userProfile.isPremium
             ) 
         }
 
@@ -880,6 +888,7 @@ private fun TodayScreen(
                     SwipeActionContainer(
                         onDeleteRequest = { entryToDelete = entry.id },
                         onEditRequest = { entryToEdit = entry },
+                        key = entry.id,
                         enabled = selectedEntryIds.value.isEmpty()
                     ) {
                         CompactEntryRow(
@@ -1002,13 +1011,14 @@ fun AddAmountDialog(
     food: FoodItemEntity,
     vm: NutritionViewModel,
     onDismiss: () -> Unit,
-    onConfirm: (Double, FoodPortionEntity?, String) -> Unit
+    onConfirm: (Double, FoodPortionEntity?, FoodPackageEntity?, String) -> Unit
 ) {
     val parent = food.parentId?.let { pId -> vm.foods.find { it.id == pId } }
     val allPortions = food.getAllPortions(parent)
     val firstPortion = allPortions.firstOrNull()
     var amount by remember { mutableStateOf(if (firstPortion != null) "1" else "100") }
     var selectedPortion by remember { mutableStateOf<FoodPortionEntity?>(firstPortion) }
+    var selectedPackage by remember { mutableStateOf<FoodPackageEntity?>(null) }
     var mealSlot by remember { mutableStateOf("Snack") }
 
     AlertDialog(
@@ -1029,15 +1039,20 @@ fun AddAmountDialog(
                     label = { Text("Menge") },
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { onConfirm(amount.num(), selectedPortion, mealSlot) })
+                    keyboardActions = KeyboardActions(onDone = { onConfirm(amount.num(), selectedPortion, selectedPackage, mealSlot) })
                 )
                 Text("Einheit", style = MaterialTheme.typography.labelMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
-                        selected = selectedPortion == null,
+                        selected = selectedPortion == null && selectedPackage == null,
                         onClick = { 
-                            val oldGrams = if (selectedPortion != null) amount.num() * selectedPortion!!.grams else amount.num()
-                            selectedPortion = null 
+                            val oldGrams = when {
+                                selectedPortion != null -> amount.num() * selectedPortion!!.grams
+                                selectedPackage != null -> amount.num() * selectedPackage!!.quantity
+                                else -> amount.num()
+                            }
+                            selectedPortion = null
+                            selectedPackage = null
                             amount = oldGrams.roundString()
                         },
                         label = { Text(food.baseUnit) }
@@ -1046,11 +1061,32 @@ fun AddAmountDialog(
                         FilterChip(
                             selected = selectedPortion == portion,
                             onClick = { 
-                                val oldGrams = if (selectedPortion != null) amount.num() * selectedPortion!!.grams else amount.num()
+                                val oldGrams = when {
+                                    selectedPortion != null -> amount.num() * selectedPortion!!.grams
+                                    selectedPackage != null -> amount.num() * selectedPackage!!.quantity
+                                    else -> amount.num()
+                                }
                                 selectedPortion = portion
+                                selectedPackage = null
                                 amount = (oldGrams / portion.grams).roundString()
                             },
                             label = { Text("${portion.name} (${portion.grams.roundString()}${food.baseUnit})") }
+                        )
+                    }
+                    food.packages.forEach { pkg ->
+                        FilterChip(
+                            selected = selectedPackage == pkg,
+                            onClick = {
+                                val oldGrams = when {
+                                    selectedPortion != null -> amount.num() * selectedPortion!!.grams
+                                    selectedPackage != null -> amount.num() * selectedPackage!!.quantity
+                                    else -> amount.num()
+                                }
+                                selectedPortion = null
+                                selectedPackage = pkg
+                                amount = (oldGrams / pkg.quantity).roundString()
+                            },
+                            label = { Text("${pkg.name} (${pkg.quantity.roundString()}${pkg.unit})") }
                         )
                     }
                 }
@@ -1068,7 +1104,7 @@ fun AddAmountDialog(
         },
         confirmButton = {
             Button(onClick = {
-                onConfirm(amount.num(), selectedPortion, mealSlot)
+                onConfirm(amount.num(), selectedPortion, selectedPackage, mealSlot)
             }) { Text("Hinzufügen") }
         },
         dismissButton = {
@@ -1082,13 +1118,14 @@ fun AddAmountDialog(
 fun AddEntryCard(
     foods: List<FoodItemEntity>,
     meals: List<MealEntity>,
-    onAddEntry: (FoodItemEntity, Double, FoodPortionEntity?, String) -> Unit,
+    onAddEntry: (FoodItemEntity, Double, FoodPortionEntity?, FoodPackageEntity?, String) -> Unit,
     onAddMeal: (MealEntity, String, Double) -> Unit,
     onScanRequest: () -> Unit,
     onSearchRequest: suspend (String) -> List<FoodItemEntity>,
     onCaptureRequested: (FoodItemEntity) -> Unit,
     vm: NutritionViewModel,
-    snackbarHostState: SnackbarHostState
+    snackbarHostState: SnackbarHostState,
+    isPremium: Boolean
 ) {
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
@@ -1116,7 +1153,7 @@ fun AddEntryCard(
                         android.graphics.BitmapFactory.decodeStream(context.contentResolver.openInputStream(it))
                     }
                     bitmap?.let { b ->
-                        vm.analyzeMealImage(b.copy(android.graphics.Bitmap.Config.ARGB_8888, true))
+                        vm.analyzeMealImage(b.copy(android.graphics.Bitmap.Config.ARGB_8888, true), isPremium)
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -1137,7 +1174,7 @@ fun AddEntryCard(
                         android.graphics.BitmapFactory.decodeStream(context.contentResolver.openInputStream(tempImageUri!!))
                     }
                     bitmap?.let { b ->
-                        vm.analyzeMealImage(b.copy(android.graphics.Bitmap.Config.ARGB_8888, true))
+                        vm.analyzeMealImage(b.copy(android.graphics.Bitmap.Config.ARGB_8888, true), isPremium)
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -1162,8 +1199,8 @@ fun AddEntryCard(
             food = selectedFood!!,
             vm = vm,
             onDismiss = { selectedFood = null },
-            onConfirm = { amount, portion, mealSlot ->
-                onAddEntry(selectedFood!!, amount, portion, mealSlot)
+            onConfirm = { amount, portion, pkg, mealSlot ->
+                onAddEntry(selectedFood!!, amount, portion, pkg, mealSlot)
                 selectedFood = null
                 query = ""
                 results = emptyList()
@@ -1357,7 +1394,15 @@ fun AddEntryCard(
                     }
 
                     FilledIconButton(
-                        onClick = { showImageSourceDialog = true },
+                        onClick = { 
+                            if (isPremium) {
+                                showImageSourceDialog = true 
+                            } else {
+                                scope.launch {
+                                    snackbarHostState.showSnackbar("Premium-Funktion: Upgrade erforderlich für die AI Bilderkennung.")
+                                }
+                            }
+                        },
                         shape = RoundedCornerShape(12.dp),
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.tertiary)
                     ) {
@@ -1433,6 +1478,9 @@ fun EditEntryDialog(
     var amount by remember { mutableStateOf(entry.amount.roundString()) }
     var selectedPortion by remember {
         mutableStateOf(allPortions.find { it.name == entry.unitLabel })
+    }
+    var selectedPackage by remember {
+        mutableStateOf(food?.packages?.find { it.name == entry.unitLabel })
     }
     var mealSlot by remember { mutableStateOf(entry.mealSlot) }
     val isOrphaned = food == null
@@ -1541,14 +1589,19 @@ fun EditEntryDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done)
                 )
                 
-                if (allPortions.isNotEmpty() || !isOrphaned) {
+                if (allPortions.isNotEmpty() || (food?.packages?.isNotEmpty() == true) || !isOrphaned) {
                     Text("Einheit", style = MaterialTheme.typography.labelMedium)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(
-                            selected = selectedPortion == null,
+                            selected = selectedPortion == null && selectedPackage == null,
                             onClick = { 
-                                val oldGrams = if (selectedPortion != null) amount.num() * selectedPortion!!.grams else amount.num()
+                                val oldGrams = when {
+                                    selectedPortion != null -> amount.num() * selectedPortion!!.grams
+                                    selectedPackage != null -> amount.num() * selectedPackage!!.quantity
+                                    else -> amount.num()
+                                }
                                 selectedPortion = null
+                                selectedPackage = null
                                 amount = oldGrams.roundString()
                             },
                             label = { Text(food?.baseUnit ?: "g") }
@@ -1557,11 +1610,32 @@ fun EditEntryDialog(
                             FilterChip(
                                 selected = selectedPortion == portion,
                                 onClick = { 
-                                    val oldGrams = if (selectedPortion != null) amount.num() * selectedPortion!!.grams else amount.num()
+                                    val oldGrams = when {
+                                        selectedPortion != null -> amount.num() * selectedPortion!!.grams
+                                        selectedPackage != null -> amount.num() * selectedPackage!!.quantity
+                                        else -> amount.num()
+                                    }
                                     selectedPortion = portion
+                                    selectedPackage = null
                                     amount = (oldGrams / portion.grams).roundString()
                                 },
                                 label = { Text("${portion.name} (${portion.grams.roundString()}${food?.baseUnit ?: "g"})") }
+                            )
+                        }
+                        food?.packages?.forEach { pkg ->
+                            FilterChip(
+                                selected = selectedPackage == pkg,
+                                onClick = {
+                                    val oldGrams = when {
+                                        selectedPortion != null -> amount.num() * selectedPortion!!.grams
+                                        selectedPackage != null -> amount.num() * selectedPackage!!.quantity
+                                        else -> amount.num()
+                                    }
+                                    selectedPortion = null
+                                    selectedPackage = pkg
+                                    amount = (oldGrams / pkg.quantity).roundString()
+                                },
+                                label = { Text("${pkg.name} (${pkg.quantity.roundString()}${pkg.unit})") }
                             )
                         }
                     }
@@ -1585,12 +1659,17 @@ fun EditEntryDialog(
         confirmButton = {
             TextButton(onClick = {
                 val numAmount = amount.num()
-                val grams = if (selectedPortion != null) numAmount * selectedPortion!!.grams else if (food != null) numAmount else entry.grams
+                val grams = when {
+                    selectedPortion != null -> numAmount * selectedPortion!!.grams
+                    selectedPackage != null -> numAmount * selectedPackage!!.quantity
+                    food != null -> numAmount
+                    else -> entry.grams
+                }
                 onSave(
                     entry.copy(
                         amount = numAmount,
-                        unitLabel = selectedPortion?.name ?: food?.baseUnit ?: entry.unitLabel,
-                        grams = if (isOrphaned && selectedPortion == null) (numAmount * (entry.grams / entry.amount.coerceAtLeast(1.0))) else grams,
+                        unitLabel = selectedPortion?.name ?: selectedPackage?.name ?: food?.baseUnit ?: entry.unitLabel,
+                        grams = if (isOrphaned && selectedPortion == null && selectedPackage == null) (numAmount * (entry.grams / entry.amount.coerceAtLeast(1.0))) else grams,
                         mealSlot = mealSlot
                     )
                 )
@@ -1988,6 +2067,18 @@ private fun CompactEntryRow(
                 if (isSelectionMode) {
                     Checkbox(checked = isSelected, onCheckedChange = { onToggleSelection() })
                 }
+                
+                if (entry.imageUrl != null) {
+                    AsyncImage(
+                        model = entry.imageUrl,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(4.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (entry.isMeal) {
@@ -2368,6 +2459,7 @@ fun FoodItemRow(
     SwipeActionContainer(
         onDeleteRequest = onDelete,
         onEditRequest = onEdit,
+        key = food.id,
         enabled = !isSelectionMode
     ) {
         Card(
@@ -2872,7 +2964,8 @@ private fun DiarySelectionActions(
     selectedEntryIds: MutableState<Set<Long>>,
     scope: kotlinx.coroutines.CoroutineScope,
     snackbarHostState: SnackbarHostState,
-    dateFormatter: java.time.format.DateTimeFormatter
+    dateFormatter: java.time.format.DateTimeFormatter,
+    userProfile: UserProfile
 ) {
     var showDateDialog by remember { mutableStateOf(false) }
     var operationType by remember { mutableStateOf("copy") }
@@ -2917,8 +3010,8 @@ private fun DiarySelectionActions(
                 showCreateMealDialog = false
                 mealFromSelection = null
             },
-            onSave = { name, ingredients, servings ->
-                vm.addMealTemplate(name, ingredients, servings)
+            onSave = { name, ingredients, servings, category, imageUrl ->
+                vm.addMealTemplate(name, ingredients, servings, category, imageUrl)
                 selectedEntryIds.value = emptySet()
                 showCreateMealDialog = false
                 mealFromSelection = null

@@ -31,7 +31,9 @@ data class FoodEntryEntity(
     var isMeal: Boolean = false,
     val mealIngredients: List<MealIngredientEntity>? = null,
     @get:PropertyName("isPlanned") @set:PropertyName("isPlanned")
-    var isPlanned: Boolean = false
+    var isPlanned: Boolean = false,
+    val imageUrl: String? = null,
+    val tags: List<String> = emptyList()
 ) {
     @get:Exclude
     val kcal: Double get() = if (isMeal) mealIngredients?.sumOf { it.kcal } ?: 0.0 else kcalPer100g * grams / 100.0

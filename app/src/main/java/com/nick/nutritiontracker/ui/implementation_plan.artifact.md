@@ -1,30 +1,46 @@
-# Implementation Plan - Switching to No-Cost AI Tier
+# Implementation Plan - Resource Optimization & Premium Strategy
 
-This plan addresses the "Your prepayment credits are depleted" error by switching the AI backend from the enterprise Vertex AI (which requires prepaid credits on Blaze) to the **Gemini Developer API** (Google AI) backend, which offers a generous no-cost tier.
+This plan introduces measures to minimize AI costs (Gemini API) and prepares the app for a "Premium" subscription model.
 
 ## User Review Required
 
 > [!IMPORTANT]
-> **Switch to Free Tier**: I am updating the code to use the `googleAI()` backend. This backend is designed for developers and generally stays within a free quota without requiring a prepaid balance.
-> **Firebase Console Action**: After I apply the code changes, you **must** enable the Gemini Developer API in the Firebase Console:
-> 1. Go to the **Firebase AI Logic** page.
-> 2. Go to **Settings** > **Gemini Developer API**.
-> 3. Click **Enable**.
+> **Global Learning (Cloud Cache)**: I propose a shared "Knowledge Base" in Firestore. When a user classifies a new item like "Duschgel", the result is stored globally. Other users will benefit from this result without triggering a new AI call.
+> **Premium Flag**: We will add a `isPremium` status to the user profile to control access to high-resource features.
 
 ## Proposed Changes
 
+### [Data Layer]
+
+#### [MODIFY] [UserProfile.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/data/UserProfile.kt)
+- Add `isPremium: Boolean = false`.
+- Add `aiCallsThisMonth: Int = 0`.
+
+#### [NEW] [GlobalCategoryCache] (Firestore)
+- A global collection `global_knowledge` where common mappings are stored:
+  `{ "term": "klopapier", "category": "Haushalt", "usageCount": 150 }`
+
 ### [Business Logic]
 
-#### [MODIFY] [GeminiService.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/data/GeminiService.kt)
-- Import `com.google.firebase.ai.GenerativeBackend`.
-- Initialize the AI model using the `googleAI()` backend:
-  ```kotlin
-  Firebase.ai(backend = GenerativeBackend.googleAI(location = region)).generativeModel(modelName)
-  ```
-- This forces the use of the Developer API instead of the Enterprise Vertex AI.
+#### [MODIFY] [NutritionViewModel.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/viewmodel/NutritionViewModel.kt)
+- **Updated `suggestCategory` Logic**:
+    1.  **Catalog**: Check personal `foods`.
+    2.  **Global Cache**: Check Firestore `global_knowledge` (No AI cost).
+    3.  **AI (Gemini)**: Only if 1 & 2 fail **AND** the user is Premium or has not reached their free limit.
+- **Limit Tracking**: Increment `aiCallsThisMonth` on every real AI call.
+
+### [User Interface]
+
+#### [MODIFY] [ProfileScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/ProfileScreen.kt)
+- Add a "Premium Status" indicator.
+- Add a (Developer only for now) toggle to simulate Premium status.
+
+#### [MODIFY] [ShoppingListScreen.kt](file:///C:/Entwicklung/AndroidStudio/nutrition-tracker-mvp/app/src/main/java/com/nick/nutritiontracker/ui/ShoppingListScreen.kt)
+- Show a small hint if AI categorization is limited by the free tier.
 
 ## Verification Plan
 
 ### Manual Verification
-1. **Model Check**: Once the Gemini Developer API is enabled in the console, tap "AI Modelle prüfen" in the app.
-2. **Analysis Test**: Test image recognition. The "credits depleted" error should no longer occur as it's now routing through the no-cost developer tier.
+1.  **Global Hit**: User A adds "Zahnbürste" (triggers AI). User B adds "Zahnbürste". Verify that User B's request does **not** trigger an AI call (visible in logs) but gets the correct category.
+2.  **Limit Test**: Set a limit of 3 AI calls. Verify that the 4th call results in "Sonstiges" with a hint to upgrade to Premium.
+3.  **Premium Toggle**: Activate Premium and verify limits are ignored.

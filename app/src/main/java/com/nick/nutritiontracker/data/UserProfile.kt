@@ -43,7 +43,10 @@ data class UserProfile(
     val breakfastReminderTime: String = "09:00",
     
     val initialWeight: Double? = null,
-    val metabolicFactor: Double = 1.0
+    val metabolicFactor: Double = 1.0,
+    val isPremium: Boolean = false,
+    val aiImagesGeneratedToday: Int = 0,
+    val lastAiImageDate: String = ""
 ) {
     val totalPercent: Int get() = proteinPercent + complexCarbsPercent + sugarPercent + unsaturatedFatPercent + saturatedFatPercent
     val isPercentValid: Boolean get() = totalPercent == 100

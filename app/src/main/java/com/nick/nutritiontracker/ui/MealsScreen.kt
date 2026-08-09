@@ -1,8 +1,11 @@
 package com.nick.nutritiontracker.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -11,8 +14,13 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -20,6 +28,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -28,15 +37,21 @@ import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.PopupProperties
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import coil.compose.AsyncImage
 import com.nick.nutritiontracker.data.*
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
+import kotlinx.coroutines.launch
 import java.io.File
 
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun MealsScreen(
     vm: NutritionViewModel,
     @Suppress("UNUSED_PARAMETER") snackbarHostState: SnackbarHostState,
-    selectedMealIds: MutableState<Set<Long>>
+    selectedMealIds: MutableState<Set<Long>>,
+    userProfile: UserProfile
 ) {
     val meals = vm.meals
     val foods = vm.foods
@@ -62,6 +77,16 @@ fun MealsScreen(
     var mealToEdit by remember { mutableStateOf<MealEntity?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
     
+    var selectedFilterTags by remember { mutableStateOf(setOf<String>()) }
+
+    LaunchedEffect(vm.aiErrorMessage) {
+        vm.aiErrorMessage?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            vm.aiErrorMessage = null
+        }
+    }
+    val mealCategories = listOf("Frühstück", "Mittagessen", "Abendessen", "Snack", "Vegan", "Vegetarisch", "Rind", "Geflügel", "Fisch", "Pasta", "Salat", "Dessert", "Hauptgericht", "Schnell")
+
     val expandedStates = remember { mutableStateMapOf<Long, Boolean>() }
     val isSelectionMode = selectedMealIds.value.isNotEmpty()
 
@@ -90,11 +115,11 @@ fun MealsScreen(
                 showAddDialog = false
                 mealToEdit = null
             },
-            onSave = { name, ingredients, servings ->
+            onSave = { name, ingredients, servings, tags, imageUrl ->
                 if (mealToEdit == null) {
-                    vm.addMealTemplate(name, ingredients, servings)
+                    vm.addMealTemplate(name, ingredients, servings, tags, imageUrl)
                 } else {
-                    vm.updateMealTemplate(mealToEdit!!.copy(name = name, ingredients = ingredients, servings = servings))
+                    vm.updateMealTemplate(mealToEdit!!.copy(name = name, ingredients = ingredients, servings = servings, tags = tags, imageUrl = imageUrl))
                 }
                 showAddDialog = false
                 mealToEdit = null
@@ -107,29 +132,55 @@ fun MealsScreen(
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = { showAddDialog = true },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Add, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Neu")
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { showAddDialog = true },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Add, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Neu")
+                    }
+                    Button(
+                        onClick = { importLauncher.launch("*/*") },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                    ) {
+                        Icon(Icons.Default.FileDownload, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Import")
+                    }
                 }
-                Button(
-                    onClick = { importLauncher.launch("*/*") },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                
+                // Tag Filtering
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.FileDownload, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Import")
+                    FilterChip(
+                        selected = selectedFilterTags.isEmpty(),
+                        onClick = { selectedFilterTags = emptySet() },
+                        label = { Text("Alle") }
+                    )
+                    mealCategories.forEach { tag ->
+                        FilterChip(
+                            selected = tag in selectedFilterTags,
+                            onClick = { 
+                                selectedFilterTags = if (tag in selectedFilterTags) selectedFilterTags - tag else selectedFilterTags + tag
+                            },
+                            label = { Text(tag) }
+                        )
+                    }
                 }
             }
         }
 
         @OptIn(ExperimentalFoundationApi::class)
-        items(meals, key = { it.id }) { meal ->
+        items(
+            meals.filter { meal -> selectedFilterTags.isEmpty() || selectedFilterTags.all { it in meal.tags } },
+            key = { it.id }
+        ) { meal ->
             val expanded = expandedStates[meal.id] ?: false
             val isSelected = selectedMealIds.value.contains(meal.id)
             val hasOrphanedIngredients = meal.ingredients.any { ing -> vm.foods.none { f -> f.id == ing.foodItemId } }
@@ -137,6 +188,7 @@ fun MealsScreen(
             SwipeActionContainer(
                 onDeleteRequest = { mealToDelete = meal.id },
                 onEditRequest = { mealToEdit = meal },
+                key = meal.id,
                 enabled = !isSelectionMode
             ) {
                 Card(
@@ -166,6 +218,17 @@ fun MealsScreen(
                                 })
                                 Spacer(Modifier.width(8.dp))
                             }
+                            if (meal.imageUrl != null) {
+                                AsyncImage(
+                                    model = meal.imageUrl,
+                                    contentDescription = null,
+                                    modifier = Modifier
+                                        .size(50.dp)
+                                        .clip(RoundedCornerShape(8.dp)),
+                                    contentScale = ContentScale.Crop
+                                )
+                                Spacer(Modifier.width(12.dp))
+                            }
                             Column(Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(meal.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -174,7 +237,23 @@ fun MealsScreen(
                                         Icon(Icons.Default.Warning, "Fehlende Zutaten", tint = Color.Red, modifier = Modifier.size(18.dp))
                                     }
                                 }
-                                Text("${meal.kcalPerServing.round0()} kcal pro Portion", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall)
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    meal.tags.forEach { tag ->
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = MaterialTheme.colorScheme.secondaryContainer,
+                                            modifier = Modifier.padding(top = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = tag,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                                            )
+                                        }
+                                    }
+                                }
+                                Text("${meal.kcalPerServing.round0()} kcal pro Portion", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
                             }
                             Icon(
                                 if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -223,11 +302,98 @@ fun MealEditDialog(
     meal: MealEntity?,
     vm: NutritionViewModel,
     onDismiss: () -> Unit,
-    onSave: (String, List<MealIngredientEntity>, Double) -> Unit
+    onSave: (String, List<MealIngredientEntity>, Double, List<String>, String?) -> Unit
 ) {
     val foods = vm.foods
     var name by remember(meal?.id) { mutableStateOf(meal?.name ?: "") }
     var servings by remember(meal?.id) { mutableStateOf(meal?.servings?.roundString() ?: "1") }
+    val tags = remember(meal?.id) { mutableStateListOf<String>().apply { meal?.tags?.let { addAll(it) } } }
+    var newTagText by remember { mutableStateOf("") }
+    var imageUrl by remember(meal?.id) { mutableStateOf(meal?.imageUrl) }
+    
+    val standardTags = listOf("Frühstück", "Mittagessen", "Abendessen", "Snack", "Vegan", "Vegetarisch", "Rind", "Geflügel", "Fisch", "Pasta", "Salat", "Dessert", "Hauptgericht", "Schnell")
+
+    val context = LocalContext.current
+    var showImageSourceDialog by remember { mutableStateOf(false) }
+    var tempImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
+
+    val galleryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        uri?.let { 
+            val path = vm.saveImageLocally(it)
+            if (path != null) imageUrl = path
+        }
+    }
+
+    val cameraLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture(),
+        onResult = { success ->
+            if (success && tempImageUri != null) {
+                val path = vm.saveImageLocally(tempImageUri!!)
+                if (path != null) imageUrl = path
+            }
+        }
+    )
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted ->
+            if (isGranted) {
+                tempImageUri?.let { cameraLauncher.launch(it) }
+            } else {
+                Toast.makeText(context, "Kamera-Berechtigung erforderlich", Toast.LENGTH_SHORT).show()
+            }
+        }
+    )
+
+    if (showImageSourceDialog) {
+        AlertDialog(
+            onDismissRequest = { showImageSourceDialog = false },
+            title = { Text("Bildquelle wählen") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ListItem(
+                        headlineContent = { Text("Kamera") },
+                        leadingContent = { Icon(Icons.Default.PhotoCamera, null) },
+                        modifier = Modifier.clickable {
+                            showImageSourceDialog = false
+                            val hasPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                            
+                            try {
+                                val file = File(context.cacheDir, "temp_meal_edit_image.jpg")
+                                if (file.exists()) file.delete()
+                                file.createNewFile()
+                                
+                                val uri = FileProvider.getUriForFile(
+                                    context, 
+                                    "${context.packageName}.fileprovider", 
+                                    file
+                                )
+                                tempImageUri = uri
+                                
+                                if (hasPermission) {
+                                    cameraLauncher.launch(uri)
+                                } else {
+                                    permissionLauncher.launch(Manifest.permission.CAMERA)
+                                }
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "Kamera konnte nicht gestartet werden", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                    ListItem(
+                        headlineContent = { Text("Galerie") },
+                        leadingContent = { Icon(Icons.Default.PhotoLibrary, null) },
+                        modifier = Modifier.clickable {
+                            showImageSourceDialog = false
+                            galleryLauncher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        }
+                    )
+                }
+            },
+            confirmButton = {}
+        )
+    }
+    
     val ingredients = remember(meal?.id) { 
         mutableStateListOf<MealIngredientEntity>().apply { 
             meal?.ingredients?.let { addAll(it) } 
@@ -237,6 +403,7 @@ fun MealEditDialog(
     var searchQuery by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
     var foodToConfigure by remember { mutableStateOf<FoodItemEntity?>(null) }
+    var tagsExpanded by remember { mutableStateOf(false) }
 
     val filteredFoods by remember(searchQuery) {
         derivedStateOf {
@@ -284,124 +451,262 @@ fun MealEditDialog(
             shape = RoundedCornerShape(16.dp),
             modifier = Modifier.fillMaxWidth().fillMaxHeight(0.9f)
         ) {
-            Column(Modifier.padding(16.dp)) {
-                Text(
-                    text = when {
-                        meal == null -> "Mahlzeit erstellen"
-                        meal.id == 0L -> "Mahlzeit aus Auswahl erstellen"
-                        else -> "Mahlzeit bearbeiten"
-                    },
-                    style = MaterialTheme.typography.headlineSmall
-                )
-                
-                val hasOrphans = remember(ingredients.size) { ingredients.any { ing -> foods.none { it.id == ing.foodItemId } } }
-                if (hasOrphans) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                        modifier = Modifier.padding(vertical = 8.dp)
-                    ) {
-                        Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary)
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                "Hinweis: Enthaltene Einzelartikel werden automatisch in deiner Bibliothek gespeichert.",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-                
-                AutoSelectTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Name der Mahlzeit") },
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(Modifier.height(8.dp))
-                
-                AutoSelectTextField(
-                    value = servings,
-                    onValueChange = { servings = it },
-                    label = { Text("Portionen (Gesamt)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
-                )
-
-                Text(
-                    text = "Gesamtgewicht: ${ingredients.sumOf { it.grams }.round0()}g (${(ingredients.sumOf { it.grams } / (servings.num().coerceAtLeast(1.0))).round0()}g pro Portion)",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline
-                )
-
-                Spacer(Modifier.height(16.dp))
-                Text("Zutaten", fontWeight = FontWeight.Bold)
-                
-                // Ingredient Search
-                Box {
-                    AutoSelectTextField(
-                        value = searchQuery,
-                        onValueChange = { 
-                            searchQuery = it
-                            expanded = true
+            LazyColumn(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item {
+                    Text(
+                        text = when {
+                            meal == null -> "Mahlzeit erstellen"
+                            meal.id == 0L -> "Mahlzeit aus Auswahl erstellen"
+                            else -> "Mahlzeit bearbeiten"
                         },
-                        label = { Text("Zutat hinzufügen...") },
-                        modifier = Modifier.fillMaxWidth(),
-                        trailingIcon = { Icon(Icons.Default.Search, null) }
+                        style = MaterialTheme.typography.headlineSmall
                     )
-                    DropdownMenu(
-                        expanded = expanded && filteredFoods.isNotEmpty(),
-                        onDismissRequest = { expanded = false },
-                        properties = PopupProperties(focusable = false),
-                        offset = DpOffset(0.dp, (-320).dp) // Force upward
-                    ) {
-                        filteredFoods.forEach { food ->
-                            DropdownMenuItem(
-                                text = { 
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        if (food.isGeneric) {
-                                            Icon(Icons.Default.Inventory2, null, modifier = Modifier.size(16.dp).padding(end = 4.dp), tint = MaterialTheme.colorScheme.primary)
-                                        }
-                                        Column {
-                                            Text(food.name)
-                                            if (!food.isGeneric && !food.brand.isNullOrBlank()) {
-                                                Text(food.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                                            }
-                                        }
-                                    }
-                                },
-                                onClick = {
-                                    foodToConfigure = food
-                                    expanded = false
-                                }
-                            )
+                }
+
+                item {
+                    val hasOrphans = ingredients.any { ing -> foods.none { it.id == ing.foodItemId } }
+                    if (hasOrphans) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                            modifier = Modifier.padding(vertical = 8.dp)
+                        ) {
+                            Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary)
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Hinweis: Enthaltene Einzelartikel werden automatisch in deiner Bibliothek gespeichert.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
                         }
                     }
                 }
 
-                LazyColumn(Modifier.weight(1f).padding(vertical = 8.dp)) {
-                    items(ingredients, key = { it.id }) { ingredient ->
-                        IngredientRow(
-                            ingredient = ingredient,
-                            vm = vm,
-                            onUpdate = { updated ->
-                                val idx = ingredients.indexOfFirst { it.id == ingredient.id }
-                                if (idx != -1) ingredients[idx] = updated
-                            },
-                            onRemove = { ingredients.removeAll { it.id == ingredient.id } }
+                item {
+                    AutoSelectTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text("Name der Mahlzeit") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                item {
+                    AutoSelectTextField(
+                        value = servings,
+                        onValueChange = { servings = it },
+                        label = { Text("Portionen (Gesamt)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
+                    )
+                }
+
+                item {
+                    Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().clickable { tagsExpanded = !tagsExpanded }
+                        ) {
+                            Text("Tags (${tags.size})", style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                            Icon(
+                                if (tagsExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        AnimatedVisibility(visible = tagsExpanded) {
+                            Column {
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(vertical = 4.dp)) {
+                                    tags.forEach { tag ->
+                                        InputChip(
+                                            selected = true,
+                                            onClick = { },
+                                            label = { Text(tag) },
+                                            trailingIcon = {
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "Remove tag",
+                                                    modifier = Modifier.size(16.dp).clickable { tags.remove(tag) }
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
+
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedTextField(
+                                        value = newTagText,
+                                        onValueChange = { newTagText = it },
+                                        label = { Text("Neuer Tag") },
+                                        modifier = Modifier.weight(1f),
+                                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                        keyboardActions = KeyboardActions(onDone = {
+                                            if (newTagText.isNotBlank() && !tags.contains(newTagText.trim())) {
+                                                tags.add(newTagText.trim())
+                                                newTagText = ""
+                                            }
+                                        })
+                                    )
+                                    IconButton(onClick = {
+                                        if (newTagText.isNotBlank() && !tags.contains(newTagText.trim())) {
+                                            tags.add(newTagText.trim())
+                                            newTagText = ""
+                                        }
+                                    }) {
+                                        Icon(Icons.Default.Add, contentDescription = "Add tag")
+                                    }
+                                }
+
+                                Text("Vorschläge", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 8.dp))
+                                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    standardTags.forEach { tag ->
+                                        FilterChip(
+                                            selected = tags.contains(tag),
+                                            onClick = {
+                                                if (tags.contains(tag)) tags.remove(tag) else tags.add(tag)
+                                            },
+                                            label = { Text(tag) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .size(60.dp)
+                                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                                .clickable { showImageSourceDialog = true },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (imageUrl != null) {
+                                Icon(Icons.Default.Image, null, tint = MaterialTheme.colorScheme.primary)
+                            } else {
+                                Icon(Icons.Default.AddAPhoto, null, tint = MaterialTheme.colorScheme.outline)
+                            }
+                        }
+                        
+                        Text(
+                            "Bild hinzufügen",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.outline
                         )
                     }
                 }
 
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("Abbrechen") }
-                    Button(
-                        enabled = name.isNotBlank() && ingredients.isNotEmpty(),
-                        onClick = { onSave(name, ingredients.toList(), servings.replace(',', '.').toDoubleOrNull() ?: 1.0) }
-                    ) { Text("Speichern") }
+                item {
+                    if (imageUrl != null) {
+                        Card(
+                            modifier = Modifier.fillMaxWidth().height(180.dp),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                AsyncImage(
+                                    model = imageUrl,
+                                    contentDescription = "Meal Image",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop
+                                )
+                                
+                                FilledIconButton(
+                                    onClick = { imageUrl = null },
+                                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
+                                    colors = IconButtonDefaults.filledIconButtonColors(
+                                        containerColor = Color.Black.copy(alpha = 0.5f),
+                                        contentColor = Color.White
+                                    )
+                                ) {
+                                    Icon(Icons.Default.Close, null)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                item {
+                    Text(
+                        text = "Gesamtgewicht: ${ingredients.sumOf { it.grams }.round0()}g (${(ingredients.sumOf { it.grams } / (servings.num().coerceAtLeast(1.0))).round0()}g pro Portion)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                }
+
+                item {
+                    Text("Zutaten", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
+                }
+
+                item {
+                    Box {
+                        AutoSelectTextField(
+                            value = searchQuery,
+                            onValueChange = { 
+                                searchQuery = it
+                                expanded = true
+                            },
+                            label = { Text("Zutat hinzufügen...") },
+                            modifier = Modifier.fillMaxWidth(),
+                            trailingIcon = { Icon(Icons.Default.Search, null) }
+                        )
+                        DropdownMenu(
+                            expanded = expanded && filteredFoods.isNotEmpty(),
+                            onDismissRequest = { expanded = false },
+                            properties = PopupProperties(focusable = false),
+                            offset = DpOffset(0.dp, (-320).dp) // Force upward
+                        ) {
+                            filteredFoods.forEach { food ->
+                                DropdownMenuItem(
+                                    text = { 
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            if (food.isGeneric) {
+                                                Icon(Icons.Default.Inventory2, null, modifier = Modifier.size(16.dp).padding(end = 4.dp), tint = MaterialTheme.colorScheme.primary)
+                                            }
+                                            Column {
+                                                Text(food.name)
+                                                if (!food.isGeneric && !food.brand.isNullOrBlank()) {
+                                                    Text(food.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                                }
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        foodToConfigure = food
+                                        expanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                items(ingredients, key = { it.id }) { ingredient ->
+                    IngredientRow(
+                        ingredient = ingredient,
+                        vm = vm,
+                        onUpdate = { updated ->
+                            val idx = ingredients.indexOfFirst { it.id == ingredient.id }
+                            if (idx != -1) ingredients[idx] = updated
+                        },
+                        onRemove = { ingredients.removeAll { it.id == ingredient.id } }
+                    )
+                }
+
+                item {
+                    Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = onDismiss) { Text("Abbrechen") }
+                        Button(
+                            enabled = name.isNotBlank() && ingredients.isNotEmpty(),
+                            onClick = { onSave(name, ingredients.toList(), servings.replace(',', '.').toDoubleOrNull() ?: 1.0, tags.toList(), imageUrl) }
+                        ) { Text("Speichern") }
+                    }
                 }
             }
         }

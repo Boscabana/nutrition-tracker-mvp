@@ -34,6 +34,9 @@ class ProfileRepository(private val context: Context) {
         val WEIGH_IN_REMINDER_TIME = stringPreferencesKey("weigh_in_reminder_time")
         val BREAKFAST_REMINDER_ENABLED = booleanPreferencesKey("breakfast_reminder_enabled")
         val BREAKFAST_REMINDER_TIME = stringPreferencesKey("breakfast_reminder_time")
+        val IS_PREMIUM = booleanPreferencesKey("is_premium")
+        val AI_IMAGES_TODAY = intPreferencesKey("ai_images_today")
+        val LAST_AI_IMAGE_DATE = stringPreferencesKey("last_ai_image_date")
     }
 
     val userProfileFlow: Flow<UserProfile> = context.dataStore.data
@@ -63,7 +66,10 @@ class ProfileRepository(private val context: Context) {
                 weighInReminderEnabled = preferences[PreferencesKeys.WEIGH_IN_REMINDER_ENABLED] ?: false,
                 weighInReminderTime = preferences[PreferencesKeys.WEIGH_IN_REMINDER_TIME] ?: "07:00",
                 breakfastReminderEnabled = preferences[PreferencesKeys.BREAKFAST_REMINDER_ENABLED] ?: false,
-                breakfastReminderTime = preferences[PreferencesKeys.BREAKFAST_REMINDER_TIME] ?: "09:00"
+                breakfastReminderTime = preferences[PreferencesKeys.BREAKFAST_REMINDER_TIME] ?: "09:00",
+                isPremium = preferences[PreferencesKeys.IS_PREMIUM] ?: false,
+                aiImagesGeneratedToday = preferences[PreferencesKeys.AI_IMAGES_TODAY] ?: 0,
+                lastAiImageDate = preferences[PreferencesKeys.LAST_AI_IMAGE_DATE] ?: ""
             )
         }
 
@@ -87,6 +93,9 @@ class ProfileRepository(private val context: Context) {
             preferences[PreferencesKeys.WEIGH_IN_REMINDER_TIME] = profile.weighInReminderTime
             preferences[PreferencesKeys.BREAKFAST_REMINDER_ENABLED] = profile.breakfastReminderEnabled
             preferences[PreferencesKeys.BREAKFAST_REMINDER_TIME] = profile.breakfastReminderTime
+            preferences[PreferencesKeys.IS_PREMIUM] = profile.isPremium
+            preferences[PreferencesKeys.AI_IMAGES_TODAY] = profile.aiImagesGeneratedToday
+            preferences[PreferencesKeys.LAST_AI_IMAGE_DATE] = profile.lastAiImageDate
         }
     }
 }

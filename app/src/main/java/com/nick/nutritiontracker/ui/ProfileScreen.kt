@@ -93,6 +93,17 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
         Card {
             Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Persönliche Daten", fontWeight = FontWeight.Bold)
+                
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Premium Status: ", style = MaterialTheme.typography.bodyMedium)
+                    if (userProfile.isPremium) {
+                        Icon(Icons.Default.Star, "Premium", tint = Color(0xFFFBC02D), modifier = Modifier.size(18.dp))
+                        Text(" Aktiv", color = Color(0xFFFBC02D), fontWeight = FontWeight.Bold)
+                    } else {
+                        Text(" Basis", color = Color.Gray)
+                    }
+                }
+
                 AutoSelectTextField(
                     value = firstName,
                     onValueChange = { firstName = it },
@@ -394,6 +405,15 @@ private fun DeveloperOptionsSection(
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                     ) {
                         Text("Setup Wizard jetzt starten")
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Text("Premium Status simulieren", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = profile.isPremium,
+                            onCheckedChange = { profileVm.updateProfile(profile.copy(isPremium = it)) },
+                            modifier = Modifier.scale(0.8f)
+                        )
                     }
 
                     HorizontalDivider()

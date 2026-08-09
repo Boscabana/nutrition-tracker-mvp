@@ -11,11 +11,6 @@ data class MealIngredientEntity(
     val amount: Double = 0.0,
     val unitLabel: String = "g",
     val grams: Double = 0.0,
-    // Store nutrient info at the time of adding to the meal to avoid issues if FoodItem changes? 
-    // Or just reference FoodItem? Usually better to keep a copy for historical entries, 
-    // but for templates, referencing FoodItem is fine.
-    // However, FoodEntryEntity stores a copy. Let's store a copy here too for simplicity 
-    // when calculating meal totals.
     val kcalPer100g: Double = 0.0,
     val proteinPer100g: Double = 0.0,
     val carbsPer100g: Double = 0.0,
@@ -46,7 +41,9 @@ data class MealEntity(
     val id: Long = 0,
     val name: String,
     val ingredients: List<MealIngredientEntity> = emptyList(),
-    val servings: Double = 1.0
+    val servings: Double = 1.0,
+    val tags: List<String> = emptyList(),
+    val imageUrl: String? = null
 ) {
     @get:Exclude
     val totalKcal: Double get() = ingredients.sumOf { it.kcal }

@@ -108,4 +108,30 @@ class GeminiService() {
             text
         }
     }
+
+    suspend fun categorizeItem(itemName: String, categories: List<String>): String {
+        val prompt = """
+            Identify the most suitable category for the item '$itemName' from this list: ${categories.joinToString(", ")}.
+            Return ONLY a valid JSON object in the following format:
+            {
+              "category": "Chosen Category"
+            }
+            If unsure or if no category fits, use 'Sonstiges'.
+            Do NOT create new categories.
+        """.trimIndent()
+
+        return try {
+            val model = getModel("gemini-3.6-flash")
+            val response = model.generateContent(prompt)
+            val cleanJson = extractJson(response.text ?: "")
+            val result = json.parseToJsonElement(cleanJson).asJsonObject()
+            result["category"]?.asString() ?: "Sonstiges"
+        } catch (e: Exception) {
+            Log.e("GeminiService", "Categorization failed for $itemName", e)
+            "Sonstiges"
+        }
+    }
 }
+
+private fun kotlinx.serialization.json.JsonElement.asJsonObject() = this as? kotlinx.serialization.json.JsonObject ?: kotlinx.serialization.json.JsonObject(emptyMap())
+private fun kotlinx.serialization.json.JsonElement?.asString() = this?.toString()?.replace("\"", "") ?: ""
