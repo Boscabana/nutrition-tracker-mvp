@@ -39,11 +39,12 @@ data class MealIngredientEntity(
 @Serializable
 data class MealEntity(
     val id: Long = 0,
-    val name: String,
+    val name: String = "",
     val ingredients: List<MealIngredientEntity> = emptyList(),
     val servings: Double = 1.0,
     val tags: List<String> = emptyList(),
-    val imageUrl: String? = null
+    val imageUrl: String? = null,
+    val lastModified: Long = System.currentTimeMillis()
 ) {
     @get:Exclude
     val totalKcal: Double get() = ingredients.sumOf { it.kcal }

@@ -67,7 +67,7 @@ class ProfileRepository(private val context: Context) {
                 weighInReminderTime = preferences[PreferencesKeys.WEIGH_IN_REMINDER_TIME] ?: "07:00",
                 breakfastReminderEnabled = preferences[PreferencesKeys.BREAKFAST_REMINDER_ENABLED] ?: false,
                 breakfastReminderTime = preferences[PreferencesKeys.BREAKFAST_REMINDER_TIME] ?: "09:00",
-                isPremium = preferences[PreferencesKeys.IS_PREMIUM] ?: false,
+                premium = preferences[PreferencesKeys.IS_PREMIUM] ?: false,
                 aiImagesGeneratedToday = preferences[PreferencesKeys.AI_IMAGES_TODAY] ?: 0,
                 lastAiImageDate = preferences[PreferencesKeys.LAST_AI_IMAGE_DATE] ?: ""
             )

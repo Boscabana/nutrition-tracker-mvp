@@ -4,8 +4,8 @@ import kotlinx.serialization.Serializable
 
 @Serializable
 data class FoodPackageEntity(
-    val id: Long,
-    val name: String,
-    val quantity: Double,
-    val unit: String
+    val id: Long = 0,
+    val name: String = "",
+    val quantity: Double = 0.0,
+    val unit: String = "g"
 )

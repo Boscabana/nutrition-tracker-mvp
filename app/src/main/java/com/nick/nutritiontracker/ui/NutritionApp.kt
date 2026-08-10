@@ -70,9 +70,16 @@ private val ActionDeleteRed = Color(0xFFD32F2F)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
+    val currentUser by vm.firebaseManager.currentUser.collectAsState()
     val userProfileState by profileVm.userProfile.collectAsState()
     
-    // 1. Wait until the profile is loaded from disk
+    // 1. App Lock / Login Gate
+    if (currentUser == null || (vm.biometricEnabled && !vm.isAppUnlocked)) {
+        AuthScreen(profileVm, vm)
+        return
+    }
+
+    // 2. Wait until the profile is loaded from disk
     val userProfile = userProfileState ?: return // Show nothing while loading (brief flash)
 
     var showSetup by remember { mutableStateOf(false) }
@@ -1873,14 +1880,27 @@ fun IngredientAdjustRow(
     val selectedPortion = allPortions.find { it.name == ingredient.unitLabel }
 
     val relatives = remember(food, foods) {
-        val root = if (food?.isGeneric == true) food else parent
-        val effectiveRoot = root ?: foods.find { it.isGeneric && it.name == ingredient.name }
+        val baseList = mutableListOf<FoodItemEntity>()
         
-        if (effectiveRoot != null) {
-            (listOf(effectiveRoot) + foods.filter { it.parentId == effectiveRoot.id }).filter { it.id != food?.id }
-        } else {
-            foods.filter { it.isGeneric }
+        // NUR Austausch-Optionen zeigen, wenn der Artikel eindeutig gefunden wurde
+        if (food != null) {
+            if (food.parentId != null) {
+                // 1. Es ist ein Marken-Produkt: Zeige Basis-Zutat und "Geschwister" (andere Marken)
+                val parentItem = foods.find { it.id == food.parentId }
+                if (parentItem != null) baseList.add(parentItem)
+                baseList.addAll(foods.filter { it.parentId == food.parentId })
+            } else if (food.isGeneric) {
+                // 2. Es ist eine Basis-Zutat: Zeige alle Marken-Varianten dafür
+                baseList.addAll(foods.filter { it.parentId == food.id })
+                // Ermögliche auch den Tausch zwischen Basis-Zutaten der gleichen Kategorie (z.B. Zwiebel <-> Schalotte)
+                if (!food.category.isNullOrBlank()) {
+                    baseList.addAll(foods.filter { it.isGeneric && it.category == food.category })
+                }
+            }
         }
+        // Fallback per Name entfernt, da dies zu falschen Zuordnungen führte (z.B. Protein-Sahne vs. normale Milch)
+
+        baseList.distinctBy { it.id }.filter { it.id != food?.id }.sortedBy { it.name }
     }
     var showSwapMenu by remember { mutableStateOf(false) }
     val isOrphaned = food == null
@@ -1922,47 +1942,73 @@ fun IngredientAdjustRow(
                                         tint = if (isOrphaned) Color.Red else MaterialTheme.colorScheme.primary
                                     )
                                 }
-                                DropdownMenu(expanded = showSwapMenu, onDismissRequest = { showSwapMenu = false }) {
-                                    if (isOrphaned) {
-                                        DropdownMenuItem(
-                                            text = { Text("Original gelöscht! Bitte Ersatz wählen:", style = MaterialTheme.typography.labelSmall, color = Color.Red) },
-                                            onClick = {},
-                                            enabled = false
-                                        )
-                                    }
-                                    relatives.take(15).forEach { alt ->
-                                        DropdownMenuItem(
-                                            text = {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    if (alt.isGeneric) {
-                                                        Icon(Icons.Default.Inventory2, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                                                        Spacer(Modifier.width(8.dp))
-                                                        Text(alt.name + " (Basis)")
-                                                    } else {
-                                                        Icon(Icons.AutoMirrored.Filled.Label, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.tertiary)
-                                                        Spacer(Modifier.width(8.dp))
-                                                        Text("${alt.brand ?: "Unbekannt"} @ ${alt.store ?: "Unbekannt"}")
+                                if (showSwapMenu) {
+                                    androidx.compose.ui.window.Popup(
+                                        onDismissRequest = { showSwapMenu = false },
+                                        properties = androidx.compose.ui.window.PopupProperties(focusable = true)
+                                    ) {
+                                        Surface(
+                                            modifier = Modifier
+                                                .widthIn(max = 280.dp)
+                                                .heightIn(max = 400.dp)
+                                                .padding(8.dp),
+                                            shape = RoundedCornerShape(12.dp),
+                                            tonalElevation = 8.dp,
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                        ) {
+                                            LazyColumn(modifier = Modifier.padding(vertical = 4.dp)) {
+                                                if (isOrphaned) {
+                                                    item {
+                                                        Text(
+                                                            "Original gelöscht! Bitte Ersatz wählen:", 
+                                                            style = MaterialTheme.typography.labelSmall, 
+                                                            color = Color.Red,
+                                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                                                        )
                                                     }
                                                 }
-                                            },
-                                            onClick = {
-                                                onUpdate(ingredient.copy(
-                                                    foodItemId = alt.id,
-                                                    name = alt.name,
-                                                    kcalPer100g = alt.kcalPer100g,
-                                                    proteinPer100g = alt.proteinPer100g,
-                                                    carbsPer100g = alt.carbsPer100g,
-                                                    sugarPer100g = alt.sugarPer100g,
-                                                    fatPer100g = alt.fatPer100g,
-                                                    saturatedFatPer100g = alt.saturatedFatPer100g,
-                                                    alcoholPercent = alt.alcoholPercent,
-                                                    baseUnit = alt.baseUnit,
-                                                    store = alt.store,
-                                                    brand = alt.brand
-                                                ))
-                                                showSwapMenu = false
+                                                items(relatives) { alt ->
+                                                    ListItem(
+                                                        headlineContent = {
+                                                            Text(
+                                                                text = if (alt.isGeneric) "${alt.name} (Basis)" else alt.name,
+                                                                style = MaterialTheme.typography.bodyMedium
+                                                            )
+                                                        },
+                                                        supportingContent = {
+                                                            if (!alt.isGeneric) {
+                                                                Text("${alt.brand ?: "Unbekannt"} @ ${alt.store ?: "Unbekannt"}", style = MaterialTheme.typography.labelSmall)
+                                                            }
+                                                        },
+                                                        leadingContent = {
+                                                            Icon(
+                                                                imageVector = if (alt.isGeneric) Icons.Default.Inventory2 else Icons.AutoMirrored.Filled.Label,
+                                                                contentDescription = null,
+                                                                modifier = Modifier.size(20.dp),
+                                                                tint = if (alt.isGeneric) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary
+                                                            )
+                                                        },
+                                                        modifier = Modifier.clickable {
+                                                            onUpdate(ingredient.copy(
+                                                                foodItemId = alt.id,
+                                                                name = alt.name,
+                                                                kcalPer100g = alt.kcalPer100g,
+                                                                proteinPer100g = alt.proteinPer100g,
+                                                                carbsPer100g = alt.carbsPer100g,
+                                                                sugarPer100g = alt.sugarPer100g,
+                                                                fatPer100g = alt.fatPer100g,
+                                                                saturatedFatPer100g = alt.saturatedFatPer100g,
+                                                                alcoholPercent = alt.alcoholPercent,
+                                                                baseUnit = alt.baseUnit,
+                                                                store = alt.store,
+                                                                brand = alt.brand
+                                                            ))
+                                                            showSwapMenu = false
+                                                        }
+                                                    )
+                                                }
                                             }
-                                        )
+                                        }
                                     }
                                 }
                             }
@@ -2262,13 +2308,24 @@ fun FoodsScreen(
             onSave = { newFood ->
                 if (newFood.id == 0L) {
                     vm.addFood(
-                        newFood.name, newFood.kcalPer100g, newFood.proteinPer100g,
-                        newFood.carbsPer100g, newFood.sugarPer100g, newFood.fatPer100g,
-                        newFood.saturatedFatPer100g, newFood.alcoholPercent, newFood.baseUnit,
-                        newFood.portions, newFood.packages, newFood.barcode, newFood.brand, newFood.category,
+                        name = newFood.name,
+                        kcal = newFood.kcalPer100g,
+                        protein = newFood.proteinPer100g,
+                        carbs = newFood.carbsPer100g,
+                        sugar = newFood.sugarPer100g,
+                        fat = newFood.fatPer100g,
+                        saturatedFat = newFood.saturatedFatPer100g,
+                        alcoholPercent = newFood.alcoholPercent,
+                        baseUnit = newFood.baseUnit,
+                        portions = newFood.portions,
+                        packages = newFood.packages,
+                        barcode = newFood.barcode,
+                        brand = newFood.brand,
+                        category = newFood.category,
                         isGeneric = newFood.isGeneric,
                         parentId = newFood.parentId,
-                        store = newFood.store
+                        store = newFood.store,
+                        isPantryItem = newFood.isPantryItem
                     )
                 } else {
                     vm.updateFood(newFood)
@@ -2611,11 +2668,12 @@ fun FoodEditDialog(
                 Text(
                     text = when {
                         parentId != null && parentFood != null -> "Neue Variante von ${parentFood.name}"
-                        food?.isGeneric == true -> if (food.id == 0L) "Neue Basis-Zutat" else "Basis-Zutat bearbeiten"
-                        else -> if (food == null || food.id == 0L) "Neues Markenprodukt" else "Markenprodukt bearbeiten"
+                        isGeneric -> if (food?.id == 0L) "Neue Basis-Zutat 📦" else "Basis-Zutat bearbeiten 📦"
+                        else -> if (food == null || food.id == 0L) "Neues Markenprodukt 🏷️" else "Markenprodukt bearbeiten 🏷️"
                     },
                     style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    color = if (isGeneric) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
                 )
 
                 AutoSelectTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())

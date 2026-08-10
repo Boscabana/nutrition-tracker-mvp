@@ -1,9 +1,9 @@
 package com.nick.nutritiontracker
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.nick.nutritiontracker.data.ProfileRepository
@@ -11,7 +11,7 @@ import com.nick.nutritiontracker.ui.NutritionApp
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
 import com.nick.nutritiontracker.viewmodel.ProfileViewModel
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     private val nutritionVm by viewModels<NutritionViewModel>()
     
     private val profileVm by viewModels<ProfileViewModel>(
@@ -19,7 +19,10 @@ class MainActivity : ComponentActivity() {
             object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                    return ProfileViewModel(ProfileRepository(applicationContext)) as T
+                    return ProfileViewModel(
+                        ProfileRepository(applicationContext),
+                        nutritionVm.firebaseManager
+                    ) as T
                 }
             }
         }

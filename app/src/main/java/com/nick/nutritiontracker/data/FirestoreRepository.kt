@@ -3,13 +3,30 @@ package com.nick.nutritiontracker.data
 import android.util.Log
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
+import java.io.File
 
 class FirestoreRepository {
     private val db = FirebaseFirestore.getInstance()
+    private val storage = FirebaseStorage.getInstance()
+
+    suspend fun uploadMealImage(uid: String, localPath: String): String? {
+        return try {
+            val file = File(localPath)
+            if (!file.exists()) return null
+            
+            val storageRef = storage.reference.child("users/$uid/meal_images/${file.name}")
+            storageRef.putFile(android.net.Uri.fromFile(file)).await()
+            storageRef.downloadUrl.await().toString()
+        } catch (e: Exception) {
+            Log.e("Firestore", "Image upload failed", e)
+            null
+        }
+    }
 
     fun getPlannedEntries(householdId: String): Flow<List<FoodEntryEntity>> = callbackFlow {
         val subscription = db.collection("households")
@@ -92,7 +109,133 @@ class FirestoreRepository {
             .await()
     }
 
-    // --- INBOX & COMMUNITY ---
+    // --- PERSONAL DATA (Foods & Meals) ---
+
+    fun getPersonalFoods(uid: String): Flow<List<FoodItemEntity>> = callbackFlow {
+        val subscription = db.collection("users")
+            .document(uid)
+            .collection("personal_foods")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) { close(error); return@addSnapshotListener }
+                val foods = snapshot?.documents?.mapNotNull { doc ->
+                    val food = doc.toObject(FoodItemEntity::class.java)
+                    if (food != null) {
+                        // Manually check common boolean field naming variations in Cloud
+                        val isGenericCloud = doc.getBoolean("isGeneric") ?: doc.getBoolean("generic") ?: food.isGeneric
+                        val isPantryCloud = doc.getBoolean("isPantryItem") ?: doc.getBoolean("pantryItem") ?: food.isPantryItem
+                        food.isGeneric = isGenericCloud
+                        food.isPantryItem = isPantryCloud
+                    }
+                    food
+                } ?: emptyList()
+                trySend(foods)
+            }
+        awaitClose { subscription.remove() }
+    }
+
+    suspend fun savePersonalFood(uid: String, food: FoodItemEntity) {
+        db.collection("users")
+            .document(uid)
+            .collection("personal_foods")
+            .document(food.id.toString())
+            .set(food)
+            .await()
+    }
+
+    fun getPersonalMeals(uid: String): Flow<List<MealEntity>> = callbackFlow {
+        val subscription = db.collection("users")
+            .document(uid)
+            .collection("personal_meals")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) { close(error); return@addSnapshotListener }
+                val meals = snapshot?.documents?.mapNotNull { it.toObject(MealEntity::class.java) } ?: emptyList()
+                trySend(meals)
+            }
+        awaitClose { subscription.remove() }
+    }
+
+    suspend fun savePersonalMeal(uid: String, meal: MealEntity) {
+        db.collection("users")
+            .document(uid)
+            .collection("personal_meals")
+            .document(meal.id.toString())
+            .set(meal)
+            .await()
+    }
+
+    suspend fun deletePersonalFood(uid: String, foodId: Long) {
+        db.collection("users").document(uid).collection("personal_foods").document(foodId.toString()).delete().await()
+    }
+
+    suspend fun deletePersonalMeal(uid: String, mealId: Long) {
+        db.collection("users").document(uid).collection("personal_meals").document(mealId.toString()).delete().await()
+    }
+
+    // --- PERSONAL ENTRIES (Diary) ---
+
+    fun getPersonalEntries(uid: String): Flow<List<FoodEntryEntity>> = callbackFlow {
+        val subscription = db.collection("users")
+            .document(uid)
+            .collection("personal_entries")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) { close(error); return@addSnapshotListener }
+                val entries = snapshot?.documents?.mapNotNull { it.toObject(FoodEntryEntity::class.java) } ?: emptyList()
+                trySend(entries)
+            }
+        awaitClose { subscription.remove() }
+    }
+
+    suspend fun savePersonalEntry(uid: String, entry: FoodEntryEntity) {
+        db.collection("users")
+            .document(uid)
+            .collection("personal_entries")
+            .document(entry.id.toString())
+            .set(entry)
+            .await()
+    }
+
+    suspend fun deletePersonalEntry(uid: String, entryId: Long) {
+        db.collection("users")
+            .document(uid)
+            .collection("personal_entries")
+            .document(entryId.toString())
+            .delete()
+            .await()
+    }
+
+    // --- WEIGHT HISTORY ---
+
+    fun getWeightHistory(uid: String): Flow<List<WeightEntry>> = callbackFlow {
+        val subscription = db.collection("users")
+            .document(uid)
+            .collection("weight_history")
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) { close(error); return@addSnapshotListener }
+                val entries = snapshot?.documents?.mapNotNull { it.toObject(WeightEntry::class.java) } ?: emptyList()
+                trySend(entries)
+            }
+        awaitClose { subscription.remove() }
+    }
+
+    suspend fun saveWeightEntry(uid: String, entry: WeightEntry) {
+        db.collection("users")
+            .document(uid)
+            .collection("weight_history")
+            .document(entry.dateIso)
+            .set(entry)
+            .await()
+    }
+
+    suspend fun deleteWeightEntry(uid: String, dateIso: String) {
+        db.collection("users")
+            .document(uid)
+            .collection("weight_history")
+            .document(dateIso)
+            .delete()
+            .await()
+    }
+
+    // --- SHARED DATA (Planner & Shopping List) ---
 
     fun getInboxMessages(uid: String): Flow<List<InboxMessage>> = callbackFlow {
         val subscription = db.collection("users")

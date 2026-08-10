@@ -1,5 +1,6 @@
 package com.nick.nutritiontracker.data
 
+import com.google.firebase.firestore.PropertyName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -44,10 +45,14 @@ data class UserProfile(
     
     val initialWeight: Double? = null,
     val metabolicFactor: Double = 1.0,
-    val isPremium: Boolean = false,
+    @get:PropertyName("isPremium")
+    @set:PropertyName("isPremium")
+    var premium: Boolean = false,
     val aiImagesGeneratedToday: Int = 0,
     val lastAiImageDate: String = ""
 ) {
+    @get:com.google.firebase.firestore.Exclude
+    val isPremium: Boolean get() = premium
     val totalPercent: Int get() = proteinPercent + complexCarbsPercent + sugarPercent + unsaturatedFatPercent + saturatedFatPercent
     val isPercentValid: Boolean get() = totalPercent == 100
 

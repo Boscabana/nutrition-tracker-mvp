@@ -22,8 +22,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
-import android.util.Log
-import com.google.firebase.auth.FirebaseAuthException
+import androidx.compose.foundation.text.selection.SelectionContainer
 import com.nick.nutritiontracker.data.*
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
 import com.nick.nutritiontracker.viewmodel.ProfileViewModel
@@ -33,11 +32,17 @@ import java.io.File
 @Composable
 fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionViewModel, userProfile: UserProfile) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     
     val firebaseManager = nutritionViewModel.firebaseManager
     val user by firebaseManager.currentUser.collectAsState()
-    val household by firebaseManager.household.collectAsState()
+    val firestoreProfile by firebaseManager.userProfile.collectAsState()
+    val householdState = firebaseManager.household.collectAsState()
+    val household = householdState.value
+    val authErrorState = viewModel.authError.collectAsState()
+    val authError = authErrorState.value
+    
+    // Cloud profile is the absolute truth for Premium features. 
+    val isPremium = firestoreProfile?.isPremium ?: false
     
     var firstName by remember(userProfile) { mutableStateOf(userProfile.firstName) }
     var age by remember(userProfile) { mutableStateOf(userProfile.age.toString()) }
@@ -96,11 +101,36 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
                 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Premium Status: ", style = MaterialTheme.typography.bodyMedium)
-                    if (userProfile.isPremium) {
+                    if (isPremium) {
                         Icon(Icons.Default.Star, "Premium", tint = Color(0xFFFBC02D), modifier = Modifier.size(18.dp))
                         Text(" Aktiv", color = Color(0xFFFBC02D), fontWeight = FontWeight.Bold)
                     } else {
                         Text(" Basis", color = Color.Gray)
+                    }
+                }
+                
+                // DEBUG INFO
+                if (firestoreProfile == null) {
+            Card(colors = CardDefaults.cardColors(containerColor = Color.Red)) {
+                Text("⚠️ Cloud-Profil wird noch geladen...", color = Color.White, modifier = Modifier.padding(16.dp))
+            }
+        }
+
+                user?.uid?.let { uid ->
+                    Column(Modifier.padding(top = 8.dp)) {
+                        Text(
+                            text = "Deine User-ID (UID):",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                        SelectionContainer {
+                            Text(
+                                text = uid,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
+                        }
                     }
                 }
 
@@ -143,6 +173,17 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
                         modifier = Modifier.weight(1f),
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
                     )
+                }
+
+                Spacer(Modifier.height(8.dp))
+                Button(
+                    onClick = { viewModel.signOut() },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Logout, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Konto abmelden")
                 }
             }
         }
@@ -227,7 +268,7 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
         }
 
         CategoryManagementCard(nutritionViewModel)
-        HouseholdManagementSection(nutritionViewModel)
+        HouseholdManagementSection(nutritionViewModel, isPremium)
         
         Card {
             Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -248,6 +289,18 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
                     onEnabledChange = { breakfastEnabled = it },
                     onTimeChange = { breakfastTime = it }
                 )
+
+                if (BiometricHelper.canAuthenticate(context)) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("App mit Biometrie schützen", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        Switch(
+                            checked = nutritionViewModel.biometricEnabled,
+                            onCheckedChange = { nutritionViewModel.updateBiometricEnabled(it) },
+                            modifier = Modifier.scale(0.8f)
+                        )
+                    }
+                }
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
 
@@ -382,6 +435,8 @@ private fun DeveloperOptionsSection(
     profile: UserProfile
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     Column(Modifier.fillMaxWidth().padding(top = 16.dp)) {
         TextButton(
@@ -407,13 +462,29 @@ private fun DeveloperOptionsSection(
                         Text("Setup Wizard jetzt starten")
                     }
 
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Text("Premium Status simulieren", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                        Switch(
-                            checked = profile.isPremium,
-                            onCheckedChange = { profileVm.updateProfile(profile.copy(isPremium = it)) },
-                            modifier = Modifier.scale(0.8f)
-                        )
+                    Button(
+                        onClick = { 
+                            scope.launch {
+                                vm.forceMigrationToCloud()
+                                Toast.makeText(context, "Cloud-Migration manuell gestartet", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Cloud-Migration erzwingen")
+                    }
+
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                vm.repairAndWipeLocalCache()
+                                Toast.makeText(context, "Daten werden repariert & aus Cloud geladen...", Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                    ) {
+                        Text("🧹 Daten-Reparatur (Cloud Pull)")
                     }
 
                     HorizontalDivider()
@@ -596,7 +667,7 @@ private fun CategoryManagementCard(vm: NutritionViewModel) {
 }
 
 @Composable
-private fun HouseholdManagementSection(vm: NutritionViewModel) {
+private fun HouseholdManagementSection(vm: NutritionViewModel, isPremium: Boolean) {
     val firebaseManager = vm.firebaseManager
     val user by firebaseManager.currentUser.collectAsState()
     val household by firebaseManager.household.collectAsState()
@@ -611,30 +682,11 @@ private fun HouseholdManagementSection(vm: NutritionViewModel) {
             Text("Kollaboration & Haushalt", fontWeight = FontWeight.Bold)
             
             if (user == null) {
-                var isLoggingIn by remember { mutableStateOf(false) }
-                val context = LocalContext.current
-                
-                Text("Melde dich an, um Daten mit anderen zu teilen.")
-                
-                if (isLoggingIn) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                } else {
-                    Button(onClick = { 
-                        isLoggingIn = true
-                        com.google.firebase.auth.FirebaseAuth.getInstance().signInAnonymously()
-                            .addOnSuccessListener {
-                                isLoggingIn = false
-                                Toast.makeText(context, "Erfolgreich angemeldet!", Toast.LENGTH_SHORT).show()
-                            }
-                            .addOnFailureListener { e ->
-                                isLoggingIn = false
-                                val errorCode = (e as? FirebaseAuthException)?.errorCode ?: "Unbekannt"
-                                Log.e("FirebaseAuth", "Login Fehler: ${e.message}, Code: $errorCode", e)
-                                Toast.makeText(context, "Fehler ($errorCode): ${e.localizedMessage}", Toast.LENGTH_LONG).show()
-                            }
-                    }) {
-                        Text("Anonym anmelden (MVP)")
-                    }
+                Text("Melde dich oben an, um Daten mit anderen zu teilen.")
+            } else if (!isPremium) {
+                Text("Premium erforderlich für Haushalts-Synchronisierung.", color = MaterialTheme.colorScheme.secondary)
+                Button(onClick = { /* Navigate to Premium or show Info */ }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Mehr über Premium erfahren")
                 }
             } else {
                 Text("Haushalt: ${household?.name ?: "Keiner"}")

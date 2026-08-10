@@ -1,5 +1,6 @@
 package com.nick.nutritiontracker.data
 
+import com.google.firebase.firestore.PropertyName
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -19,10 +20,13 @@ data class FoodItemEntity(
     val barcode: String? = null,
     val brand: String? = null,
     val category: String? = null,
-    val isGeneric: Boolean = false,
+    @get:PropertyName("isGeneric") @set:PropertyName("isGeneric")
+    var isGeneric: Boolean = false,
     val parentId: Long? = null,
     val store: String? = null,
-    val isPantryItem: Boolean = false
+    @get:PropertyName("isPantryItem") @set:PropertyName("isPantryItem")
+    var isPantryItem: Boolean = false,
+    val lastModified: Long = System.currentTimeMillis()
 ) {
     val complexCarbsPer100g: Double
         get() = (carbsPer100g - sugarPer100g).coerceAtLeast(0.0)

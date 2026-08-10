@@ -80,4 +80,7 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-storage")
     implementation("com.google.firebase:firebase-appcheck-debug")
+
+    // Biometrics
+    implementation("androidx.biometric:biometric:1.2.0-alpha05")
 }

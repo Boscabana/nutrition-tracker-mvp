@@ -16,8 +16,11 @@ import android.graphics.Bitmap
 import com.google.firebase.Firebase
 import com.google.firebase.storage.storage
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -83,6 +86,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     val householdMembers = mutableStateListOf<Map<String, String>>()
     
+    private val pendingDeletions = mutableMapOf<String, Long>()
+
     var forceOnboardingOnStart by mutableStateOf(prefs.getBoolean("force_onboarding", false))
         private set
     
@@ -93,6 +98,21 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     
     var selectedAiModel by mutableStateOf(prefs.getString("selected_ai_model", "gemini-3.6-flash") ?: "gemini-3.6-flash")
         private set
+
+    var biometricEnabled by mutableStateOf(prefs.getBoolean("biometric_enabled", false))
+        private set
+
+    var isAppUnlocked by mutableStateOf(false)
+        private set
+
+    fun unlockApp() {
+        isAppUnlocked = true
+    }
+
+    fun updateBiometricEnabled(enabled: Boolean) {
+        biometricEnabled = enabled
+        prefs.edit().putBoolean("biometric_enabled", enabled).apply()
+    }
 
     fun updateSelectedAiModel(model: String) {
         selectedAiModel = model
@@ -147,7 +167,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 aiErrorMessage = when {
                     msg.contains("404") || msg.contains("not found") -> 
                         "AI Modell nicht verfügbar. Bitte prüfe die API-Berechtigungen deines Keys im Google AI Studio."
-                    msg.contains("403") -> "API Key ungültig oder keine Berechtigung für die AI-Modelle."
+                    msg.contains("403") -> "API Key ungültig oder keine Berechtigung for die AI-Modelle."
                     else -> "Fehler bei der Analyse: ${e.localizedMessage}"
                 }
             } finally {
@@ -207,9 +227,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     init {
         loadFoods(); loadMeals(); loadEntries(); loadSteps(); loadCategories(); loadWeightHistory(); loadVerifications()
-        if (foods.size != foods.map { it.id }.distinct().size || foods.any { it.parentId != null && foods.none { p -> p.id == it.parentId } }) {
-            recalculateIds()
-        }
         if (foods.isEmpty()) createDefaultFoods()
         if (categories.isEmpty()) createDefaultCategories()
         syncStepsForSelectedDate()
@@ -228,44 +245,363 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private fun setupFirebaseSync() {
         syncJob?.cancel()
         syncJob = viewModelScope.launch {
-            firebaseManager.household.collectLatest { household ->
-                if (household != null) {
-                    launch {
-                        try {
-                            val members = firestoreRepository.getHouseholdMembers(household.members)
-                            householdMembers.clear()
-                            householdMembers.addAll(members)
-                        } catch (e: Exception) { Log.e("Firestore", "Error members", e) }
+            // 1. Profile consistency
+            launch {
+                firebaseManager.userProfile.collectLatest { cloudProfile ->
+                    if (cloudProfile != null) {
+                        val localProfile = profileRepository.userProfileFlow.first()
+                        if (localProfile.firstName.isBlank() && cloudProfile.firstName.isNotBlank()) {
+                            Log.d("Sync", "Initial profile setup from cloud")
+                            profileRepository.saveProfile(cloudProfile)
+                        }
                     }
-                    launch {
-                        try {
-                            firestoreRepository.getInboxMessages(firebaseManager.currentUser.value?.uid ?: "").collect { messages ->
-                                inboxMessages.clear()
-                                inboxMessages.addAll(messages)
+                }
+            }
+
+            // 2. Personal Data Sync
+            launch {
+                firebaseManager.currentUser.collectLatest { user ->
+                    if (user != null) {
+                        Log.d("Sync", "Starting personal sync for user: ${user.uid}")
+                        coroutineScope {
+                            val migrationKey = "migration_done_${user.uid}"
+                            if (!prefs.getBoolean(migrationKey, false) && foods.isNotEmpty()) {
+                                migrateLocalDataToCloud(user.uid)
+                                prefs.edit().putBoolean(migrationKey, true).apply()
                             }
-                        } catch (e: Exception) { Log.e("Firestore", "Inbox error", e) }
-                    }
-                    launch {
-                        try {
-                            firestoreRepository.getPlannedEntries(household.id).collect { entries ->
-                                plannedEntries.clear()
-                                plannedEntries.addAll(entries)
+
+                            launch {
+                                firestoreRepository.getPersonalFoods(user.uid).collect { cloudFoods ->
+                                    Log.d("Sync", "Received ${cloudFoods.size} foods from cloud")
+                                    val cloudIds = cloudFoods.map { it.id }.toSet()
+                                    cloudFoods.forEach { cloudFood ->
+                                        val localIndex = foods.indexOfFirst { it.id == cloudFood.id }
+                                        if (localIndex != -1) {
+                                            if (cloudFood.lastModified > foods[localIndex].lastModified + 2000) {
+                                                foods[localIndex] = cloudFood
+                                            }
+                                        } else {
+                                            foods.add(cloudFood)
+                                        }
+                                    }
+                                    val now = System.currentTimeMillis()
+                                    val localOnly = foods.filter { it.id != 0L && !cloudIds.contains(it.id) }
+                                    localOnly.forEach { local ->
+                                        if (now - local.lastModified < 15000) {
+                                            Log.d("Sync", "Healing cloud with local food: ${local.name}")
+                                            firestoreRepository.savePersonalFood(user.uid, local)
+                                        }
+                                    }
+                                    updateNextFoodIds()
+                                    saveFoods()
+                                }
                             }
-                        } catch (e: Exception) { Log.e("Firestore", "Planner error", e) }
-                    }
-                    launch {
-                        try {
-                            firestoreRepository.getShoppingList(household.id).collect { items ->
-                                shoppingList.clear()
-                                shoppingList.addAll(items)
+
+                            launch {
+                                firestoreRepository.getPersonalMeals(user.uid).collect { cloudMeals ->
+                                    Log.d("Sync", "Received ${cloudMeals.size} meals from cloud")
+                                    val cloudIds = cloudMeals.map { it.id }.toSet()
+                                    cloudMeals.forEach { cloudMeal ->
+                                        val localIndex = meals.indexOfFirst { it.id == cloudMeal.id }
+                                        if (localIndex != -1) {
+                                            if (cloudMeal.lastModified > meals[localIndex].lastModified + 2000) {
+                                                meals[localIndex] = cloudMeal
+                                            }
+                                        } else {
+                                            meals.add(cloudMeal)
+                                        }
+                                    }
+                                    val now = System.currentTimeMillis()
+                                    val localOnly = meals.filter { it.id != 0L && !cloudIds.contains(it.id) }
+                                    localOnly.forEach { local ->
+                                        if (now - local.lastModified < 15000) {
+                                            Log.d("Sync", "Healing cloud with local meal: ${local.name}")
+                                            firestoreRepository.savePersonalMeal(user.uid, local)
+                                        }
+                                    }
+                                    
+                                    // Auto-Repair ingredient IDs in meals
+                                    if (foods.isNotEmpty()) {
+                                        repairMealIngredients(user.uid)
+                                    }
+                                    
+                                    updateNextMealIds()
+                                    saveMeals()
+                                }
                             }
-                        } catch (e: Exception) { Log.e("Firestore", "Shopping error", e) }
+
+                            launch {
+                                firestoreRepository.getWeightHistory(user.uid).collect { cloudWeight ->
+                                    if (cloudWeight.isNotEmpty()) {
+                                        weightHistory.clear()
+                                        weightHistory.addAll(cloudWeight.sortedByDescending { it.dateIso })
+                                    }
+                                }
+                            }
+
+                            launch {
+                                firestoreRepository.getPersonalEntries(user.uid).collect { cloudEntries ->
+                                    Log.d("Sync", "Received ${cloudEntries.size} entries from cloud")
+                                    allEntries.clear()
+                                    allEntries.addAll(cloudEntries)
+                                    updateNextEntryIds()
+                                    saveEntries()
+                                }
+                            }
+                        }
                     }
-                } else {
-                    plannedEntries.clear(); shoppingList.clear(); householdMembers.clear(); inboxMessages.clear()
+                }
+            }
+
+            // 3. Shared Data Sync (Household)
+            launch {
+                firebaseManager.household.collectLatest { household ->
+                    if (household != null) {
+                        Log.d("Sync", "Starting shared data sync for household: ${household.id}")
+                        coroutineScope {
+                            launch {
+                                try {
+                                    val members = firestoreRepository.getHouseholdMembers(household.members)
+                                    householdMembers.clear()
+                                    householdMembers.addAll(members)
+                                } catch (e: Exception) { Log.e("Firestore", "Error members", e) }
+                            }
+                            
+                            launch {
+                                firestoreRepository.getInboxMessages(firebaseManager.currentUser.value?.uid ?: "").collect { messages ->
+                                    inboxMessages.clear()
+                                    inboxMessages.addAll(messages)
+                                }
+                            }
+                            
+                            launch {
+                                firestoreRepository.getPlannedEntries(household.id).collect { entries ->
+                                    Log.d("Sync", "Received ${entries.size} planned entries for household ${household.id}")
+                                    val now = System.currentTimeMillis()
+                                    val filtered = entries.filter { 
+                                        val delTime = pendingDeletions[it.id.toString()]
+                                        delTime == null || now - delTime > 10000 
+                                    }
+                                    plannedEntries.clear()
+                                    plannedEntries.addAll(filtered)
+                                    
+                                    // Repair planned entry ingredients
+                                    if (foods.isNotEmpty()) {
+                                        repairPlannedEntryIngredients(household.id)
+                                    }
+                                }
+                            }
+                            
+                            launch {
+                                firestoreRepository.getShoppingList(household.id).collect { items ->
+                                    Log.d("Sync", "Received ${items.size} shopping items for household ${household.id}")
+                                    val now = System.currentTimeMillis()
+                                    val filtered = items.filter { 
+                                        val delTime = pendingDeletions[it.id]
+                                        delTime == null || now - delTime > 10000 
+                                    }
+                                    shoppingList.clear()
+                                    shoppingList.addAll(filtered)
+                                }
+                            }
+                        }
+                    } else {
+                        Log.d("Sync", "Clearing shared data (No household)")
+                        plannedEntries.clear()
+                        shoppingList.clear()
+                        householdMembers.clear()
+                        inboxMessages.clear()
+                    }
                 }
             }
         }
+    }
+
+    private fun repairMealIngredients(uid: String) {
+        var anyFixed = false
+        meals.forEachIndexed { index, meal ->
+            var mealFixed = false
+            val fixedIngredients = meal.ingredients.map { ing ->
+                if (ing.foodItemId == -1L) return@map ing
+                val food = foods.find { it.id == ing.foodItemId }
+                val broken = food == null || !food.name.equals(ing.name, ignoreCase = true)
+                
+                if (broken) {
+                    val correctFood = findFoodByIdOrName(0, ing.name, ing.brand)
+                    if (correctFood != null && correctFood.id != ing.foodItemId) {
+                        Log.d("DeepRepair", "Auto-Repair Meal '${meal.name}': Fixed '${ing.name}' (${ing.foodItemId} -> ${correctFood.id})")
+                        mealFixed = true
+                        anyFixed = true
+                        ing.copy(foodItemId = correctFood.id)
+                    } else { ing }
+                } else { ing }
+            }
+            if (mealFixed) {
+                val updatedMeal = meal.copy(ingredients = fixedIngredients, lastModified = System.currentTimeMillis())
+                meals[index] = updatedMeal
+                viewModelScope.launch { firestoreRepository.savePersonalMeal(uid, updatedMeal) }
+            }
+        }
+        if (anyFixed) saveMeals()
+    }
+
+    private fun repairPlannedEntryIngredients(householdId: String) {
+        plannedEntries.forEachIndexed { index, entry ->
+            if (entry.isMeal && entry.mealIngredients != null) {
+                var entryFixed = false
+                val fixedIngredients = entry.mealIngredients.map { ing ->
+                    if (ing.foodItemId == -1L) return@map ing
+                    val food = foods.find { it.id == ing.foodItemId }
+                    val broken = food == null || !food.name.equals(ing.name, ignoreCase = true)
+                    
+                    if (broken) {
+                        val correctFood = findFoodByIdOrName(0, ing.name, ing.brand)
+                        if (correctFood != null && correctFood.id != ing.foodItemId) {
+                            Log.d("DeepRepair", "Auto-Repair PlannedEntry '${entry.name}': Fixed '${ing.name}' (${ing.foodItemId} -> ${correctFood.id})")
+                            entryFixed = true
+                            ing.copy(foodItemId = correctFood.id)
+                        } else { ing }
+                    } else { ing }
+                }
+                if (entryFixed) {
+                    val updatedEntry = entry.copy(mealIngredients = fixedIngredients)
+                    plannedEntries[index] = updatedEntry
+                    viewModelScope.launch { firestoreRepository.addPlannedEntry(householdId, updatedEntry) }
+                }
+            }
+        }
+    }
+
+    private fun updateNextFoodIds() {
+        nextFoodId = (foods.maxOfOrNull { it.id } ?: 0L) + 1
+        nextPortionId = (foods.flatMap { it.portions }.maxOfOrNull { it.id } ?: 0L) + 1
+    }
+
+    private fun updateNextMealIds() {
+        nextMealId = (meals.maxOfOrNull { it.id } ?: 0L) + 1
+    }
+
+    private fun updateNextEntryIds() {
+        nextEntryId = (allEntries.maxOfOrNull { it.id } ?: 0L) + 1
+    }
+
+    private suspend fun migrateLocalDataToCloud(uid: String) {
+        Log.d("Migration", "Starting migration of local data to cloud for user $uid")
+        
+        // Take a clean snapshot of current local lists
+        val foodsToMigrate = foods.toList()
+        val mealsToMigrate = meals.toList()
+
+        Log.d("Migration", "Found ${foodsToMigrate.size} local foods and ${mealsToMigrate.size} local meals to migrate")
+        
+        foodsToMigrate.forEach { food ->
+            Log.d("Migration", "Uploading food: ${food.name} (Generic: ${food.isGeneric})")
+            firestoreRepository.savePersonalFood(uid, food) 
+        }
+        mealsToMigrate.forEach { meal -> 
+            Log.d("Migration", "Uploading meal: ${meal.name}")
+            firestoreRepository.savePersonalMeal(uid, meal) 
+        }
+        Log.d("Migration", "Migration finished for user $uid")
+    }
+
+    suspend fun forceMigrationToCloud() {
+        val user = firebaseManager.currentUser.value ?: return
+        migrateLocalDataToCloud(user.uid)
+    }
+
+    fun repairAndWipeLocalCache() {
+        val user = firebaseManager.currentUser.value ?: return
+        
+        viewModelScope.launch {
+            // New Step: Deep Repair before wiping
+            forceDeepRepair()
+
+            // 1. Cancel active sync to stop listeners
+            syncJob?.cancel()
+            
+            // 2. Clear local lists (State)
+            foods.clear()
+            meals.clear()
+            allEntries.clear()
+            weightHistory.clear()
+            
+            // 3. Clear SharedPrefs JSON strings (Disk)
+            prefs.edit()
+                .remove("foods_json")
+                .remove("meals_json")
+                .remove("entries_json")
+                .remove("weight_history_json")
+                .putBoolean("migration_done_${user.uid}", true)
+                .apply()
+            
+            Log.d("DeepRepair", "Local cache wiped. Restarting sync for clean pull.")
+            
+            // 4. Restart sync. This will re-attach all Firestore listeners and force a fresh data pull.
+            setupFirebaseSync()
+        }
+    }
+
+    fun forceDeepRepair() {
+        val user = firebaseManager.currentUser.value ?: return
+        val householdId = firebaseManager.household.value?.id
+        
+        Log.d("DeepRepair", "Starting Deep Repair for ${meals.size} meals and ${plannedEntries.size} planned entries")
+        
+        // 1. Repair Meals
+        meals.forEachIndexed { index, meal ->
+            var mealFixed = false
+            val updatedIngredients = meal.ingredients.map { ing ->
+                val correctFood = findFoodByIdOrName(ing.foodItemId, ing.name, ing.brand)
+                if (correctFood != null && correctFood.id != ing.foodItemId) {
+                    Log.d("DeepRepair", "Deep-Repair Meal '${meal.name}': Fixed '${ing.name}' (${ing.foodItemId} -> ${correctFood.id})")
+                    mealFixed = true
+                    ing.copy(foodItemId = correctFood.id)
+                } else {
+                    ing
+                }
+            }
+            if (mealFixed) {
+                val updatedMeal = meal.copy(ingredients = updatedIngredients, lastModified = System.currentTimeMillis())
+                meals[index] = updatedMeal
+                viewModelScope.launch { firestoreRepository.savePersonalMeal(user.uid, updatedMeal) }
+            }
+        }
+        
+        // 2. Repair Planned Entries
+        if (householdId != null) {
+            plannedEntries.forEachIndexed { index, entry ->
+                if (entry.isMeal && entry.mealIngredients != null) {
+                    var entryFixed = false
+                    val updatedIngredients = entry.mealIngredients.map { ing ->
+                        val correctFood = findFoodByIdOrName(ing.foodItemId, ing.name, ing.brand)
+                        if (correctFood != null && correctFood.id != ing.foodItemId) {
+                            Log.d("DeepRepair", "Deep-Repair PlannedEntry '${entry.name}': Fixed Zutat '${ing.name}' (${ing.foodItemId} -> ${correctFood.id})")
+                            entryFixed = true
+                            ing.copy(foodItemId = correctFood.id)
+                        } else {
+                            ing
+                        }
+                    }
+                    if (entryFixed) {
+                        val updatedEntry = entry.copy(mealIngredients = updatedIngredients)
+                        plannedEntries[index] = updatedEntry
+                        viewModelScope.launch { firestoreRepository.addPlannedEntry(householdId, updatedEntry) }
+                    }
+                } else if (!entry.isMeal && entry.foodItemId != -1L) {
+                    val correctFood = findFoodByIdOrName(entry.foodItemId, entry.name, entry.brand)
+                    if (correctFood != null && correctFood.id != entry.foodItemId) {
+                        Log.d("DeepRepair", "Deep-Repair PlannedEntry '${entry.name}': Fixed ID (${entry.foodItemId} -> ${correctFood.id})")
+                        val updatedEntry = entry.copy(foodItemId = correctFood.id)
+                        plannedEntries[index] = updatedEntry
+                        viewModelScope.launch { firestoreRepository.addPlannedEntry(householdId, updatedEntry) }
+                    }
+                }
+            }
+        }
+        
+        saveMeals()
+        Log.d("DeepRepair", "Deep Repair finished")
     }
 
     private fun getGeneralName(food: FoodItemEntity): String {
@@ -273,8 +609,37 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         return parent?.name ?: food.name
     }
 
-    private fun getGeneralNameForIngredient(foodItemId: Long, fallbackName: String): String {
-        val food = foods.find { it.id == foodItemId }
+    fun findFoodByIdOrName(id: Long, name: String, brand: String? = null): FoodItemEntity? {
+        // 1. Precise ID match
+        val byId = foods.find { it.id == id && it.id != 0L && it.id != -1L }
+        if (byId != null) return byId
+
+        val cleanName = name.trim()
+        val cleanBrand = brand?.trim()?.takeIf { it.isNotEmpty() }
+
+        // 2. Name + Brand match (most specific)
+        if (cleanBrand != null) {
+            val byNameAndBrand = foods.find {
+                it.name.equals(cleanName, ignoreCase = true) &&
+                it.brand?.equals(cleanBrand, ignoreCase = true) == true
+            }
+            if (byNameAndBrand != null) return byNameAndBrand
+        }
+
+        // 3. Name match where brand is null or empty in BOTH
+        val byNameOnlyNoBrand = foods.find {
+            it.name.equals(cleanName, ignoreCase = true) &&
+            (it.brand == null || it.brand.isBlank()) &&
+            (cleanBrand == null)
+        }
+        if (byNameOnlyNoBrand != null) return byNameOnlyNoBrand
+
+        // 4. Fallback: Just the name
+        return foods.find { it.name.equals(cleanName, ignoreCase = true) }
+    }
+
+    private fun getGeneralNameForIngredient(foodItemId: Long, fallbackName: String, brand: String? = null): String {
+        val food = findFoodByIdOrName(foodItemId, fallbackName, brand)
         val parent = food?.parentId?.let { pId -> foods.find { it.id == pId } }
         return parent?.name ?: food?.name ?: fallbackName
     }
@@ -300,16 +665,28 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun addPlannedMeal(meal: MealEntity, mealSlot: String, date: LocalDate, servings: Double = 1.0, autoAddToShoppingList: Boolean = true) {
         val householdId = firebaseManager.household.value?.id ?: return
-        val entry = FoodEntryEntity(id = System.currentTimeMillis(), dateIso = date.toString(), mealSlot = mealSlot, amount = servings, unitLabel = if (servings == 1.0) "Portion" else "Portionen", grams = (meal.ingredients.sumOf { it.grams } * (servings / meal.servings)).coerceAtLeast(0.0), foodItemId = -1, name = meal.name, kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, isMeal = true, mealIngredients = meal.ingredients.map { it.copy(id = System.currentTimeMillis() + (Math.random() * 1000).toLong(), grams = it.grams * (servings / meal.servings), amount = it.amount * (servings / meal.servings)) }, isPlanned = true, imageUrl = meal.imageUrl, tags = meal.tags)
+
+        val fixedIngredients = meal.ingredients.map { ing ->
+            val food = foods.find { it.id == ing.foodItemId }
+            if (food == null || !food.name.equals(ing.name, ignoreCase = true)) {
+                val correct = findFoodByIdOrName(0, ing.name, ing.brand)
+                if (correct != null && correct.id != ing.foodItemId) {
+                    Log.d("DeepRepair", "addPlannedMeal '${meal.name}': Fixed '${ing.name}' (${ing.foodItemId} -> ${correct.id})")
+                    ing.copy(foodItemId = correct.id)
+                } else ing
+            } else ing
+        }.map { it.copy(id = System.currentTimeMillis() + (Math.random() * 1000).toLong(), grams = it.grams * (servings / meal.servings), amount = it.amount * (servings / meal.servings)) }
+
+        val entry = FoodEntryEntity(id = System.currentTimeMillis(), dateIso = date.toString(), mealSlot = mealSlot, amount = servings, unitLabel = if (servings == 1.0) "Portion" else "Portionen", grams = (meal.ingredients.sumOf { it.grams } * (servings / meal.servings)).coerceAtLeast(0.0), foodItemId = -1, name = meal.name, kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, isMeal = true, mealIngredients = fixedIngredients, isPlanned = true, imageUrl = meal.imageUrl, tags = meal.tags)
         viewModelScope.launch {
             try {
                 firestoreRepository.addPlannedEntry(householdId, entry)
                 if (autoAddToShoppingList) {
                     meal.ingredients.forEach { ing ->
-                        val foodItem = foods.find { it.id == ing.foodItemId }
+                        val foodItem = findFoodByIdOrName(ing.foodItemId, ing.name, ing.brand)
                         val isPantry = foodItem?.isPantryItem == true || (foodItem?.parentId?.let { pId -> foods.find { it.id == pId }?.isPantryItem } ?: false)
                         val itemWeight = (ing.grams / meal.servings) * servings
-                        val item = ShoppingItem(name = getGeneralNameForIngredient(ing.foodItemId, ing.name), amount = (ing.amount / meal.servings) * servings, unit = ing.unitLabel, isAutoGenerated = true, category = foodItem?.category ?: (foodItem?.parentId?.let { pId -> foods.find { it.id == pId }?.category }), householdId = householdId, sourceName = meal.name, weightGrams = itemWeight, baseUnit = ing.baseUnit, isPantryItem = isPantry)
+                        val item = ShoppingItem(name = getGeneralNameForIngredient(ing.foodItemId, ing.name, ing.brand), amount = (ing.amount / meal.servings) * servings, unit = ing.unitLabel, isAutoGenerated = true, category = foodItem?.category ?: (foodItem?.parentId?.let { pId -> foods.find { it.id == pId }?.category }), householdId = householdId, sourceName = meal.name, weightGrams = itemWeight, baseUnit = ing.baseUnit, isPantryItem = isPantry)
                         firestoreRepository.addShoppingItem(householdId, item)
                     }
                 }
@@ -319,6 +696,11 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun deletePlannedEntry(entryId: Long) {
         val householdId = firebaseManager.household.value?.id ?: return
+        
+        // Local First
+        plannedEntries.removeAll { it.id == entryId }
+        pendingDeletions[entryId.toString()] = System.currentTimeMillis()
+        
         viewModelScope.launch { firestoreRepository.deletePlannedEntry(householdId, entryId) }
     }
 
@@ -393,6 +775,11 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun deleteShoppingItem(itemId: String) {
         val householdId = firebaseManager.household.value?.id ?: return
+        
+        // Local First
+        shoppingList.removeAll { it.id == itemId }
+        pendingDeletions[itemId] = System.currentTimeMillis()
+        
         viewModelScope.launch { try { firestoreRepository.deleteShoppingItem(householdId, itemId) } catch (e: Exception) { Log.e("Firestore", "Delete error", e) } }
     }
 
@@ -408,19 +795,33 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun findFoodByBarcode(barcode: String): FoodItemEntity? = foods.find { it.barcode?.equals(barcode, ignoreCase = true) == true }
 
     fun addFood(name: String, kcal: Double, protein: Double, carbs: Double, sugar: Double, fat: Double, saturatedFat: Double, alcoholPercent: Double, baseUnit: String, portions: List<FoodPortionEntity>, packages: List<FoodPackageEntity>, barcode: String? = null, brand: String? = null, category: String? = null, isGeneric: Boolean = false, parentId: Long? = null, store: String? = null, isPantryItem: Boolean = false): FoodItemEntity {
+        Log.d("AddFood", "Adding food: $name (Generic: $isGeneric)")
+        val user = firebaseManager.currentUser.value
+        val newId = if (user != null) System.currentTimeMillis() else nextFoodId++
+        
         val updatedPortions = portions.map { if (it.id == 0L) it.copy(id = nextPortionId++) else it }
-        val updatedPackages = packages.mapIndexed { idx, pkg -> if (pkg.id == 0L) pkg.copy(id = nextFoodId * 100 + idx) else pkg }
-        val newFood = FoodItemEntity(id = nextFoodId++, name = name.trim(), brand = brand?.trim()?.takeIf { it.isNotBlank() }, kcalPer100g = kcal, proteinPer100g = protein, carbsPer100g = carbs, sugarPer100g = sugar, fatPer100g = fat, saturatedFatPer100g = saturatedFat, alcoholPercent = alcoholPercent, baseUnit = baseUnit, portions = updatedPortions, packages = updatedPackages, barcode = barcode?.trim()?.takeIf { it.isNotBlank() }, category = category?.trim()?.takeIf { it.isNotBlank() }, isGeneric = isGeneric, parentId = parentId, store = store?.trim()?.takeIf { it.isNotBlank() }, isPantryItem = isPantryItem)
-        foods.add(newFood); saveFoods(); return newFood
+        val updatedPackages = packages.mapIndexed { idx, pkg -> if (pkg.id == 0L) pkg.copy(id = newId * 100 + idx) else pkg }
+        val newFood = FoodItemEntity(id = newId, name = name.trim(), brand = brand?.trim()?.takeIf { it.isNotBlank() }, kcalPer100g = kcal, proteinPer100g = protein, carbsPer100g = carbs, sugarPer100g = sugar, fatPer100g = fat, saturatedFatPer100g = saturatedFat, alcoholPercent = alcoholPercent, baseUnit = baseUnit, portions = updatedPortions, packages = updatedPackages, barcode = barcode?.trim()?.takeIf { it.isNotBlank() }, category = category?.trim()?.takeIf { it.isNotBlank() }, isGeneric = isGeneric, parentId = parentId, store = store?.trim()?.takeIf { it.isNotBlank() }, isPantryItem = isPantryItem, lastModified = System.currentTimeMillis())
+        
+        foods.add(newFood)
+        saveFoods()
+        
+        if (user != null) {
+            viewModelScope.launch { firestoreRepository.savePersonalFood(user.uid, newFood) }
+        }
+        return newFood
     }
 
     fun updateFood(updatedFood: FoodItemEntity) {
-        val index = foods.indexOfFirst { it.id == updatedFood.id }
+        val user = firebaseManager.currentUser.value
+        val fixedPortions = updatedFood.portions.map { if (it.id == 0L) it.copy(id = nextPortionId++) else it }
+        val fixedPackages = updatedFood.packages.mapIndexed { idx, pkg -> if (pkg.id == 0L) pkg.copy(id = updatedFood.id * 100 + idx) else pkg }
+        val finalFood = updatedFood.copy(portions = fixedPortions, packages = fixedPackages, lastModified = System.currentTimeMillis())
+
+        val index = foods.indexOfFirst { it.id == finalFood.id }
         if (index != -1) {
-            val fixedPortions = updatedFood.portions.map { if (it.id == 0L) it.copy(id = nextPortionId++) else it }
-            val fixedPackages = updatedFood.packages.mapIndexed { idx, pkg -> if (pkg.id == 0L) pkg.copy(id = updatedFood.id * 100 + idx) else pkg }
-            val finalFood = updatedFood.copy(portions = fixedPortions, packages = fixedPackages)
-            foods[index] = finalFood; saveFoods()
+            foods[index] = finalFood
+            saveFoods()
             for (i in allEntries.indices) { if (allEntries[i].foodItemId == finalFood.id) allEntries[i] = allEntries[i].copy(name = finalFood.name, brand = finalFood.brand, kcalPer100g = finalFood.kcalPer100g, proteinPer100g = finalFood.proteinPer100g, carbsPer100g = finalFood.carbsPer100g, sugarPer100g = finalFood.sugarPer100g, fatPer100g = finalFood.fatPer100g, saturatedFatPer100g = finalFood.saturatedFatPer100g, alcoholPercent = finalFood.alcoholPercent, baseUnit = finalFood.baseUnit, store = finalFood.store) }
             saveEntries()
             for (mIdx in meals.indices) {
@@ -429,10 +830,18 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 if (changed) meals[mIdx] = meals[mIdx].copy(ingredients = updatedIngredients)
             }
             saveMeals()
-            val householdId = firebaseManager.household.value?.id
-            if (householdId != null) {
-                viewModelScope.launch {
-                    shoppingList.filter { !it.isChecked && it.name.equals(finalFood.name, ignoreCase = true) }.forEach { firestoreRepository.updateShoppingItem(householdId, it.copy(category = finalFood.category, isPantryItem = finalFood.isPantryItem)) }
+        }
+
+        if (user != null) {
+            viewModelScope.launch {
+                firestoreRepository.savePersonalFood(user.uid, finalFood)
+                
+                // Still update linked cloud items (Planner & Shopping List)
+                val householdId = firebaseManager.household.value?.id
+                if (householdId != null) {
+                    shoppingList.filter { !it.isChecked && it.name.equals(finalFood.name, ignoreCase = true) }.forEach { 
+                        firestoreRepository.updateShoppingItem(householdId, it.copy(category = finalFood.category, isPantryItem = finalFood.isPantryItem)) 
+                    }
                     plannedEntries.filter { it.foodItemId == finalFood.id || (it.isMeal && it.mealIngredients?.any { ing -> ing.foodItemId == finalFood.id } == true) }.forEach { entry ->
                         if (entry.isMeal) {
                             val updatedIngredients = entry.mealIngredients?.map { ing -> if (ing.foodItemId == finalFood.id) ing.copy(name = finalFood.name, kcalPer100g = finalFood.kcalPer100g, proteinPer100g = finalFood.proteinPer100g, carbsPer100g = finalFood.carbsPer100g, sugarPer100g = finalFood.sugarPer100g, fatPer100g = finalFood.fatPer100g, saturatedFatPer100g = finalFood.saturatedFatPer100g, alcoholPercent = finalFood.alcoholPercent, baseUnit = finalFood.baseUnit, store = finalFood.store, brand = finalFood.brand) else ing }
@@ -444,9 +853,58 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun deleteFood(id: Long) { foods.removeAll { it.id == id }; foods.forEachIndexed { i, f -> if (f.parentId == id) foods[i] = f.copy(parentId = null) }; allEntries.forEachIndexed { i, e -> if (e.foodItemId == id) allEntries[i] = e.copy(foodItemId = -1L) }; saveFoods(); saveMeals(); saveEntries() }
-    fun mergeFoods(targetParentId: Long, childIds: List<Long>) { childIds.forEach { id -> val idx = foods.indexOfFirst { it.id == id }; if (idx != -1) foods[idx] = foods[idx].copy(parentId = targetParentId, isGeneric = false) }; saveFoods() }
-    fun promoteToGeneric(foodId: Long) { val idx = foods.indexOfFirst { it.id == foodId }; if (idx != -1) { foods[idx] = foods[idx].copy(isGeneric = true, parentId = null); saveFoods() } }
+    fun deleteFood(id: Long) {
+        // Local First: Remove immediately from local lists
+        foods.removeAll { it.id == id }
+        foods.forEachIndexed { i, f -> if (f.parentId == id) foods[i] = f.copy(parentId = null) }
+        
+        // Update meals containing this food
+        for (i in meals.indices) {
+            if (meals[i].ingredients.any { it.foodItemId == id }) {
+                meals[i] = meals[i].copy(ingredients = meals[i].ingredients.map { 
+                    if (it.foodItemId == id) it.copy(foodItemId = -1L) else it 
+                })
+            }
+        }
+        
+        allEntries.forEachIndexed { i, e -> if (e.foodItemId == id) allEntries[i] = e.copy(foodItemId = -1L) }
+        saveFoods()
+        saveMeals()
+        saveEntries()
+
+        val user = firebaseManager.currentUser.value
+        if (user != null) {
+            viewModelScope.launch { firestoreRepository.deletePersonalFood(user.uid, id) }
+        }
+    }
+    fun mergeFoods(targetParentId: Long, childIds: List<Long>) {
+        val user = firebaseManager.currentUser.value
+        childIds.forEach { id -> 
+            val idx = foods.indexOfFirst { it.id == id }
+            if (idx != -1) {
+                val updated = foods[idx].copy(parentId = targetParentId, isGeneric = false, lastModified = System.currentTimeMillis())
+                foods[idx] = updated
+                if (user != null) {
+                    viewModelScope.launch { firestoreRepository.savePersonalFood(user.uid, updated) }
+                }
+            }
+        }
+        saveFoods()
+    }
+
+    fun promoteToGeneric(foodId: Long) {
+        val index = foods.indexOfFirst { it.id == foodId }
+        if (index != -1) {
+            val updated = foods[index].copy(isGeneric = true, parentId = null, lastModified = System.currentTimeMillis())
+            foods[index] = updated
+            saveFoods()
+            
+            val user = firebaseManager.currentUser.value
+            if (user != null) {
+                viewModelScope.launch { firestoreRepository.savePersonalFood(user.uid, updated) }
+            }
+        }
+    }
     fun addCategory(name: String) { if (name.isNotBlank() && !categories.contains(name.trim())) { categories.add(name.trim()); saveCategories() } }
     fun deleteCategory(name: String) { categories.remove(name); saveCategories() }
     fun updateCategory(oldName: String, newName: String) {
@@ -461,31 +919,90 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private fun saveCategories() { try { prefs.edit().putString("categories_json", json.encodeToString(categories.toList())).apply() } catch (e: Exception) {} }
     private fun loadCategories() { val data = prefs.getString("categories_json", null); if (data != null) try { val loaded = json.decodeFromString<List<String>>(data); categories.clear(); categories.addAll(loaded) } catch (e: Exception) {} }
     fun addMealTemplate(name: String, ingredients: List<MealIngredientEntity>, servings: Double = 1.0, tags: List<String> = emptyList(), imageUrl: String? = null) {
+        val user = firebaseManager.currentUser.value
         val finalIngredients = ingredients.mapIndexed { idx, ing -> 
             if (foods.none { it.id == ing.foodItemId }) { 
                 val saved = saveIngredientAsFood(ing)
                 ing.copy(id = System.currentTimeMillis() + idx, foodItemId = saved.id) 
             } else ing.copy(id = System.currentTimeMillis() + idx) 
         }
-        meals.add(MealEntity(id = nextMealId++, name = name, ingredients = finalIngredients, servings = servings, tags = tags, imageUrl = imageUrl))
+        
+        val mealToSave = MealEntity(
+            id = nextMealId++, 
+            name = name, 
+            ingredients = finalIngredients, 
+            servings = servings, 
+            tags = tags, 
+            imageUrl = imageUrl, 
+            lastModified = System.currentTimeMillis()
+        )
+        
+        meals.add(mealToSave)
         saveMeals()
+
+        if (user != null) {
+            viewModelScope.launch {
+                var remoteUrl = imageUrl
+                if (imageUrl != null && (imageUrl.startsWith("/") || imageUrl.startsWith("file:"))) {
+                    // It's a local image, upload it
+                    remoteUrl = firestoreRepository.uploadMealImage(user.uid, imageUrl.replace("file:", ""))
+                }
+                
+                val finalMeal = if (remoteUrl != imageUrl) mealToSave.copy(imageUrl = remoteUrl) else mealToSave
+                if (remoteUrl != imageUrl) {
+                    // Update local list if we got a remote URL
+                    val idx = meals.indexOfFirst { it.id == mealToSave.id }
+                    if (idx != -1) meals[idx] = finalMeal
+                    saveMeals()
+                }
+                firestoreRepository.savePersonalMeal(user.uid, finalMeal)
+            }
+        }
     }
 
     fun updateMealTemplate(updatedMeal: MealEntity) {
+        val user = firebaseManager.currentUser.value
         val finalIngredients = updatedMeal.ingredients.map { ing -> 
             if (foods.none { it.id == ing.foodItemId }) { 
                 val saved = saveIngredientAsFood(ing)
                 ing.copy(foodItemId = saved.id) 
             } else ing 
         }
-        val finalMeal = updatedMeal.copy(ingredients = finalIngredients)
-        val idx = meals.indexOfFirst { it.id == finalMeal.id }
+        val mealWithIngredients = updatedMeal.copy(ingredients = finalIngredients, lastModified = System.currentTimeMillis())
+        
+        val idx = meals.indexOfFirst { it.id == mealWithIngredients.id }
         if (idx != -1) {
-            meals[idx] = finalMeal
+            meals[idx] = mealWithIngredients
             saveMeals()
         }
+
+        if (user != null) {
+            viewModelScope.launch {
+                var remoteUrl = mealWithIngredients.imageUrl
+                if (remoteUrl != null && (remoteUrl.startsWith("/") || remoteUrl.startsWith("file:"))) {
+                    remoteUrl = firestoreRepository.uploadMealImage(user.uid, remoteUrl.replace("file:", ""))
+                }
+                
+                val finalMeal = if (remoteUrl != mealWithIngredients.imageUrl) mealWithIngredients.copy(imageUrl = remoteUrl) else mealWithIngredients
+                if (remoteUrl != mealWithIngredients.imageUrl) {
+                    val mIdx = meals.indexOfFirst { it.id == finalMeal.id }
+                    if (mIdx != -1) meals[mIdx] = finalMeal
+                    saveMeals()
+                }
+                firestoreRepository.savePersonalMeal(user.uid, finalMeal)
+            }
+        }
     }
-    fun deleteMealTemplate(id: Long) { meals.removeAll { it.id == id }; saveMeals() }
+    fun deleteMealTemplate(id: Long) {
+        // Local First: Remove immediately
+        meals.removeAll { it.id == id }
+        saveMeals()
+        
+        val user = firebaseManager.currentUser.value
+        if (user != null) {
+            viewModelScope.launch { firestoreRepository.deletePersonalMeal(user.uid, id) }
+        }
+    }
     fun addEntry(food: FoodItemEntity, amount: Double, portion: FoodPortionEntity?, mealSlot: String, pkg: FoodPackageEntity? = null) {
         val grams = when {
             portion != null -> amount * portion.grams
@@ -493,39 +1010,78 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             else -> amount
         }
         if (grams > 0.0) {
-            allEntries.add(
-                FoodEntryEntity(
-                    id = nextEntryId++,
-                    dateIso = selectedDate.toString(),
-                    mealSlot = mealSlot,
-                    amount = amount,
-                    unitLabel = portion?.name ?: pkg?.name ?: food.baseUnit,
-                    grams = grams,
-                    foodItemId = food.id,
-                    name = food.name,
-                    brand = food.brand,
-                    kcalPer100g = food.kcalPer100g,
-                    proteinPer100g = food.proteinPer100g,
-                    carbsPer100g = food.carbsPer100g,
-                    sugarPer100g = food.sugarPer100g,
-                    fatPer100g = food.fatPer100g,
-                    saturatedFatPer100g = food.saturatedFatPer100g,
-                    alcoholPercent = food.alcoholPercent,
-                    baseUnit = food.baseUnit,
-                    store = food.store
-                )
+            val user = firebaseManager.currentUser.value
+            val entry = FoodEntryEntity(
+                id = if (user != null) System.currentTimeMillis() else nextEntryId++,
+                dateIso = selectedDate.toString(),
+                mealSlot = mealSlot,
+                amount = amount,
+                unitLabel = portion?.name ?: pkg?.name ?: food.baseUnit,
+                grams = grams,
+                foodItemId = food.id,
+                name = food.name,
+                brand = food.brand,
+                kcalPer100g = food.kcalPer100g,
+                proteinPer100g = food.proteinPer100g,
+                carbsPer100g = food.carbsPer100g,
+                sugarPer100g = food.sugarPer100g,
+                fatPer100g = food.fatPer100g,
+                saturatedFatPer100g = food.saturatedFatPer100g,
+                alcoholPercent = food.alcoholPercent,
+                baseUnit = food.baseUnit,
+                store = food.store
             )
+            allEntries.add(entry)
             saveEntries()
+            if (user != null) {
+                viewModelScope.launch { firestoreRepository.savePersonalEntry(user.uid, entry) }
+            }
         }
     }
-    fun addMealEntry(meal: MealEntity, mealSlot: String, servings: Double = 1.0) { allEntries.add(FoodEntryEntity(id = nextEntryId++, dateIso = selectedDate.toString(), mealSlot = mealSlot, amount = servings, unitLabel = if (servings == 1.0) "Portion" else "Portionen", grams = (meal.ingredients.sumOf { it.grams } * (servings / meal.servings)).coerceAtLeast(0.0), foodItemId = -1, name = meal.name, kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, isMeal = true, mealIngredients = meal.ingredients.mapIndexed { idx, it -> it.copy(id = System.currentTimeMillis() + idx, grams = it.grams * (servings / meal.servings), amount = it.amount * (servings / meal.servings)) }, imageUrl = meal.imageUrl, tags = meal.tags)); saveEntries() }
-    fun updateEntry(updatedEntry: FoodEntryEntity) { val entryToSave = if (updatedEntry.foodItemId == -1L && !updatedEntry.isMeal) { val saved = saveEntryAsFood(updatedEntry); updatedEntry.copy(foodItemId = saved.id) } else if (updatedEntry.isMeal) { val finalIngredients = updatedEntry.mealIngredients?.map { ing -> if (foods.none { it.id == ing.foodItemId }) { val saved = saveIngredientAsFood(ing); ing.copy(foodItemId = saved.id) } else ing }; updatedEntry.copy(mealIngredients = finalIngredients) } else updatedEntry; val idx = allEntries.indexOfFirst { it.id == entryToSave.id }; if (idx != -1) { allEntries[idx] = entryToSave; saveEntries() } }
-    fun deleteEntry(id: Long) { allEntries.removeAll { it.id == id }; saveEntries() }
-    fun copyEntriesToDate(entryIds: Set<Long>, targetDate: LocalDate) { val newEntries = allEntries.filter { it.id in entryIds }.map { it.copy(id = nextEntryId++, dateIso = targetDate.toString()) }; allEntries.addAll(newEntries); saveEntries() }
-    fun moveEntriesToDate(entryIds: Set<Long>, targetDate: LocalDate) { copyEntriesToDate(entryIds, targetDate); allEntries.removeAll { it.id in entryIds }; saveEntries() }
+    fun addMealEntry(meal: MealEntity, mealSlot: String, servings: Double = 1.0) { 
+        val user = firebaseManager.currentUser.value
+        val entry = FoodEntryEntity(id = if (user != null) System.currentTimeMillis() else nextEntryId++, dateIso = selectedDate.toString(), mealSlot = mealSlot, amount = servings, unitLabel = if (servings == 1.0) "Portion" else "Portionen", grams = (meal.ingredients.sumOf { it.grams } * (servings / meal.servings)).coerceAtLeast(0.0), foodItemId = -1, name = meal.name, kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, isMeal = true, mealIngredients = meal.ingredients.mapIndexed { idx, it -> it.copy(id = System.currentTimeMillis() + idx, grams = it.grams * (servings / meal.servings), amount = it.amount * (servings / meal.servings)) }, imageUrl = meal.imageUrl, tags = meal.tags)
+        allEntries.add(entry)
+        saveEntries() 
+        if (user != null) {
+            viewModelScope.launch { firestoreRepository.savePersonalEntry(user.uid, entry) }
+        }
+    }
+    fun updateEntry(updatedEntry: FoodEntryEntity) { val entryToSave = if (updatedEntry.foodItemId == -1L && !updatedEntry.isMeal) { val saved = saveEntryAsFood(updatedEntry); updatedEntry.copy(foodItemId = saved.id) } else if (updatedEntry.isMeal) { val finalIngredients = updatedEntry.mealIngredients?.map { ing -> if (foods.none { it.id == ing.foodItemId }) { val saved = saveIngredientAsFood(ing); ing.copy(foodItemId = saved.id) } else ing }; updatedEntry.copy(mealIngredients = finalIngredients) } else updatedEntry; val idx = allEntries.indexOfFirst { it.id == entryToSave.id }; if (idx != -1) { allEntries[idx] = entryToSave; saveEntries() }; val user = firebaseManager.currentUser.value; if (user != null) { viewModelScope.launch { firestoreRepository.savePersonalEntry(user.uid, entryToSave) } } }
+    fun deleteEntry(id: Long) { allEntries.removeAll { it.id == id }; saveEntries(); val user = firebaseManager.currentUser.value; if (user != null) { viewModelScope.launch { firestoreRepository.deletePersonalEntry(user.uid, id) } } }
+    fun copyEntriesToDate(entryIds: Set<Long>, targetDate: LocalDate) { 
+        val user = firebaseManager.currentUser.value
+        val newEntries = allEntries.filter { it.id in entryIds }.map { it.copy(id = if (user != null) System.currentTimeMillis() + (Math.random()*1000).toLong() else nextEntryId++, dateIso = targetDate.toString()) }
+        allEntries.addAll(newEntries)
+        saveEntries() 
+        if (user != null) {
+            viewModelScope.launch { newEntries.forEach { firestoreRepository.savePersonalEntry(user.uid, it) } }
+        }
+    }
+    fun moveEntriesToDate(entryIds: Set<Long>, targetDate: LocalDate) { copyEntriesToDate(entryIds, targetDate); entryIds.forEach { deleteEntry(it) } }
     fun updateSteps(steps: Int) { dailySteps[selectedDate.toString()] = steps; saveSteps() }
-    fun addWeightEntry(weight: Double, dateIso: String, profile: UserProfile) { val entry = WeightEntry(dateIso, weight); val existingIdx = weightHistory.indexOfFirst { it.dateIso == dateIso }; if (existingIdx != -1) weightHistory[existingIdx] = entry else weightHistory.add(entry); saveWeightHistory(); calculateMetabolicFactorForProfile(profile) }
-    fun deleteWeightEntry(dateIso: String) { weightHistory.removeAll { it.dateIso == dateIso }; saveWeightHistory() }
+    fun addWeightEntry(weight: Double, dateIso: String, profile: UserProfile) {
+        val entry = WeightEntry(dateIso, weight)
+        val existingIdx = weightHistory.indexOfFirst { it.dateIso == dateIso }
+        if (existingIdx != -1) weightHistory[existingIdx] = entry else weightHistory.add(entry)
+        saveWeightHistory()
+        calculateMetabolicFactorForProfile(profile)
+        
+        firebaseManager.currentUser.value?.let { user ->
+            viewModelScope.launch {
+                firestoreRepository.saveWeightEntry(user.uid, entry)
+            }
+        }
+    }
+    fun deleteWeightEntry(dateIso: String) {
+        weightHistory.removeAll { it.dateIso == dateIso }
+        saveWeightHistory()
+        firebaseManager.currentUser.value?.let { user ->
+            viewModelScope.launch {
+                firestoreRepository.deleteWeightEntry(user.uid, dateIso)
+            }
+        }
+    }
     fun calculateMetabolicFactorForProfile(profile: UserProfile): Double { if (weightHistory.size < 3) return profile.metabolicFactor; val sorted = weightHistory.sortedBy { it.dateIso }; val actualLossKg = sorted.first().weight - sorted.last().weight; if (actualLossKg <= 0) return profile.metabolicFactor; var predictedLossG = 0.0; var curr = LocalDate.parse(sorted.first().dateIso); val end = LocalDate.parse(sorted.last().dateIso); while (!curr.isAfter(end)) { if (dayVerifications[curr.toString()] == true) predictedLossG += calculateWeightBudgetGrams(curr.toString(), profile); curr = curr.plusDays(1) }; val predictedLossKg = predictedLossG / 1000.0; return if (predictedLossKg <= 0.1) profile.metabolicFactor else actualLossKg / predictedLossKg }
     fun verifyDay(dateIso: String, isComplete: Boolean) { dayVerifications[dateIso] = isComplete; saveVerifications() }
     private fun saveWeightHistory() { try { prefs.edit().putString("weight_history_json", json.encodeToString(weightHistory.toList())).apply() } catch (e: Exception) {} }
@@ -561,12 +1117,140 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun getBackupJson(): String = json.encodeToString(BackupData(foods.toList(), meals.toList(), categories.toList(), allEntries.toList()))
     fun getCatalogJson(): String = json.encodeToString(BackupData(foods.toList(), meals.toList(), categories.toList(), emptyList()))
     fun getRecipeJson(meal: MealEntity): String = json.encodeToString(RecipeData(meal, meal.ingredients.mapNotNull { ing -> foods.find { it.id == ing.foodItemId } }))
-    fun importBackup(s: String): Boolean = try { val b = json.decodeFromString<BackupData>(s); b.categories.forEach { if (it.isNotBlank() && !categories.contains(it)) categories.add(it) }; b.foods.forEach { imp -> if (foods.none { it.name == imp.name && it.barcode == imp.barcode }) foods.add(imp) }; b.meals.forEach { m -> if (meals.none { it.name == m.name }) meals.add(m) }; b.entries.forEach { e -> if (allEntries.none { it.dateIso == e.dateIso && it.name == e.name && it.mealSlot == e.mealSlot }) allEntries.add(e) }; recalculateIds(); true } catch (e: Exception) { false }
+    fun importBackup(s: String): Boolean = try {
+        val b = json.decodeFromString<BackupData>(s)
+        val uid = firebaseManager.currentUser.value?.uid
+        val idMapping = mutableMapOf<Long, Long>()
+        
+        b.categories.forEach { if (it.isNotBlank() && !categories.contains(it)) categories.add(it) }
+        
+        // 1. Process Foods with ID remapping for cloud safety
+        val processedFoods = b.foods.map { imp ->
+            if (imp.id < 1_000_000L) {
+                val newId = System.currentTimeMillis() + (Math.random() * 1000).toLong()
+                idMapping[imp.id] = newId
+                imp.copy(id = newId, lastModified = System.currentTimeMillis())
+            } else imp
+        }.map { food ->
+            if (food.parentId != null && idMapping.containsKey(food.parentId)) {
+                food.copy(parentId = idMapping[food.parentId])
+            } else food
+        }
+
+        processedFoods.forEach { food ->
+            if (foods.none { it.id == food.id }) {
+                foods.add(food)
+                uid?.let { viewModelScope.launch { firestoreRepository.savePersonalFood(it, food) } }
+            }
+        }
+
+        // 2. Process Meals with updated food references
+        b.meals.forEach { m ->
+            var finalMeal = m.copy(ingredients = m.ingredients.map { it.copy(foodItemId = idMapping[it.foodItemId] ?: it.foodItemId) })
+            if (finalMeal.id < 1_000_000L) {
+                val newId = System.currentTimeMillis() + (Math.random() * 1000).toLong()
+                finalMeal = finalMeal.copy(id = newId, lastModified = System.currentTimeMillis())
+            }
+            if (meals.none { it.id == finalMeal.id }) {
+                meals.add(finalMeal)
+                uid?.let { viewModelScope.launch { firestoreRepository.savePersonalMeal(it, finalMeal) } }
+            }
+        }
+
+        // 3. Process Entries with updated food references
+        b.entries.forEach { e ->
+            val finalEntry = e.copy(
+                foodItemId = if (e.foodItemId != -1L) idMapping[e.foodItemId] ?: e.foodItemId else -1L,
+                mealIngredients = e.mealIngredients?.map { it.copy(foodItemId = idMapping[it.foodItemId] ?: it.foodItemId) }
+            )
+            if (allEntries.none { it.dateIso == finalEntry.dateIso && it.name == finalEntry.name && it.mealSlot == finalEntry.mealSlot }) {
+                allEntries.add(finalEntry)
+                uid?.let { viewModelScope.launch { firestoreRepository.savePersonalEntry(it, finalEntry) } }
+            }
+        }
+        
+        if (uid == null) {
+            recalculateIds()
+        } else {
+            updateNextFoodIds()
+            updateNextMealIds()
+        }
+        saveFoods(); saveMeals(); saveEntries()
+        true 
+    } catch (e: Exception) { 
+        Log.e("Import", "Backup import failed", e)
+        false 
+    }
     fun startRecipeImport(s: String): Boolean = try { pendingRecipeImport = json.decodeFromString<RecipeData>(s); true } catch (e: Exception) { false }
-    fun resolveRecipeImport(supplement: Boolean) { val r = pendingRecipeImport ?: return; r.relatedFoods.forEach { imp -> if (foods.none { it.name == imp.name && it.barcode == imp.barcode }) foods.add(imp) else if (supplement && foods.find { it.name == imp.name }?.category == null) foods[foods.indexOfFirst { it.name == imp.name }] = foods.find { it.name == imp.name }!!.copy(category = imp.category) }; if (meals.none { it.name == r.meal.name }) meals.add(r.meal) else if (supplement) meals[meals.indexOfFirst { it.name == r.meal.name }] = r.meal; recalculateIds(); pendingRecipeImport = null }
+    fun resolveRecipeImport(supplement: Boolean) {
+        val r = pendingRecipeImport ?: return
+        val uid = firebaseManager.currentUser.value?.uid
+        
+        r.relatedFoods.forEach { imp -> 
+            if (foods.none { it.name == imp.name && it.barcode == imp.barcode }) {
+                foods.add(imp)
+                uid?.let { viewModelScope.launch { firestoreRepository.savePersonalFood(it, imp) } }
+            } else if (supplement && foods.find { it.name == imp.name }?.category == null) {
+                val existing = foods.find { it.name == imp.name }!!
+                val updated = existing.copy(category = imp.category)
+                foods[foods.indexOfFirst { it.name == imp.name }] = updated
+                uid?.let { viewModelScope.launch { firestoreRepository.savePersonalFood(it, updated) } }
+            }
+        }
+        
+        if (meals.none { it.name == r.meal.name }) {
+            meals.add(r.meal)
+            uid?.let { viewModelScope.launch { firestoreRepository.savePersonalMeal(it, r.meal) } }
+        } else if (supplement) {
+            meals[meals.indexOfFirst { it.name == r.meal.name }] = r.meal
+            uid?.let { viewModelScope.launch { firestoreRepository.savePersonalMeal(it, r.meal) } }
+        }
+        
+        if (uid == null) recalculateIds()
+        else {
+            updateNextFoodIds()
+            updateNextMealIds()
+        }
+        pendingRecipeImport = null
+    }
     fun deleteInboxMessage(messageId: String) { val uid = firebaseManager.currentUser.value?.uid ?: return; viewModelScope.launch { try { firestoreRepository.deleteInboxMessage(uid, messageId) } catch (e: Exception) { Log.e("Firestore", "Error deleting message", e) } } }
     fun markMessageAsRead(messageId: String) { val uid = firebaseManager.currentUser.value?.uid ?: return; viewModelScope.launch { try { firestoreRepository.markMessageAsRead(uid, messageId) } catch (e: Exception) { Log.e("Firestore", "Error marking as read", e) } } }
-    fun sendRecipeToUser(targetUid: String, meal: MealEntity) { val currentUser = firebaseManager.currentUser.value ?: return; viewModelScope.launch { try { val name = firebaseManager.getUserName(currentUser.uid); val jsonPayload = getRecipeJson(meal); val message = InboxMessage(fromUid = currentUser.uid, fromName = name, type = MessageType.RECIPE, payloadJson = jsonPayload); firestoreRepository.sendInboxMessage(targetUid, message) } catch (e: Exception) { Log.e("Firestore", "Error sending recipe", e) } } }
+    fun sendRecipeToUser(targetUid: String, meal: MealEntity) {
+        val currentUser = firebaseManager.currentUser.value ?: return
+        viewModelScope.launch {
+            try {
+                var mealToSend = meal
+                // Ensure the image is accessible to the recipient (upload if local)
+                if (meal.imageUrl != null && (meal.imageUrl.startsWith("/") || meal.imageUrl.startsWith("file:"))) {
+                    Log.d("Sync", "Uploading image before sending recipe...")
+                    val remoteUrl = firestoreRepository.uploadMealImage(currentUser.uid, meal.imageUrl.replace("file:", ""))
+                    if (remoteUrl != null) {
+                        mealToSend = meal.copy(imageUrl = remoteUrl)
+                        // Persist the remote URL locally too
+                        val idx = meals.indexOfFirst { it.id == meal.id }
+                        if (idx != -1) {
+                            meals[idx] = mealToSend
+                            saveMeals()
+                            firestoreRepository.savePersonalMeal(currentUser.uid, mealToSend)
+                        }
+                    }
+                }
+
+                val name = firebaseManager.getUserName(currentUser.uid)
+                val jsonPayload = getRecipeJson(mealToSend)
+                val message = InboxMessage(
+                    fromUid = currentUser.uid, 
+                    fromName = name, 
+                    type = MessageType.RECIPE, 
+                    payloadJson = jsonPayload
+                )
+                firestoreRepository.sendInboxMessage(targetUid, message)
+                Log.d("Sync", "Recipe sent successfully with image: ${mealToSend.imageUrl != null}")
+            } catch (e: Exception) { 
+                Log.e("Firestore", "Error sending recipe", e) 
+            }
+        }
+    }
     fun sendFoodToUser(targetUid: String, food: FoodItemEntity) { val currentUser = firebaseManager.currentUser.value ?: return; viewModelScope.launch { try { val name = firebaseManager.getUserName(currentUser.uid); val jsonPayload = json.encodeToString(food); val message = InboxMessage(fromUid = currentUser.uid, fromName = name, type = MessageType.FOOD, payloadJson = jsonPayload); firestoreRepository.sendInboxMessage(targetUid, message) } catch (e: Exception) { Log.e("Firestore", "Error sending food", e) } } }
     fun recalculateIds() {
         var fId = 1L; var pId = 1L; var pkgId = 1L; var ingId = 1L

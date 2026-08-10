@@ -2,11 +2,27 @@ package com.nick.nutritiontracker.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -16,6 +32,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.nick.nutritiontracker.data.FoodEntryEntity
@@ -34,6 +52,7 @@ fun PlannerScreen(vm: NutritionViewModel, @Suppress("UNUSED_PARAMETER") userProf
     
     var showPickerForDate by remember { mutableStateOf<LocalDate?>(null) }
     var selectedFoodForPlanning by remember { mutableStateOf<FoodItemEntity?>(null) }
+    var selectedMealForPlanning by remember { mutableStateOf<MealEntity?>(null) }
     var foodPlanningDate by remember { mutableStateOf<LocalDate?>(null) }
     var entryToEdit by remember { mutableStateOf<FoodEntryEntity?>(null) }
 
@@ -55,6 +74,21 @@ fun PlannerScreen(vm: NutritionViewModel, @Suppress("UNUSED_PARAMETER") userProf
             onConfirm = { amount, portion, pkg, mealSlot ->
                 vm.addPlannedEntry(selectedFoodForPlanning!!, amount, portion, mealSlot, foodPlanningDate!!, pkg = pkg)
                 selectedFoodForPlanning = null
+                foodPlanningDate = null
+            }
+        )
+    }
+
+    if (selectedMealForPlanning != null && foodPlanningDate != null) {
+        AddMealAmountDialog(
+            meal = selectedMealForPlanning!!,
+            onDismiss = { 
+                selectedMealForPlanning = null
+                foodPlanningDate = null
+            },
+            onConfirm = { servings, mealSlot ->
+                vm.addPlannedMeal(selectedMealForPlanning!!, mealSlot, foodPlanningDate!!, servings)
+                selectedMealForPlanning = null
                 foodPlanningDate = null
             }
         )
@@ -113,7 +147,8 @@ fun PlannerScreen(vm: NutritionViewModel, @Suppress("UNUSED_PARAMETER") userProf
         PlannedItemPickerBottomSheet(
             onDismiss = { showPickerForDate = null },
             onMealSelected = { meal ->
-                vm.addPlannedMeal(meal, "Mittagessen", showPickerForDate!!, 1.0)
+                selectedMealForPlanning = meal
+                foodPlanningDate = showPickerForDate
                 showPickerForDate = null
             },
             onFoodSelected = { food ->
@@ -285,7 +320,7 @@ fun PlannedItemPickerBottomSheet(
                                     modifier = Modifier.size(48.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
-                                        if (meal.imageUrl != null) {
+                                        if (!meal.imageUrl.isNullOrBlank()) {
                                             AsyncImage(
                                                 model = meal.imageUrl,
                                                 contentDescription = null,
@@ -351,7 +386,7 @@ fun PlannedEntryRow(entry: FoodEntryEntity) {
                 modifier = Modifier.size(40.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    if (entry.imageUrl != null) {
+                    if (!entry.imageUrl.isNullOrBlank()) {
                         AsyncImage(
                             model = entry.imageUrl,
                             contentDescription = null,
@@ -403,3 +438,51 @@ fun PlannedEntryRow(entry: FoodEntryEntity) {
         }
     }
 }
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun AddMealAmountDialog(
+    meal: MealEntity,
+    onDismiss: () -> Unit,
+    onConfirm: (Double, String) -> Unit
+) {
+    var amount by remember { mutableStateOf("1") }
+    var mealSlot by remember { mutableStateOf("Mittag") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(meal.name) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                AutoSelectTextField(
+                    value = amount,
+                    onValueChange = { amount = it },
+                    label = { Text("Portionen") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { onConfirm(amount.num(), mealSlot) })
+                )
+                Text("Mahlzeit", style = MaterialTheme.typography.labelMedium)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Frühstück", "Mittag", "Abend", "Snack").forEach { slot ->
+                        FilterChip(
+                            selected = mealSlot == slot,
+                            onClick = { mealSlot = slot },
+                            label = { Text(slot) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                onConfirm(amount.num(), mealSlot)
+            }) { Text("Hinzufügen") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Abbrechen") }
+        }
+    )
+}
+
+private fun String.num(): Double = replace(',', '.').toDoubleOrNull() ?: 0.0
