@@ -25,6 +25,7 @@ fun AutoSelectTextField(
     singleLine: Boolean = true,
     colors: TextFieldColors = OutlinedTextFieldDefaults.colors(),
     trailingIcon: @Composable (() -> Unit)? = null,
+    placeholder: @Composable (() -> Unit)? = null,
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     keyboardActions: KeyboardActions = KeyboardActions.Default
 ) {
@@ -60,6 +61,7 @@ fun AutoSelectTextField(
         singleLine = singleLine,
         colors = colors,
         trailingIcon = trailingIcon,
+        placeholder = placeholder,
         keyboardOptions = keyboardOptions,
         keyboardActions = keyboardActions
     )

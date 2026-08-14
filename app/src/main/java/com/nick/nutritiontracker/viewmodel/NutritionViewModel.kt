@@ -48,7 +48,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun selectDate(date: LocalDate) {
         selectedDate = date
-        syncStepsForSelectedDate()
+        syncActivityForSelectedDate()
     }
 
     private var nextFoodId = 1L
@@ -182,6 +182,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     }
     
     val dailySteps = mutableStateMapOf<String, Int>()
+    val dailyTotalCalories = mutableStateMapOf<String, Double>()
+    val dailyExerciseSessions = mutableStateMapOf<String, List<ExerciseSessionInfo>>()
 
     val todayEntries by derivedStateOf {
         allEntries.filter { it.dateIso == selectedDate.toString() }
@@ -196,14 +198,40 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     val todayTotalSaturatedFat by derivedStateOf { todayEntries.sumOf { it.saturatedFat } }
     
     val todaySteps by derivedStateOf { dailySteps[selectedDate.toString()] ?: 0 }
+    
+    val todayStepKcal by derivedStateOf {
+        val profile = firebaseManager.userProfile.value ?: return@derivedStateOf 0.0
+        calculateStepKcal(selectedDate.toString(), profile)
+    }
+
+    val todayExerciseKcal by derivedStateOf { 
+        dailyExerciseSessions[selectedDate.toString()]?.sumOf { it.calories ?: 0.0 } ?: 0.0 
+    }
+    
+    val todayActivityKcal by derivedStateOf {
+        todayStepKcal + todayExerciseKcal
+    }
+
+    private fun calculateStepKcal(dateIso: String, profile: UserProfile): Double {
+        val steps = dailySteps[dateIso] ?: 0
+        val heightM = profile.heightCm / 100.0
+        return 0.55 * profile.weightKg * steps * 0.415 * heightM / 1000.0
+    }
+
+    private fun getActivityKcal(dateIso: String, profile: UserProfile): Double {
+        val stepKcal = calculateStepKcal(dateIso, profile)
+        val sessions = dailyExerciseSessions[dateIso] ?: emptyList()
+        val workoutKcal = sessions.sumOf { it.calories ?: 0.0 }
+        
+        return stepKcal + workoutKcal
+    }
 
     fun calculateWeightBudgetGrams(dateIso: String, userProfile: UserProfile): Double {
         val dateEntries = allEntries.filter { it.dateIso == dateIso }
         if (dateEntries.isEmpty()) return 0.0
         val intake = dateEntries.sumOf { it.kcal }
-        val steps = dailySteps[dateIso] ?: 0
-        val activity = DailyActivity(dateIso, steps)
-        val activityKcal = activity.calculateCalories(userProfile.weightKg, userProfile.heightCm / 100.0)
+        val activityKcal = getActivityKcal(dateIso, userProfile)
+        
         val actualDeficit = (userProfile.bmr + activityKcal) - intake
         val cappedDeficit = minOf(userProfile.goalIntensity.toDouble(), actualDeficit)
         return (cappedDeficit / 7000.0) * 1000.0
@@ -213,9 +241,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val entries = allEntries.filter { it.dateIso == dateIso }
         if (entries.isEmpty()) return 0xFFFF0000.toInt()
         val intake = entries.sumOf { it.kcal }
-        val steps = dailySteps[dateIso] ?: 0
-        val activity = DailyActivity(dateIso, steps)
-        val activityKcal = activity.calculateCalories(profile.weightKg, profile.heightCm / 100.0)
+        val activityKcal = getActivityKcal(dateIso, profile)
+
         val bmrLimit = profile.bmr + activityKcal
         val deficitLimit = (profile.bmr - profile.goalIntensity) + activityKcal
         return when {
@@ -226,18 +253,19 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     init {
-        loadFoods(); loadMeals(); loadEntries(); loadSteps(); loadCategories(); loadWeightHistory(); loadVerifications()
+        loadFoods(); loadMeals(); loadEntries(); loadActivity(); loadCategories(); loadWeightHistory(); loadVerifications()
         if (foods.isEmpty()) createDefaultFoods()
         if (categories.isEmpty()) createDefaultCategories()
-        syncStepsForSelectedDate()
+        syncActivityForSelectedDate()
         setupFirebaseSync()
     }
 
-    fun syncStepsForSelectedDate() {
+    fun syncActivityForSelectedDate() {
         viewModelScope.launch {
             if (healthConnectManager.isAvailable() && healthConnectManager.hasAllPermissions()) {
-                val steps = healthConnectManager.getStepsForDate(selectedDate)
-                if (steps != null) updateSteps(steps)
+                val data = healthConnectManager.syncActivityForSelectedDate(selectedDate)
+                Log.d("Sync", "Activity Sync for $selectedDate: Steps=${data.steps}, Total=${data.totalKcal}, Sessions=${data.sessions.size}")
+                updateActivity(data.steps, data.totalKcal, data.sessions)
             }
         }
     }
@@ -1059,7 +1087,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
     fun moveEntriesToDate(entryIds: Set<Long>, targetDate: LocalDate) { copyEntriesToDate(entryIds, targetDate); entryIds.forEach { deleteEntry(it) } }
-    fun updateSteps(steps: Int) { dailySteps[selectedDate.toString()] = steps; saveSteps() }
+    
+    fun updateActivity(steps: Int?, totalKcal: Double? = null, sessions: List<ExerciseSessionInfo>? = null) {
+        val dateKey = selectedDate.toString()
+        if (steps != null) dailySteps[dateKey] = steps
+        if (totalKcal != null) dailyTotalCalories[dateKey] = totalKcal
+        if (sessions != null) dailyExerciseSessions[dateKey] = sessions
+        saveActivity()
+    }
     fun addWeightEntry(weight: Double, dateIso: String, profile: UserProfile) {
         val entry = WeightEntry(dateIso, weight)
         val existingIdx = weightHistory.indexOfFirst { it.dateIso == dateIso }
@@ -1112,8 +1147,35 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun loadEntries() { val data = prefs.getString("entries_json", null); if (data != null) try { val loaded = json.decodeFromString<List<FoodEntryEntity>>(data); allEntries.clear(); allEntries.addAll(loaded); nextEntryId = (allEntries.maxOfOrNull { it.id } ?: 0L) + 1 } catch (e: Exception) {} }
-    private fun saveSteps() { try { prefs.edit().putString("steps_json", json.encodeToString(dailySteps.toMap())).apply() } catch (e: Exception) {} }
-    private fun loadSteps() { val data = prefs.getString("steps_json", null); if (data != null) try { val loaded = json.decodeFromString<Map<String, Int>>(data); dailySteps.putAll(loaded) } catch (e: Exception) {} }
+    private fun saveActivity() {
+        try {
+            prefs.edit().putString("steps_json", json.encodeToString(dailySteps.toMap())).apply()
+            prefs.edit().putString("total_calories_json", json.encodeToString(dailyTotalCalories.toMap())).apply()
+            prefs.edit().putString("exercise_sessions_json", json.encodeToString(dailyExerciseSessions.toMap())).apply()
+        } catch (e: Exception) {
+            Log.e("SaveActivity", "Error saving activity", e)
+        }
+    }
+
+    private fun loadActivity() {
+        val stepsData = prefs.getString("steps_json", null)
+        if (stepsData != null) try {
+            val loaded = json.decodeFromString<Map<String, Int>>(stepsData)
+            dailySteps.putAll(loaded)
+        } catch (e: Exception) {}
+        
+        val totalCaloriesData = prefs.getString("total_calories_json", null)
+        if (totalCaloriesData != null) try {
+            val loaded = json.decodeFromString<Map<String, Double>>(totalCaloriesData)
+            dailyTotalCalories.putAll(loaded)
+        } catch (e: Exception) {}
+
+        val sessionsData = prefs.getString("exercise_sessions_json", null)
+        if (sessionsData != null) try {
+            val loaded = json.decodeFromString<Map<String, List<ExerciseSessionInfo>>>(sessionsData)
+            dailyExerciseSessions.putAll(loaded)
+        } catch (e: Exception) {}
+    }
     fun getBackupJson(): String = json.encodeToString(BackupData(foods.toList(), meals.toList(), categories.toList(), allEntries.toList()))
     fun getCatalogJson(): String = json.encodeToString(BackupData(foods.toList(), meals.toList(), categories.toList(), emptyList()))
     fun getRecipeJson(meal: MealEntity): String = json.encodeToString(RecipeData(meal, meal.ingredients.mapNotNull { ing -> foods.find { it.id == ing.foodItemId } }))

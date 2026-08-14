@@ -12,7 +12,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.nick.nutritiontracker.data.UserProfile
-import com.nick.nutritiontracker.data.DailyActivity
+import com.nick.nutritiontracker.data.ExerciseSessionInfo
 
 @Composable
 fun MacroProgressSection(
@@ -23,13 +23,12 @@ fun MacroProgressSection(
     currentSugar: Double,
     currentUnsaturatedFat: Double,
     currentSaturatedFat: Double,
-    steps: Int,
-    weightBudgetGrams: Double
+    activityKcal: Double,
+    weightBudgetGrams: Double,
+    steps: Int = 0,
+    stepKcal: Double = 0.0,
+    exerciseSessions: List<ExerciseSessionInfo> = emptyList()
 ) {
-    // Activity calories calculation based on MET formula
-    val activity = DailyActivity("", steps)
-    val activityKcal = activity.calculateCalories(userProfile.weightKg, userProfile.heightCm / 100.0)
-    
     val totalBudget = userProfile.calorieBudget + activityKcal
 
     Card(
@@ -62,15 +61,61 @@ fun MacroProgressSection(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("Basis: ${userProfile.calorieBudget} kcal", style = MaterialTheme.typography.bodySmall)
-                    Text("Aktivität: +${activityKcal.round0()} kcal", style = MaterialTheme.typography.bodySmall, color = Color(0xFF2E7D32))
+                    Text("Bonus: +${activityKcal.round0()} kcal", style = MaterialTheme.typography.bodySmall, color = Color(0xFF2E7D32))
                 }
                 BudgetSummary(
-                    label = "Gesamt Kalorien",
+                    label = "Gesamt Budget",
                     current = currentKcal,
                     target = totalBudget,
                     unit = "kcal",
                     showRemaining = true
                 )
+            }
+
+            // Activity Breakdown List
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.padding(bottom = 8.dp)) {
+                // 1. Steps (Custom Formula)
+                if (steps > 0) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Schritte ($steps) 🚶‍♂️",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        Text(
+                            text = "+${stepKcal.round0()} kcal",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF2E7D32)
+                        )
+                    }
+                }
+
+                // 2. Exercise Sessions
+                exerciseSessions.forEach { session ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${session.type} (${session.durationMinutes} min) 🔥",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        val displayKcal = session.calories ?: 0.0
+                        Text(
+                            text = if (displayKcal > 0) "+${displayKcal.round0()} kcal" else "In Gesamt inkl.",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = if (displayKcal > 0) Color(0xFF2E7D32) else MaterialTheme.colorScheme.outline
+                        )
+                    }
+                }
             }
 
             // Calorie Progress Bar (Thicker, App-Purple/Primary)

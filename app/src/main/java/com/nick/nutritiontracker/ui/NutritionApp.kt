@@ -170,7 +170,7 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
         PermissionController.createRequestPermissionResultContract()
     ) { granted ->
         if (granted.containsAll(vm.healthConnectManager.permissions)) {
-            vm.syncStepsForSelectedDate()
+            vm.syncActivityForSelectedDate()
             scope.launch { snackbarHostState.showSnackbar("Berechtigung erteilt!") }
         }
     }
@@ -276,14 +276,14 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                                         when (status) {
                                             HealthConnectClient.SDK_AVAILABLE -> {
                                                 if (vm.healthConnectManager.hasAllPermissions()) {
-                                                    vm.syncStepsForSelectedDate()
-                                                    snackbarHostState.showSnackbar("Schritte aktualisiert")
+                                                    vm.syncActivityForSelectedDate()
+                                                    snackbarHostState.showSnackbar("Aktivität aktualisiert")
                                                 } else {
                                                     permissionLauncher.launch(vm.healthConnectManager.permissions)
                                                 }
                                             }
                                             else -> {
-                                                vm.syncStepsForSelectedDate()
+                                                vm.syncActivityForSelectedDate()
                                                 snackbarHostState.showSnackbar("Health Connect nicht verfügbar")
                                             }
                                         }
@@ -753,11 +753,12 @@ private fun TodayScreen(
     }
     
     if (showStepDialog) {
-        StepInputDialog(
+        ActivityInputDialog(
             initialSteps = vm.todaySteps,
+            initialTotalKcal = vm.dailyTotalCalories[vm.selectedDate.toString()] ?: 0.0,
             onDismiss = { showStepDialog = false },
-            onConfirm = { 
-                vm.updateSteps(it)
+            onConfirm = { steps, totalKcal ->
+                vm.updateActivity(steps, totalKcal)
                 showStepDialog = false
             }
         )
@@ -781,8 +782,11 @@ private fun TodayScreen(
                     currentSugar = vm.todayTotalSugar,
                     currentUnsaturatedFat = vm.todayTotalUnsaturatedFat,
                     currentSaturatedFat = vm.todayTotalSaturatedFat,
+                    activityKcal = vm.todayActivityKcal,
+                    weightBudgetGrams = weightBudget,
                     steps = vm.todaySteps,
-                    weightBudgetGrams = weightBudget
+                    stepKcal = vm.todayStepKcal,
+                    exerciseSessions = vm.dailyExerciseSessions[vm.selectedDate.toString()] ?: emptyList()
                 )
             }
         }
@@ -918,30 +922,48 @@ private fun TodayScreen(
 }
 
 @Composable
-private fun StepInputDialog(
+private fun ActivityInputDialog(
     initialSteps: Int,
+    initialTotalKcal: Double,
     onDismiss: () -> Unit,
-    onConfirm: (Int) -> Unit
+    onConfirm: (Int, Double) -> Unit
 ) {
     var steps by remember { mutableStateOf(initialSteps.toString()) }
+    var totalKcal by remember { mutableStateOf(if (initialTotalKcal > 0) initialTotalKcal.roundString() else "") }
+    
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Schritte erfassen") },
+        title = { Text("Aktivität erfassen") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Wie viele Schritte hast du heute gemacht?")
+                Text("Trage deine heutige Aktivität ein:")
+                AutoSelectTextField(
+                    value = totalKcal,
+                    onValueChange = { totalKcal = it },
+                    label = { Text("Gesamtkalorien (Watch)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("z.B. 2500") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next)
+                )
                 AutoSelectTextField(
                     value = steps,
                     onValueChange = { steps = it },
-                    label = { Text("Schritte") },
+                    label = { Text("Schritte (nur als Backup)") },
                     modifier = Modifier.fillMaxWidth(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { onConfirm(steps.toIntOrNull() ?: 0) })
+                    keyboardActions = KeyboardActions(onDone = { onConfirm(steps.toIntOrNull() ?: 0, totalKcal.num()) })
+                )
+                Text(
+                    "Hinweis: Wenn Gesamtkalorien eingetragen sind, wird dein Tagesbudget = BMR + (Watch Total - BMR) berechnet.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline
                 )
             }
         },
         confirmButton = {
-            Button(onClick = { onConfirm(steps.toIntOrNull() ?: 0) }) { Text("Speichern") }
+            Button(onClick = { 
+                onConfirm(steps.toIntOrNull() ?: 0, totalKcal.num()) 
+            }) { Text("Speichern") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Abbrechen") }
