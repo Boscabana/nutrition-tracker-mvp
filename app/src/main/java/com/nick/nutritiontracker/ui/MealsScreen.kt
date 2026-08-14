@@ -672,8 +672,9 @@ fun MealEditDialog(
                                             }
                                             Column {
                                                 Text(food.name)
-                                                if (!food.isGeneric && !food.brand.isNullOrBlank()) {
-                                                    Text(food.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                                val brand = food.brand
+                                                if (!food.isGeneric && !brand.isNullOrBlank()) {
+                                                    Text(brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                                                 }
                                             }
                                         }
@@ -732,8 +733,9 @@ fun AddIngredientDialog(
         title = { 
             Column {
                 Text(food.name)
-                if (!food.isGeneric && !food.brand.isNullOrBlank()) {
-                    Text(food.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                val brand = food.brand
+                if (!food.isGeneric && !brand.isNullOrBlank()) {
+                    Text(brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                 }
             }
         },

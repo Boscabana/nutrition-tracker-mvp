@@ -4,6 +4,7 @@ import android.util.Log
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
 import com.google.firebase.storage.FirebaseStorage
+import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -39,9 +40,18 @@ class FirestoreRepository {
                     close(error)
                     return@addSnapshotListener
                 }
-                val entries = snapshot?.documents?.mapNotNull { it.toObject(FoodEntryEntity::class.java) } ?: emptyList()
-                Log.d("Firestore", "Loaded ${entries.size} planned entries")
-                trySend(entries)
+                launch(Dispatchers.Default) {
+                    val entries = snapshot?.documents?.mapNotNull { doc ->
+                        val entry = doc.toObject(FoodEntryEntity::class.java)
+                        if (entry != null) {
+                            entry.isMeal = doc.getBoolean("isMeal") ?: entry.isMeal
+                            entry.isPlanned = doc.getBoolean("isPlanned") ?: entry.isPlanned
+                        }
+                        entry
+                    } ?: emptyList()
+                    Log.d("Firestore", "Loaded ${entries.size} planned entries")
+                    trySend(entries)
+                }
             }
         awaitClose { subscription.remove() }
     }
@@ -117,18 +127,21 @@ class FirestoreRepository {
             .collection("personal_foods")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) { close(error); return@addSnapshotListener }
-                val foods = snapshot?.documents?.mapNotNull { doc ->
-                    val food = doc.toObject(FoodItemEntity::class.java)
-                    if (food != null) {
-                        // Manually check common boolean field naming variations in Cloud
-                        val isGenericCloud = doc.getBoolean("isGeneric") ?: doc.getBoolean("generic") ?: food.isGeneric
-                        val isPantryCloud = doc.getBoolean("isPantryItem") ?: doc.getBoolean("pantryItem") ?: food.isPantryItem
-                        food.isGeneric = isGenericCloud
-                        food.isPantryItem = isPantryCloud
-                    }
-                    food
-                } ?: emptyList()
-                trySend(foods)
+                
+                // Offload mapping to background thread to avoid OOM/Jank on Main
+                launch(Dispatchers.Default) {
+                    val foods = snapshot?.documents?.mapNotNull { doc ->
+                        val food = doc.toObject(FoodItemEntity::class.java)
+                        if (food != null) {
+                            val isGenericCloud = doc.getBoolean("isGeneric") ?: doc.getBoolean("generic") ?: food.isGeneric
+                            val isPantryCloud = doc.getBoolean("isPantryItem") ?: doc.getBoolean("pantryItem") ?: food.isPantryItem
+                            food.isGeneric = isGenericCloud
+                            food.isPantryItem = isPantryCloud
+                        }
+                        food
+                    } ?: emptyList()
+                    trySend(foods)
+                }
             }
         awaitClose { subscription.remove() }
     }
@@ -148,8 +161,10 @@ class FirestoreRepository {
             .collection("personal_meals")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) { close(error); return@addSnapshotListener }
-                val meals = snapshot?.documents?.mapNotNull { it.toObject(MealEntity::class.java) } ?: emptyList()
-                trySend(meals)
+                launch(Dispatchers.Default) {
+                    val meals = snapshot?.documents?.mapNotNull { it.toObject(MealEntity::class.java) } ?: emptyList()
+                    trySend(meals)
+                }
             }
         awaitClose { subscription.remove() }
     }
@@ -179,8 +194,17 @@ class FirestoreRepository {
             .collection("personal_entries")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) { close(error); return@addSnapshotListener }
-                val entries = snapshot?.documents?.mapNotNull { it.toObject(FoodEntryEntity::class.java) } ?: emptyList()
-                trySend(entries)
+                launch(Dispatchers.Default) {
+                    val entries = snapshot?.documents?.mapNotNull { doc ->
+                        val entry = doc.toObject(FoodEntryEntity::class.java)
+                        if (entry != null) {
+                            entry.isMeal = doc.getBoolean("isMeal") ?: entry.isMeal
+                            entry.isPlanned = doc.getBoolean("isPlanned") ?: entry.isPlanned
+                        }
+                        entry
+                    } ?: emptyList()
+                    trySend(entries)
+                }
             }
         awaitClose { subscription.remove() }
     }
@@ -211,8 +235,10 @@ class FirestoreRepository {
             .collection("weight_history")
             .addSnapshotListener { snapshot, error ->
                 if (error != null) { close(error); return@addSnapshotListener }
-                val entries = snapshot?.documents?.mapNotNull { it.toObject(WeightEntry::class.java) } ?: emptyList()
-                trySend(entries)
+                launch(Dispatchers.Default) {
+                    val entries = snapshot?.documents?.mapNotNull { it.toObject(WeightEntry::class.java) } ?: emptyList()
+                    trySend(entries)
+                }
             }
         awaitClose { subscription.remove() }
     }
@@ -247,10 +273,12 @@ class FirestoreRepository {
                     close(error)
                     return@addSnapshotListener
                 }
-                val messages = snapshot?.documents?.mapNotNull { doc ->
-                    doc.toObject(InboxMessage::class.java)?.copy(id = doc.id)
-                } ?: emptyList<InboxMessage>()
-                trySend(messages)
+                launch(Dispatchers.Default) {
+                    val messages = snapshot?.documents?.mapNotNull { doc ->
+                        doc.toObject(InboxMessage::class.java)?.copy(id = doc.id)
+                    } ?: emptyList<InboxMessage>()
+                    trySend(messages)
+                }
             }
         awaitClose { subscription.remove() }
     }

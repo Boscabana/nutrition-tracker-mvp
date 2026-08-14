@@ -1,32 +1,34 @@
 package com.nick.nutritiontracker.data
 
+import androidx.annotation.Keep
 import com.google.firebase.firestore.PropertyName
 import kotlinx.serialization.Serializable
 
+@Keep
 @Serializable
 data class FoodItemEntity(
-    val id: Long = 0,
-    val name: String = "",
-    val kcalPer100g: Double = 0.0,
-    val proteinPer100g: Double = 0.0,
-    val carbsPer100g: Double = 0.0,
-    val sugarPer100g: Double = 0.0,
-    val fatPer100g: Double = 0.0,
-    val saturatedFatPer100g: Double = 0.0,
-    val alcoholPercent: Double = 0.0,
-    val baseUnit: String = "g",
-    val portions: List<FoodPortionEntity> = emptyList(),
-    val packages: List<FoodPackageEntity> = emptyList(),
-    val barcode: String? = null,
-    val brand: String? = null,
-    val category: String? = null,
+    var id: Long = 0,
+    var name: String = "",
+    var kcalPer100g: Double = 0.0,
+    var proteinPer100g: Double = 0.0,
+    var carbsPer100g: Double = 0.0,
+    var sugarPer100g: Double = 0.0,
+    var fatPer100g: Double = 0.0,
+    var saturatedFatPer100g: Double = 0.0,
+    var alcoholPercent: Double = 0.0,
+    var baseUnit: String = "g",
+    var portions: List<FoodPortionEntity> = emptyList(),
+    var packages: List<FoodPackageEntity> = emptyList(),
+    var barcode: String? = null,
+    var brand: String? = null,
+    var category: String? = null,
     @get:PropertyName("isGeneric") @set:PropertyName("isGeneric")
     var isGeneric: Boolean = false,
-    val parentId: Long? = null,
-    val store: String? = null,
+    var parentId: Long? = null,
+    var store: String? = null,
     @get:PropertyName("isPantryItem") @set:PropertyName("isPantryItem")
     var isPantryItem: Boolean = false,
-    val lastModified: Long = System.currentTimeMillis()
+    var lastModified: Long = System.currentTimeMillis()
 ) {
     val complexCarbsPer100g: Double
         get() = (carbsPer100g - sugarPer100g).coerceAtLeast(0.0)

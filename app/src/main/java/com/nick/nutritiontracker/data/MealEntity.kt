@@ -1,26 +1,28 @@
 package com.nick.nutritiontracker.data
 
+import androidx.annotation.Keep
 import com.google.firebase.firestore.Exclude
 import kotlinx.serialization.Serializable
 
+@Keep
 @Serializable
 data class MealIngredientEntity(
-    val id: Long = 0,
-    val foodItemId: Long = 0,
-    val name: String = "",
-    val amount: Double = 0.0,
-    val unitLabel: String = "g",
-    val grams: Double = 0.0,
-    val kcalPer100g: Double = 0.0,
-    val proteinPer100g: Double = 0.0,
-    val carbsPer100g: Double = 0.0,
-    val sugarPer100g: Double = 0.0,
-    val fatPer100g: Double = 0.0,
-    val saturatedFatPer100g: Double = 0.0,
-    val alcoholPercent: Double = 0.0,
-    val baseUnit: String = "g",
-    val store: String? = null,
-    val brand: String? = null
+    var id: Long = 0,
+    var foodItemId: Long = 0,
+    var name: String = "",
+    var amount: Double = 0.0,
+    var unitLabel: String = "g",
+    var grams: Double = 0.0,
+    var kcalPer100g: Double = 0.0,
+    var proteinPer100g: Double = 0.0,
+    var carbsPer100g: Double = 0.0,
+    var sugarPer100g: Double = 0.0,
+    var fatPer100g: Double = 0.0,
+    var saturatedFatPer100g: Double = 0.0,
+    var alcoholPercent: Double = 0.0,
+    var baseUnit: String = "g",
+    var store: String? = null,
+    var brand: String? = null
 ) {
     @get:Exclude
     val kcal: Double get() = kcalPer100g * grams / 100.0
@@ -36,15 +38,16 @@ data class MealIngredientEntity(
     val saturatedFat: Double get() = saturatedFatPer100g * grams / 100.0
 }
 
+@Keep
 @Serializable
 data class MealEntity(
-    val id: Long = 0,
-    val name: String = "",
-    val ingredients: List<MealIngredientEntity> = emptyList(),
-    val servings: Double = 1.0,
-    val tags: List<String> = emptyList(),
-    val imageUrl: String? = null,
-    val lastModified: Long = System.currentTimeMillis()
+    var id: Long = 0,
+    var name: String = "",
+    var ingredients: List<MealIngredientEntity> = emptyList(),
+    var servings: Double = 1.0,
+    var tags: List<String> = emptyList(),
+    var imageUrl: String? = null,
+    var lastModified: Long = System.currentTimeMillis()
 ) {
     @get:Exclude
     val totalKcal: Double get() = ingredients.sumOf { it.kcal }

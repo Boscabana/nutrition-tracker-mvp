@@ -1055,8 +1055,8 @@ fun AddAmountDialog(
         title = { 
             Column {
                 Text(food.name)
-                if (!food.isGeneric && !food.brand.isNullOrBlank()) {
-                    Text(food.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                food.brand?.takeIf { it.isNotBlank() && !food.isGeneric }?.let {
+                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
                 }
             }
         },
@@ -2162,11 +2162,11 @@ private fun CompactEntryRow(
                     }
                     if (!entry.brand.isNullOrBlank() || !entry.store.isNullOrBlank()) {
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            if (!entry.brand.isNullOrBlank()) {
-                                Text(entry.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1)
+                            entry.brand?.takeIf { it.isNotBlank() }?.let {
+                                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 1)
                             }
-                            if (!entry.store.isNullOrBlank()) {
-                                Text("@ ${entry.store}", style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32), maxLines = 1)
+                            entry.store?.takeIf { it.isNotBlank() }?.let {
+                                Text("@ $it", style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32), maxLines = 1)
                             }
                         }
                     }
@@ -2186,10 +2186,11 @@ private fun CompactEntryRow(
                 MacroNumber(entry.saturatedFat, SaturatedGrey)
             }
             
-            if (isExpanded && entry.isMeal && entry.mealIngredients != null) {
+            val ingredients = entry.mealIngredients
+            if (isExpanded && entry.isMeal && ingredients != null) {
                 HorizontalDivider(modifier = Modifier.padding(horizontal = 10.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
                 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    entry.mealIngredients.forEach { ing ->
+                    ingredients.forEach { ing ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                             Text("${ing.amount.roundString()} ${ing.unitLabel} ${ing.name}", style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -2249,6 +2250,9 @@ fun FoodsScreen(
     var foodToEdit by remember { mutableStateOf<FoodItemEntity?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
     var showPantry by remember { mutableStateOf(false) }
+
+    val userProfileState by vm.firebaseManager.userProfile.collectAsState()
+    val isPremium = userProfileState?.isPremium ?: false
 
     if (showPantry) {
         PantryScreen(vm, onDismiss = { showPantry = false })
@@ -2369,8 +2373,8 @@ fun FoodsScreen(
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(Icons.Default.Inventory2, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Basis")
+                    Spacer(Modifier.width(4.dp))
+                    Icon(Icons.Default.Add, null, modifier = Modifier.size(14.dp))
                 }
 
                 Button(
@@ -2381,8 +2385,8 @@ fun FoodsScreen(
                     modifier = Modifier.weight(1f)
                 ) {
                     Icon(Icons.AutoMirrored.Filled.Label, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Marke")
+                    Spacer(Modifier.width(4.dp))
+                    Icon(Icons.Default.Add, null, modifier = Modifier.size(14.dp))
                 }
 
                 Button(
@@ -2391,8 +2395,6 @@ fun FoodsScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer, contentColor = MaterialTheme.colorScheme.onTertiaryContainer)
                 ) {
                     Icon(Icons.Default.Kitchen, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Vorrat")
                 }
             }
 
@@ -2578,8 +2580,10 @@ fun FoodItemRow(
                         style = if (food.isGeneric) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge
                     )
                     
-                    if (!isExpanded && !food.category.isNullOrBlank()) {
-                        SuggestionChip(onClick = {}, label = { Text(food.category, style = MaterialTheme.typography.labelSmall) })
+                    if (!isExpanded) {
+                        food.category?.takeIf { it.isNotBlank() }?.let {
+                            SuggestionChip(onClick = {}, label = { Text(it, style = MaterialTheme.typography.labelSmall) })
+                        }
                     }
                     Icon(
                         if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -2592,11 +2596,11 @@ fun FoodItemRow(
                     Column(Modifier.padding(top = 8.dp)) {
                         if (!food.brand.isNullOrBlank() || !food.store.isNullOrBlank()) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                if (!food.brand.isNullOrBlank()) {
-                                    Text(food.brand, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                food.brand?.takeIf { it.isNotBlank() }?.let {
+                                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                                 }
-                                if (!food.store.isNullOrBlank()) {
-                                    Text("@ ${food.store}", style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
+                                food.store?.takeIf { it.isNotBlank() }?.let {
+                                    Text("@ $it", style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
                                 }
                             }
                         }
@@ -2658,6 +2662,9 @@ fun FoodEditDialog(
     var categoryExpanded by remember { mutableStateOf(false) }
     var parentExpanded by remember { mutableStateOf(false) }
 
+    val userProfileState by vm.firebaseManager.userProfile.collectAsState()
+    val isPremium = userProfileState?.isPremium ?: false
+
     val genericFoods by remember(food?.id) { 
         derivedStateOf { vm.foods.filter { it.isGeneric && it.id != food?.id } } 
     }
@@ -2698,7 +2705,66 @@ fun FoodEditDialog(
                     color = if (isGeneric) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
                 )
 
-                AutoSelectTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AutoSelectTextField(name, { name = it }, label = { Text("Name") }, modifier = Modifier.weight(1f))
+                    if (food?.id == 0L) {
+                        val scope = rememberCoroutineScope()
+                        
+                        IconButton(
+                            onClick = {
+                                if (isPremium) {
+                                    scope.launch {
+                                        val result = vm.estimateGenericMacros(name, isBrandSearch = !isGeneric)
+                                        if (result != null) {
+                                            name = result.name
+                                            protein = result.proteinPer100.roundString()
+                                            carbs = result.carbsPer100.roundString()
+                                            sugar = result.sugarPer100.roundString()
+                                            fat = result.fatPer100.roundString()
+                                            saturatedFat = result.saturatedFatPer100.roundString()
+                                            baseUnit = result.baseUnit
+                                            if (!result.category.isNullOrBlank() && vm.categories.contains(result.category)) {
+                                                category = result.category
+                                            }
+                                            if (!isGeneric && !result.brand.isNullOrBlank()) {
+                                                brand = result.brand
+                                            }
+                                            // Auto-fill portions for brands
+                                            if (!isGeneric && result.portions.isNotEmpty()) {
+                                                portions.clear()
+                                                result.portions.forEach { p ->
+                                                    portions.add(PortionInputState(p.name, p.grams.roundString()))
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = name.isNotBlank() && !vm.isAnalyzingGenericFood,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(
+                                    if (isPremium) (if (isGeneric) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer) 
+                                    else Color.LightGray.copy(alpha = 0.3f), 
+                                    RoundedCornerShape(8.dp)
+                                )
+                        ) {
+                            if (vm.isAnalyzingGenericFood) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(
+                                    Icons.Default.AutoAwesome, 
+                                    contentDescription = "KI Hilfe",
+                                    tint = if (isPremium) (if (isGeneric) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary) else Color.Gray
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (vm.aiGenericFoodError != null) {
+                    Text(vm.aiGenericFoodError!!, color = Color.Red, style = MaterialTheme.typography.labelSmall)
+                }
 
                 if (!isGeneric) {
                     ExposedDropdownMenuBox(
@@ -2969,7 +3035,7 @@ fun PantryScreen(vm: NutritionViewModel, onDismiss: () -> Unit) {
                                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
                                         Text(food.name, fontWeight = FontWeight.Bold)
-                                        if (!food.brand.isNullOrBlank()) Text(food.brand, style = MaterialTheme.typography.labelSmall)
+                                        food.brand?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
                                     }
                                     IconButton(onClick = { 
                                         vm.updateFood(food.copy(isPantryItem = false))
