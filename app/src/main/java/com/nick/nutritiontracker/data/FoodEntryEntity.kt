@@ -1,39 +1,41 @@
 package com.nick.nutritiontracker.data
 
 import com.google.firebase.firestore.Exclude
+import androidx.annotation.Keep
 import com.google.firebase.firestore.PropertyName
 import kotlinx.serialization.Serializable
 
+@Keep
 @Serializable
 data class FoodEntryEntity(
-    val id: Long = 0,
-    val dateIso: String = "",
-    val mealSlot: String = "Snack",
-    val amount: Double = 0.0,
-    val unitLabel: String = "g",
-    val grams: Double = 0.0,
+    var id: Long = 0,
+    var dateIso: String = "",
+    var mealSlot: String = "Snack",
+    var amount: Double = 0.0,
+    var unitLabel: String = "g",
+    var grams: Double = 0.0,
 
-    val foodItemId: Long = -1,
-    val name: String = "",
-    val brand: String? = null,
-    val kcalPer100g: Double = 0.0,
-    val proteinPer100g: Double = 0.0,
-    val carbsPer100g: Double = 0.0,
-    val sugarPer100g: Double = 0.0,
-    val fatPer100g: Double = 0.0,
-    val saturatedFatPer100g: Double = 0.0,
-    val alcoholPercent: Double = 0.0,
-    val baseUnit: String = "g",
-    val store: String? = null,
+    var foodItemId: Long = -1,
+    var name: String = "",
+    var brand: String? = null,
+    var kcalPer100g: Double = 0.0,
+    var proteinPer100g: Double = 0.0,
+    var carbsPer100g: Double = 0.0,
+    var sugarPer100g: Double = 0.0,
+    var fatPer100g: Double = 0.0,
+    var saturatedFatPer100g: Double = 0.0,
+    var alcoholPercent: Double = 0.0,
+    var baseUnit: String = "g",
+    var store: String? = null,
     
     // New fields for meal support
     @get:PropertyName("isMeal") @set:PropertyName("isMeal")
     var isMeal: Boolean = false,
-    val mealIngredients: List<MealIngredientEntity>? = null,
+    var mealIngredients: List<MealIngredientEntity>? = null,
     @get:PropertyName("isPlanned") @set:PropertyName("isPlanned")
     var isPlanned: Boolean = false,
-    val imageUrl: String? = null,
-    val tags: List<String> = emptyList()
+    var imageUrl: String? = null,
+    var tags: List<String> = emptyList()
 ) {
     @get:Exclude
     val kcal: Double get() = if (isMeal) mealIngredients?.sumOf { it.kcal } ?: 0.0 else kcalPer100g * grams / 100.0

@@ -109,6 +109,61 @@ class GeminiService() {
         }
     }
 
+    suspend fun estimateGenericFood(foodName: String, categories: List<String>, isBrandSearch: Boolean = false, preferredModel: String? = null): AiGenericFoodResult? {
+        val modelToUse = preferredModel ?: "gemini-3.6-flash"
+        val model = getModel(modelToUse)
+        
+        val brandPromptPart = if (isBrandSearch) {
+            "This is a search for a specific branded product. If you identify the brand, include it in the 'brand' field and provide real-world commercial portion sizes (e.g., '1 Riegel', '1 Dose', '1 Becher') in the 'portions' array."
+        } else {
+            "This is a general food item. Use 'portions' ONLY for very standard sizes (e.g., '1 Stück')."
+        }
+
+        val prompt = """
+            You are a nutrition expert. Analyze the food item: '$foodName'.
+            $brandPromptPart
+            
+            Provide average nutritional values per 100g (or 100ml for liquids).
+            Also select the most suitable category from this list: ${categories.joinToString(", ")}.
+            
+            IMPORTANT RULES:
+            1. All values must be ABSOLUTE numbers. 
+            2. DO NOT use ranges. Use '12.5'.
+            3. Macro values must be grams per 100 units.
+            4. If the item is a liquid, set 'baseUnit' to 'ml', otherwise 'g'.
+            5. Select EXACTLY ONE category from the provided list. If none fits, use 'Sonstiges'.
+            6. Language: German for 'name', 'brand', and portion names.
+            
+            Return ONLY a valid JSON object in the following format:
+            {
+              "name": "Lebensmittel Name",
+              "brand": "Markenname oder null",
+              "kcalPer100": 0.0,
+              "proteinPer100": 0.0,
+              "carbsPer100": 0.0,
+              "sugarPer100": 0.0,
+              "fatPer100": 0.0,
+              "saturatedFatPer100": 0.0,
+              "baseUnit": "g",
+              "category": "Chosen Category",
+              "portions": [
+                { "name": "Portionsname", "grams": 0.0 }
+              ]
+            }
+        """.trimIndent()
+
+        return try {
+            val response = model.generateContent(prompt)
+            val responseText = response.text ?: ""
+            val cleanJson = extractJson(responseText)
+            if (cleanJson.isBlank()) null
+            else json.decodeFromString<AiGenericFoodResult>(cleanJson)
+        } catch (e: Exception) {
+            Log.e("GeminiService", "Generic food estimation failed", e)
+            null
+        }
+    }
+
     suspend fun categorizeItem(itemName: String, categories: List<String>): String {
         val prompt = """
             Identify the most suitable category for the item '$itemName' from this list: ${categories.joinToString(", ")}.

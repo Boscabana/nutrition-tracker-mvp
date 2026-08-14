@@ -1,5 +1,6 @@
 package com.nick.nutritiontracker.data
 
+import androidx.annotation.Keep
 import com.google.firebase.firestore.PropertyName
 import kotlinx.serialization.Serializable
 
@@ -18,38 +19,39 @@ enum class DietaryPreference {
     NONE, VEGETARIAN, VEGAN, PALEO, KETO, LOW_CARB
 }
 
+@Keep
 @Serializable
 data class UserProfile(
-    val firstName: String = "",
-    val age: Int = 30,
-    val weightKg: Double = 70.0,
-    val heightCm: Int = 175,
-    val gender: Gender = Gender.MALE,
-    val goal: UserGoal = UserGoal.MAINTAIN,
-    val goalIntensity: Int = 500, // Deficit or surplus
-    val dietaryPreference: DietaryPreference = DietaryPreference.NONE,
-    val setupCompleted: Boolean = false,
+    var firstName: String = "",
+    var age: Int = 30,
+    var weightKg: Double = 70.0,
+    var heightCm: Int = 175,
+    var gender: Gender = Gender.MALE,
+    var goal: UserGoal = UserGoal.MAINTAIN,
+    var goalIntensity: Int = 500, // Deficit or surplus
+    var dietaryPreference: DietaryPreference = DietaryPreference.NONE,
+    var setupCompleted: Boolean = false,
     
     // Macro percentages (kept for now, will be automated later)
-    val proteinPercent: Int = 20,
-    val complexCarbsPercent: Int = 40,
-    val sugarPercent: Int = 10,
-    val unsaturatedFatPercent: Int = 20,
-    val saturatedFatPercent: Int = 10,
-    val stepGoal: Int = 10000,
+    var proteinPercent: Int = 20,
+    var complexCarbsPercent: Int = 40,
+    var sugarPercent: Int = 10,
+    var unsaturatedFatPercent: Int = 20,
+    var saturatedFatPercent: Int = 10,
+    var stepGoal: Int = 10000,
 
-    val weighInReminderEnabled: Boolean = false,
-    val weighInReminderTime: String = "07:00",
-    val breakfastReminderEnabled: Boolean = false,
-    val breakfastReminderTime: String = "09:00",
+    var weighInReminderEnabled: Boolean = false,
+    var weighInReminderTime: String = "07:00",
+    var breakfastReminderEnabled: Boolean = false,
+    var breakfastReminderTime: String = "09:00",
     
-    val initialWeight: Double? = null,
-    val metabolicFactor: Double = 1.0,
+    var initialWeight: Double? = null,
+    var metabolicFactor: Double = 1.0,
     @get:PropertyName("isPremium")
     @set:PropertyName("isPremium")
     var premium: Boolean = false,
-    val aiImagesGeneratedToday: Int = 0,
-    val lastAiImageDate: String = ""
+    var aiImagesGeneratedToday: Int = 0,
+    var lastAiImageDate: String = ""
 ) {
     @get:com.google.firebase.firestore.Exclude
     val isPremium: Boolean get() = premium

@@ -1,11 +1,13 @@
 package com.nick.nutritiontracker.data
 
+import androidx.annotation.Keep
 import kotlinx.serialization.Serializable
 
+@Keep
 @Serializable
 data class FoodPackageEntity(
-    val id: Long = 0,
-    val name: String = "",
-    val quantity: Double = 0.0,
-    val unit: String = "g"
+    var id: Long = 0,
+    var name: String = "",
+    var quantity: Double = 0.0,
+    var unit: String = "g"
 )
