@@ -263,6 +263,9 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                                         2 -> "Mahlzeiten"
                                         4 -> "Planer"
                                         5 -> "Einkaufsliste"
+                                        6 -> "Gewicht"
+                                        7 -> "Postfach"
+                                        8 -> "Community"
                                         else -> "Profil & Ziele"
                                     }
                                 )
@@ -307,7 +310,7 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                                 }
                             }
                             
-                            if (tab == 5) {
+                            if (tab == 5) { // Shopping List
                                 var showMenu by remember { mutableStateOf(false) }
                                 Box {
                                     IconButton(onClick = { showMenu = true }) {
