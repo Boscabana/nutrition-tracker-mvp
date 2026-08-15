@@ -55,6 +55,27 @@ fun PlannerScreen(vm: NutritionViewModel, @Suppress("UNUSED_PARAMETER") userProf
     var selectedMealForPlanning by remember { mutableStateOf<MealEntity?>(null) }
     var foodPlanningDate by remember { mutableStateOf<LocalDate?>(null) }
     var entryToEdit by remember { mutableStateOf<FoodEntryEntity?>(null) }
+    var entryToDelete by remember { mutableStateOf<FoodEntryEntity?>(null) }
+
+    if (entryToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { entryToDelete = null },
+            title = { Text("Eintrag löschen") },
+            text = { Text("Möchtest du auch die zugehörigen Einträge auf der Einkaufsliste löschen?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.deletePlannedEntry(entryToDelete!!.id, deleteFromShoppingList = true)
+                    entryToDelete = null
+                }) { Text("Ja, alles löschen", color = Color.Red) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    vm.deletePlannedEntry(entryToDelete!!.id, deleteFromShoppingList = false)
+                    entryToDelete = null
+                }) { Text("Nein, nur Planer") }
+            }
+        )
+    }
 
     if (household == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -137,7 +158,7 @@ fun PlannerScreen(vm: NutritionViewModel, @Suppress("UNUSED_PARAMETER") userProf
                     entries = vm.plannedEntries.filter { it.dateIso == date.toString() },
                     onAddClick = { showPickerForDate = date },
                     onEntryClick = { entryToEdit = it },
-                    onDeleteEntry = { vm.deletePlannedEntry(it) }
+                    onDeleteEntry = { entryToDelete = it }
                 )
             }
         }
@@ -167,7 +188,7 @@ fun DayPlannerCard(
     entries: List<FoodEntryEntity>,
     onAddClick: () -> Unit,
     onEntryClick: (FoodEntryEntity) -> Unit,
-    onDeleteEntry: (Long) -> Unit
+    onDeleteEntry: (FoodEntryEntity) -> Unit
 ) {
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEEE, d. MMMM", Locale.GERMAN) }
     val isToday = date == LocalDate.now()
@@ -199,7 +220,7 @@ fun DayPlannerCard(
             } else {
                 entries.forEach { entry ->
                     SwipeActionContainer(
-                        onDeleteRequest = { onDeleteEntry(entry.id) },
+                        onDeleteRequest = { onDeleteEntry(entry) },
                         onEditRequest = { onEntryClick(entry) },
                         key = entry.id
                     ) {
