@@ -768,6 +768,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun addPlannedMeal(meal: MealEntity, mealSlot: String, date: LocalDate, servings: Double = 1.0) {
+        val householdId = firebaseManager.household.value?.id
         val ratio = servings / meal.servings
         val dayLabel = getDayLabel(date)
         val source = "${meal.name} ($dayLabel)"
@@ -796,8 +797,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
         meal.ingredients.forEach { ing ->
             val food = foods.find { it.id == ing.foodItemId }
-            if (food != null) {
-                internalAddToShoppingList(food, ing.amount * ratio, ing.unitLabel, sourceName = source)
+            // Nur hinzufügen, wenn es kein Vorratsartikel ist
+            if (food?.isPantryItem != true) {
+                internalAddToShoppingList(food ?: FoodItemEntity(name = ing.name), ing.amount * ratio, ing.unitLabel, sourceName = source)
             }
         }
     }
@@ -860,19 +862,17 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             else -> 0.0 
         }
 
-        // Find if already exists in shopping list
-        // We only update an existing item if:
-        // 1. It's the same food, unit, and pantry status
-        // 2. We are in aggregation mode OR it has the exact same sourceName
+        // Wir suchen NUR dann nach einem existierenden Item, wenn Name, Einheit UND Quelle 
+        // exakt gleich sind. Das verhindert, dass Zutaten aus Mahlzeiten in "Manuell" verschwinden.
         val existingIndex = shoppingList.indexOfFirst { 
             it.name.equals(name, ignoreCase = true) && 
             it.unit == unit && 
             !it.isChecked && 
             it.isPantryItem == food.isPantryItem &&
-            (isShoppingListAggregated || it.sourceName == sourceName)
+            it.sourceName == (sourceName ?: "Manuell hinzugefügt")
         }
         
-        if (existingIndex != -1 && isShoppingListAggregated) {
+        if (existingIndex != -1) {
             val existing = shoppingList[existingIndex]
             val updated = existing.copy(
                 amount = existing.amount + amount,
