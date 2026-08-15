@@ -117,18 +117,27 @@ fun ShoppingListScreen(vm: NutritionViewModel, userProfile: UserProfile) {
 
     val groupedActiveItems by remember(aggregatedActiveList, vm.isShoppingListAggregated, vm.shoppingListSortByCategory) {
         derivedStateOf {
-            if (vm.shoppingListSortByCategory) {
-                aggregatedActiveList.groupBy { 
-                    val cat = it.category
-                    if (cat.isNullOrBlank()) "Sonstiges" else cat 
+            when {
+                // Wenn nicht zusammengefasst: Immer nach Mahlzeit (sourceName) gruppieren
+                !vm.isShoppingListAggregated -> {
+                    aggregatedActiveList.groupBy { it.sourceName ?: "Manuell hinzugefügt" }
                 }
+                // Wenn zusammengefasst und Kategorie-Sortierung an
+                vm.shoppingListSortByCategory -> {
+                    aggregatedActiveList.groupBy { 
+                        val cat = it.category
+                        if (cat.isNullOrBlank()) "Sonstiges" else cat 
+                    }
                     .toList()
                     .sortedBy { (cat, _) -> 
                         val idx = categoryOrder.indexOf(cat)
                         if (idx == -1) categoryOrder.size else idx
                     }.toMap()
-            } else {
-                aggregatedActiveList.groupBy { it.sourceName ?: "Manuell hinzugefügt" }
+                }
+                // Wenn zusammengefasst aber Kategorie aus: Nach Quelle gruppieren (z.B. "3 Quellen")
+                else -> {
+                    aggregatedActiveList.groupBy { it.sourceName ?: "Manuell hinzugefügt" }
+                }
             }
         }
     }

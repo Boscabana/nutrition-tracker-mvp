@@ -16,6 +16,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
+import java.util.UUID
+import kotlin.random.Random
 
 class NutritionViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("nutrition_tracker", Context.MODE_PRIVATE)
@@ -223,8 +225,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         }
                         launch {
                             firestoreRepository.getShoppingList(household.id).collect { cloudShopping ->
-                                shoppingList.clear()
-                                shoppingList.addAll(cloudShopping)
+                                syncList(shoppingList, cloudShopping) { it.id }
                                 saveShoppingList()
                             }
                         }
@@ -239,7 +240,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    private fun <T> syncList(localList: MutableList<T>, cloudList: List<T>, idSelector: (T) -> Long) {
+    private fun <T, K> syncList(localList: MutableList<T>, cloudList: List<T>, idSelector: (T) -> K) {
         if (cloudList.isEmpty()) {
             if (localList.isNotEmpty()) localList.clear()
             return
@@ -251,8 +252,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         cloudIds.clear() // Clear to help GC
 
         // Build a temporary index map for O(1) lookups during sync
-        // Storing Long -> Int is memory-efficient
-        val localIndexMap = mutableMapOf<Long, Int>()
+        val localIndexMap = mutableMapOf<K, Int>()
         localList.forEachIndexed { index, item ->
             localIndexMap[idSelector(item)] = index
         }
@@ -630,7 +630,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun addEntry(entry: FoodEntryEntity) {
         val user = firebaseManager.currentUser.value
-        val newEntry = entry.copy(id = nextEntryId++)
+        // Highly unique ID using current time nanos + large random to prevent collisions in fast loops
+        val newEntry = entry.copy(id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000))
         allEntries.add(newEntry)
         saveEntries()
         if (user != null) {
@@ -642,11 +643,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val ratio = servings / meal.servings
         val adjustedIngredients = meal.ingredients.map { ing ->
             ing.copy(
+                id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
                 amount = ing.amount * ratio,
                 grams = ing.grams * ratio
             )
         }
         val entry = FoodEntryEntity(
+            id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
             dateIso = selectedDate.toString(),
             mealSlot = mealSlot,
             name = meal.name,
@@ -708,6 +711,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     // --- Planner ---
+    private fun getDayLabel(date: LocalDate): String {
+        return when (date) {
+            LocalDate.now() -> "Heute"
+            LocalDate.now().plusDays(1) -> "Morgen"
+            else -> date.dayOfWeek.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.GERMAN)
+        }
+    }
+
     fun addPlannedEntry(food: FoodItemEntity, amount: Double, portion: FoodPortionEntity?, mealSlot: String, date: LocalDate, pkg: FoodPackageEntity? = null) {
         val grams = when {
             pkg != null -> amount * pkg.quantity
@@ -715,8 +726,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             else -> amount
         }
         val unitLabel = pkg?.name ?: portion?.name ?: food.baseUnit
+        val dayLabel = getDayLabel(date)
 
         val entry = FoodEntryEntity(
+            id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
             dateIso = date.toString(),
             mealSlot = mealSlot,
             amount = amount,
@@ -733,14 +746,20 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             saturatedFatPer100g = food.saturatedFatPer100g,
             alcoholPercent = food.alcoholPercent,
             baseUnit = food.baseUnit,
-            store = food.store
+            store = food.store,
+            isPlanned = true
         )
         addPlannedEntry(entry)
+        internalAddToShoppingList(food, amount, unitLabel, pkg, sourceName = "Einzelartikel ($dayLabel)")
     }
 
     fun addPlannedEntry(entry: FoodEntryEntity) {
         val householdId = firebaseManager.household.value?.id
-        val newEntry = entry.copy(id = nextEntryId++)
+        // Highly unique ID using current time nanos + large random to prevent collisions in fast loops
+        val newEntry = if (entry.id == 0L) {
+            entry.copy(id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000))
+        } else entry
+        
         plannedEntries.add(newEntry)
         savePlannedEntries()
         if (householdId != null) {
@@ -750,13 +769,18 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun addPlannedMeal(meal: MealEntity, mealSlot: String, date: LocalDate, servings: Double = 1.0) {
         val ratio = servings / meal.servings
+        val dayLabel = getDayLabel(date)
+        val source = "${meal.name} ($dayLabel)"
+
         val adjustedIngredients = meal.ingredients.map { ing ->
             ing.copy(
+                id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
                 amount = ing.amount * ratio,
                 grams = ing.grams * ratio
             )
         }
         val entry = FoodEntryEntity(
+            id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
             dateIso = date.toString(),
             mealSlot = mealSlot,
             name = meal.name,
@@ -765,9 +789,17 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             amount = servings,
             unitLabel = "Portion(en)",
             imageUrl = meal.imageUrl,
-            tags = meal.tags
+            tags = meal.tags,
+            isPlanned = true
         )
         addPlannedEntry(entry)
+
+        meal.ingredients.forEach { ing ->
+            val food = foods.find { it.id == ing.foodItemId }
+            if (food != null) {
+                internalAddToShoppingList(food, ing.amount * ratio, ing.unitLabel, sourceName = source)
+            }
+        }
     }
 
     fun updatePlannedEntry(updatedEntry: FoodEntryEntity) {
@@ -814,15 +846,70 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    private fun getGeneralName(food: FoodItemEntity): String {
+        return food.name.split(",").first().trim()
+    }
+
+    private fun internalAddToShoppingList(food: FoodItemEntity, amount: Double, unit: String, pkg: FoodPackageEntity? = null, sourceName: String? = null) {
+        val householdId = firebaseManager.household.value?.id ?: return
+        val name = getGeneralName(food)
+        
+        val addedWeight = when {
+            pkg != null -> amount * pkg.quantity
+            unit == food.baseUnit -> amount
+            else -> 0.0 
+        }
+
+        // Find if already exists in shopping list
+        // We only update an existing item if:
+        // 1. It's the same food, unit, and pantry status
+        // 2. We are in aggregation mode OR it has the exact same sourceName
+        val existingIndex = shoppingList.indexOfFirst { 
+            it.name.equals(name, ignoreCase = true) && 
+            it.unit == unit && 
+            !it.isChecked && 
+            it.isPantryItem == food.isPantryItem &&
+            (isShoppingListAggregated || it.sourceName == sourceName)
+        }
+        
+        if (existingIndex != -1 && isShoppingListAggregated) {
+            val existing = shoppingList[existingIndex]
+            val updated = existing.copy(
+                amount = existing.amount + amount,
+                weightGrams = existing.weightGrams + addedWeight
+            )
+            shoppingList[existingIndex] = updated
+            viewModelScope.launch { firestoreRepository.updateShoppingItem(householdId, updated) }
+        } else {
+            val newItem = ShoppingItem(
+                id = UUID.randomUUID().toString(),
+                name = name,
+                amount = amount,
+                unit = unit,
+                category = food.category,
+                householdId = householdId,
+                isAutoGenerated = true,
+                isPantryItem = food.isPantryItem,
+                baseUnit = food.baseUnit,
+                weightGrams = addedWeight,
+                sourceName = sourceName ?: "Manuell hinzugefügt"
+            )
+            shoppingList.add(newItem)
+            viewModelScope.launch { firestoreRepository.addShoppingItem(householdId, newItem) }
+        }
+        saveShoppingList()
+    }
+
     fun addShoppingItem(name: String, amount: Double, unit: String, category: String?, isPremium: Boolean) {
         val householdId = firebaseManager.household.value?.id ?: ""
         val newItem = ShoppingItem(
-            id = System.currentTimeMillis().toString(),
+            id = UUID.randomUUID().toString(),
             name = name,
             amount = amount,
             unit = unit,
             category = category,
-            householdId = householdId
+            householdId = householdId,
+            sourceName = "Manuell hinzugefügt"
         )
         shoppingList.add(newItem)
         saveShoppingList()
