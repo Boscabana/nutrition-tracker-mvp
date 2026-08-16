@@ -1,7 +1,9 @@
 package com.nick.nutritiontracker
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.LaunchedEffect
 import androidx.activity.viewModels
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.ViewModel
@@ -31,12 +33,34 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        handleIntent(intent)
+        
         // Initialisiere Benachrichtigungen
         NotificationHelper.createNotificationChannel(this)
         
         requestNotificationPermission()
 
-        setContent { NutritionApp(nutritionVm, profileVm) }
+        setContent {
+            LaunchedEffect(nutritionVm.shouldCloseApp) {
+                if (nutritionVm.shouldCloseApp) {
+                    nutritionVm.shouldCloseApp = false
+                    nutritionVm.isQuickScanRunning = false
+                    finish()
+                }
+            }
+            NutritionApp(nutritionVm, profileVm)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.action == "com.nick.nutritiontracker.ACTION_QUICK_SCAN") {
+            nutritionVm.triggerScan(isQuickScan = true)
+        }
     }
 
     private fun requestNotificationPermission() {

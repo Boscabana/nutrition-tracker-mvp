@@ -75,7 +75,8 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
     val userProfileState by profileVm.userProfile.collectAsState()
     
     // 1. App Lock / Login Gate
-    if (currentUser == null || (vm.biometricEnabled && !vm.isAppUnlocked)) {
+    // Biometrie soll nur noch den Login ersetzen, nicht mehr die App bei jedem Start sperren (User-Wunsch)
+    if (currentUser == null) {
         AuthScreen(profileVm, vm)
         return
     }
@@ -119,9 +120,20 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
 private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userProfile: UserProfile) {
     val scope = rememberCoroutineScope()
     var tab by remember { mutableIntStateOf(0) }
+    
+    val context = LocalContext.current
+    val scannerService = remember { BarcodeScannerService(context) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Deep Link Handling: Bei Schnell-Scan automatisch auf den Heute-Tab wechseln
+    LaunchedEffect(vm.isQuickScanRunning) {
+        if (vm.isQuickScanRunning) {
+            tab = 0
+        }
+    }
+
     val foods = vm.foods
     val entries = vm.todayEntries
-    val snackbarHostState = remember { SnackbarHostState() }
     
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, d. MMM", Locale.GERMAN) }
     var showCalendar by remember { mutableStateOf(false) }
@@ -190,6 +202,93 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
             },
             dismissButton = {
                 TextButton(onClick = { vm.pendingRecipeImport = null }) { Text("Abbrechen") }
+            }
+        )
+    }
+
+    if (vm.pendingScanResult != null) {
+        val food = vm.pendingScanResult!!
+        AddAmountDialog(
+            food = food,
+            vm = vm,
+            onDismiss = { 
+                vm.pendingScanResult = null 
+                if (vm.isQuickScanRunning) vm.shouldCloseApp = true
+            },
+            onConfirm = { amount, portion, pkg, mealSlot ->
+                vm.addEntry(food, amount, portion, mealSlot, pkg)
+                vm.pendingScanResult = null
+                if (vm.isQuickScanRunning) vm.shouldCloseApp = true
+            }
+        )
+    }
+
+    if (vm.pendingDuplicateFood != null) {
+        val food = vm.pendingDuplicateFood!!
+        AlertDialog(
+            onDismissRequest = { 
+                vm.pendingDuplicateFood = null 
+                if (vm.isQuickScanRunning) vm.shouldCloseApp = true
+            },
+            title = { Text("Artikel bereits vorhanden") },
+            text = { Text("Ein Artikel mit dem Barcode '${food.barcode}' ist bereits als '${food.name}' gespeichert. Möchtest du den vorhandenen Artikel verwenden?") },
+            confirmButton = {
+                Button(onClick = {
+                    vm.pendingScanResult = food
+                    vm.pendingDuplicateFood = null
+                }) { Text("Verwenden") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    vm.pendingDuplicateFood = null
+                    if (vm.isQuickScanRunning) vm.shouldCloseApp = true
+                }) { Text("Abbrechen") }
+            }
+        )
+    }
+
+    if (vm.pendingAskToCapture != null) {
+        val food = vm.pendingAskToCapture!!
+        AlertDialog(
+            onDismissRequest = { 
+                vm.pendingAskToCapture = null 
+                if (vm.isQuickScanRunning) vm.shouldCloseApp = true
+            },
+            title = { Text("Neuer Artikel") },
+            text = { Text("Möchtest du '${food.name}' dauerhaft in deinen Artikeln speichern (mit Portionen etc.) oder nur für diesen Eintrag verwenden?") },
+            confirmButton = {
+                Button(onClick = {
+                    vm.pendingFoodToCapture = food
+                    vm.pendingAskToCapture = null
+                }) { Text("Dauerhaft speichern") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    vm.pendingScanResult = food
+                    vm.pendingAskToCapture = null
+                }) { Text("Nur verwenden") }
+            }
+        )
+    }
+
+    if (vm.pendingFoodToCapture != null) {
+        FoodEditDialog(
+            food = vm.pendingFoodToCapture!!,
+            vm = vm,
+            onDismiss = { vm.pendingFoodToCapture = null },
+            onSave = { newFood ->
+                val saved = vm.addFood(
+                    newFood.name, newFood.kcalPer100g, newFood.proteinPer100g,
+                    newFood.carbsPer100g, newFood.sugarPer100g, newFood.fatPer100g,
+                    newFood.saturatedFatPer100g, newFood.alcoholPercent, newFood.baseUnit,
+                    newFood.portions, newFood.packages, newFood.barcode, newFood.brand,
+                    newFood.category,
+                    isGeneric = newFood.isGeneric,
+                    parentId = newFood.parentId,
+                    store = newFood.store
+                )
+                vm.pendingFoodToCapture = null
+                vm.pendingScanResult = saved
             }
         )
     }
@@ -422,7 +521,7 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
         ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
                 when (tab) {
-                    0 -> TodayScreen(userProfile, foods, entries, vm, snackbarHostState, selectedEntryIds, selectedFoodIds, selectedMealIds)
+                    0 -> TodayScreen(userProfile, foods, entries, vm, snackbarHostState, selectedEntryIds, selectedFoodIds, selectedMealIds, scannerService)
                     1 -> FoodsScreen(vm, snackbarHostState, selectedFoodIds)
                     2 -> MealsScreen(vm, snackbarHostState, selectedMealIds, userProfile)
                     3 -> ProfileScreen(profileVm, vm, userProfile)
@@ -440,7 +539,8 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
     var weeklySummaryAcknowledged by remember { mutableStateOf(false) }
     val isSunday = LocalDate.now().dayOfWeek == java.time.DayOfWeek.SUNDAY
     
-    if (isSunday && userProfile.setupCompleted && !weeklySummaryAcknowledged) {
+    // Unterdrücke Zusammenfassung im Quick-Scan-Modus
+    if (isSunday && userProfile.setupCompleted && !weeklySummaryAcknowledged && !vm.isQuickScanRunning) {
         val last7Days = (0..6).map { LocalDate.now().minusDays(it.toLong()).toString() }
         val verifiedDays = last7Days.filter { vm.dayVerifications[it] == true }
         
@@ -573,21 +673,44 @@ private fun TodayScreen(
     snackbarHostState: SnackbarHostState,
     selectedEntryIds: MutableState<Set<Long>>,
     selectedFoodIds: MutableState<Set<Long>>,
-    selectedMealIds: MutableState<Set<Long>>
+    selectedMealIds: MutableState<Set<Long>>,
+    scannerService: BarcodeScannerService // Übergeben von MainApp
 ) {
     val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-    val scannerService = remember { BarcodeScannerService(context) }
 
     var entryToDelete by remember { mutableStateOf<Long?>(null) }
     var entryToEdit by remember { mutableStateOf<FoodEntryEntity?>(null) }
-    var scannedFood by remember { mutableStateOf<FoodItemEntity?>(null) }
-    var duplicateFood by remember { mutableStateOf<FoodItemEntity?>(null) }
     var showStepDialog by remember { mutableStateOf(false) }
-    var foodToCapture by remember { mutableStateOf<FoodItemEntity?>(null) }
-    var askToCaptureFood by remember { mutableStateOf<FoodItemEntity?>(null) }
 
     val localContext = LocalContext.current
+    
+    // Widget/Quick-Scan Trigger: Wir lauschen auf den Trigger aus dem ViewModel
+    LaunchedEffect(Unit) {
+        vm.scanTrigger.collect {
+            // Sofort konsumieren, damit es nicht bei Rotation erneut feuert
+            vm.consumeScanTrigger()
+            
+            // Dies führt exakt denselben Code aus wie der Scan-Button unten
+            val barcode = scannerService.startScan()
+            if (barcode != null) {
+                val existing = vm.findFoodByBarcode(barcode)
+                if (existing != null) {
+                    vm.pendingDuplicateFood = existing
+                } else {
+                    val fetched = scannerService.fetchProduct(barcode)
+                    if (fetched != null) {
+                        vm.pendingAskToCapture = fetched
+                    } else {
+                        snackbarHostState.showSnackbar("Produkt nicht gefunden. Bitte manuell erfassen.")
+                        vm.pendingFoodToCapture = FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
+                    }
+                }
+            } else if (vm.isQuickScanRunning) {
+                vm.shouldCloseApp = true
+            }
+        }
+    }
+    
     LaunchedEffect(vm.aiErrorMessage) {
         vm.aiErrorMessage?.let {
             android.widget.Toast.makeText(localContext, it, android.widget.Toast.LENGTH_LONG).show()
@@ -680,82 +803,6 @@ private fun TodayScreen(
         }
     }
 
-    if (scannedFood != null) {
-        val food = scannedFood!!
-        AddAmountDialog(
-            food = food,
-            vm = vm,
-            onDismiss = { scannedFood = null },
-            onConfirm = { amount, portion, pkg, mealSlot ->
-                vm.addEntry(food, amount, portion, mealSlot, pkg)
-                scannedFood = null
-            }
-        )
-    }
-
-    if (duplicateFood != null) {
-        val food = duplicateFood!!
-        AlertDialog(
-            onDismissRequest = { duplicateFood = null },
-            title = { Text("Artikel bereits vorhanden") },
-            text = { Text("Ein Artikel mit dem Barcode '${food.barcode}' ist bereits als '${food.name}' gespeichert. Möchtest du den vorhandenen Artikel verwenden?") },
-            confirmButton = {
-                Button(onClick = {
-                    scannedFood = food
-                    duplicateFood = null
-                }) { Text("Verwenden") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    duplicateFood = null
-                }) { Text("Abbrechen") }
-            }
-        )
-    }
-
-    if (askToCaptureFood != null) {
-        val food = askToCaptureFood!!
-        AlertDialog(
-            onDismissRequest = { askToCaptureFood = null },
-            title = { Text("Neuer Artikel") },
-            text = { Text("Möchtest du '${food.name}' dauerhaft in deinen Artikeln speichern (mit Portionen etc.) oder nur für diesen Eintrag verwenden?") },
-            confirmButton = {
-                Button(onClick = {
-                    foodToCapture = food
-                    askToCaptureFood = null
-                }) { Text("Dauerhaft speichern") }
-            },
-            dismissButton = {
-                TextButton(onClick = {
-                    scannedFood = food
-                    askToCaptureFood = null
-                }) { Text("Nur verwenden") }
-            }
-        )
-    }
-
-    if (foodToCapture != null) {
-        FoodEditDialog(
-            food = foodToCapture,
-            vm = vm,
-            onDismiss = { foodToCapture = null },
-            onSave = { newFood ->
-                val saved = vm.addFood(
-                    newFood.name, newFood.kcalPer100g, newFood.proteinPer100g,
-                    newFood.carbsPer100g, newFood.sugarPer100g, newFood.fatPer100g,
-                    newFood.saturatedFatPer100g, newFood.alcoholPercent, newFood.baseUnit,
-                    newFood.portions, newFood.packages, newFood.barcode, newFood.brand,
-                    newFood.category,
-                    isGeneric = newFood.isGeneric,
-                    parentId = newFood.parentId,
-                    store = newFood.store
-                )
-                foodToCapture = null
-                scannedFood = saved
-            }
-        )
-    }
-    
     if (showStepDialog) {
         ActivityInputDialog(
             initialSteps = vm.todaySteps,
@@ -844,9 +891,9 @@ private fun TodayScreen(
                         } else {
                             finalFood = vm.addFood(
                                 food.name, food.kcalPer100g, food.proteinPer100g,
-                                food.carbsPer100g, food.sugarPer100g, food.fatPer100g,
-                                food.saturatedFatPer100g, food.alcoholPercent, food.baseUnit,
-                                food.portions, food.packages, food.barcode, food.brand, food.category,
+                                food.carbsPer100g, sugar = food.sugarPer100g, fat = food.fatPer100g,
+                                saturatedFat = food.saturatedFatPer100g, alcoholPercent = food.alcoholPercent, baseUnit = food.baseUnit,
+                                portions = food.portions, packages = food.packages, barcode = food.barcode, brand = food.brand, category = food.category,
                                 isGeneric = food.isGeneric,
                                 parentId = food.parentId,
                                 store = food.store
@@ -854,9 +901,17 @@ private fun TodayScreen(
                         }
                     }
                     vm.addEntry(finalFood, amount, portion, mealSlot, pkg)
+                    
+                    // Quick-Scan: App nach Eintragung schließen
+                    if (vm.isQuickScanRunning) {
+                        vm.shouldCloseApp = true
+                    }
                 },
                 onAddMeal = { meal, mealSlot, servings ->
                     vm.addMealEntry(meal, mealSlot, servings)
+                    if (vm.isQuickScanRunning) {
+                        vm.shouldCloseApp = true
+                    }
                 },
                 onScanRequest = {
                     scope.launch {
@@ -864,21 +919,21 @@ private fun TodayScreen(
                         if (barcode != null) {
                             val existing = vm.findFoodByBarcode(barcode)
                             if (existing != null) {
-                                duplicateFood = existing
+                                vm.pendingDuplicateFood = existing
                             } else {
                                 val fetched = scannerService.fetchProduct(barcode)
                                 if (fetched != null) {
-                                    askToCaptureFood = fetched
+                                    vm.pendingAskToCapture = fetched
                                 } else {
                                     snackbarHostState.showSnackbar("Produkt nicht gefunden. Bitte manuell erfassen.")
-                                    foodToCapture = FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
+                                    vm.pendingFoodToCapture = FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
                                 }
                             }
                         }
                     }
                 },
                 onSearchRequest = { query -> scannerService.searchProducts(query) },
-                onCaptureRequested = { food -> askToCaptureFood = food },
+                onCaptureRequested = { food -> vm.pendingAskToCapture = food },
                 vm = vm,
                 snackbarHostState = snackbarHostState,
                 isPremium = userProfile.isPremium

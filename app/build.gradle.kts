@@ -83,4 +83,8 @@ dependencies {
 
     // Biometrics
     implementation("androidx.biometric:biometric:1.2.0-alpha05")
+
+    // Jetpack Glance (Widgets)
+    implementation("androidx.glance:glance-appwidget:1.1.0")
+    implementation("androidx.glance:glance-material3:1.1.0")
 }

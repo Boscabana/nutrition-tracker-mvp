@@ -115,43 +115,12 @@ fun AuthScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionViewMod
                     modifier = Modifier.padding(24.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    if (currentUser != null && nutritionViewModel.biometricEnabled) {
-                        Text(
-                            text = "App gesperrt",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.fillMaxWidth(),
-                            textAlign = TextAlign.Center
-                        )
-                        
-                        Text(
-                            text = "Bitte authentifiziere dich, um fortzufahren.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.fillMaxWidth(),
-                            textAlign = TextAlign.Center
-                        )
-                        
-                        Spacer(Modifier.height(8.dp))
-                        
-                        Button(
-                            onClick = {
-                                BiometricHelper.showBiometricPrompt(context as FragmentActivity) { success ->
-                                    if (success) nutritionViewModel.unlockApp()
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth().height(56.dp),
-                            shape = RoundedCornerShape(12.dp)
-                        ) {
-                            Icon(Icons.Default.Fingerprint, null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Mit Biometrie entsperren")
-                        }
-                        
-                        TextButton(
-                            onClick = { viewModel.signOut() },
-                            modifier = Modifier.align(Alignment.CenterHorizontally)
-                        ) {
-                            Text("Abmelden")
+                    if (currentUser != null) {
+                        // Dieser Fall sollte eigentlich nicht mehr eintreten, da NutritionApp
+                        // bei currentUser != null direkt die Haupt-App anzeigt.
+                        // Wir lassen zur Sicherheit einen Lade-Indikator da.
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator()
                         }
                     } else {
                         Text(
@@ -216,25 +185,44 @@ fun AuthScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionViewMod
 
                         Spacer(Modifier.height(8.dp))
 
-                        Button(
-                            onClick = {
-                                if (isRegistration) {
-                                    viewModel.signUp(email, password, firstName)
-                                } else {
-                                    viewModel.signIn(email, password)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    if (isRegistration) {
+                                        viewModel.signUp(email, password, firstName)
+                                    } else {
+                                        viewModel.signIn(email, password)
+                                    }
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(56.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                enabled = email.isNotBlank() && password.length >= 6 && (!isRegistration || firstName.isNotBlank())
+                            ) {
+                                Text(
+                                    text = if (isRegistration) "Registrieren" else "Einloggen",
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            
+                            if (!isRegistration && canBiometric && nutritionViewModel.biometricEnabled) {
+                                FilledIconButton(
+                                    onClick = {
+                                        BiometricHelper.showBiometricPrompt(context as FragmentActivity) { success ->
+                                            if (success) {
+                                                // Wenn Biometrie erfolgreich, können wir hier z.B. 
+                                                // automatisch versuchen mit den letzten Daten einzuloggen.
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.size(56.dp),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Default.Fingerprint, "Biometrie")
                                 }
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(56.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            enabled = email.isNotBlank() && password.length >= 6 && (!isRegistration || firstName.isNotBlank())
-                        ) {
-                            Text(
-                                text = if (isRegistration) "Registrieren" else "Einloggen",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            }
                         }
 
                         TextButton(

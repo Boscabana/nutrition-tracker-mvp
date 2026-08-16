@@ -9,6 +9,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nick.nutritiontracker.data.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -105,6 +106,33 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     var geminiApiKey by mutableStateOf(prefs.getString("gemini_api_key", null) ?: "")
     var biometricEnabled by mutableStateOf(prefs.getBoolean("biometric_enabled", false))
     var isAppUnlocked by mutableStateOf(false)
+    var shouldTriggerQuickScan by mutableStateOf(false)
+    var isQuickScanRunning by mutableStateOf(false)
+    var shouldCloseApp by mutableStateOf(false)
+    
+    // Neuer Trigger für den Scan-Vorgang (Replay = 1 damit der UI-Collector den Start nicht verpasst)
+    private val _scanTrigger = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(replay = 1)
+    val scanTrigger = _scanTrigger.asSharedFlow()
+
+    fun triggerScan(isQuickScan: Boolean = false) {
+        if (isQuickScan) {
+            isQuickScanRunning = true
+        }
+        viewModelScope.launch { _scanTrigger.emit(Unit) }
+    }
+    
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    fun consumeScanTrigger() {
+        // Löscht den letzten Wert aus dem Replay-Cache, damit er nicht bei Rotation neu triggert
+        _scanTrigger.resetReplayCache()
+    }
+    
+    // States für Scan-Resultate (Global damit sie Recompositions überstehen)
+    var pendingScanResult by mutableStateOf<FoodItemEntity?>(null)
+    var pendingAskToCapture by mutableStateOf<FoodItemEntity?>(null)
+    var pendingFoodToCapture by mutableStateOf<FoodItemEntity?>(null)
+    var pendingDuplicateFood by mutableStateOf<FoodItemEntity?>(null)
+
     val availableAiModels = mutableStateListOf<AiModelStatus>()
 
     private var nextFoodId = 1L
