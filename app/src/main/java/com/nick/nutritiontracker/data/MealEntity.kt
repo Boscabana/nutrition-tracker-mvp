@@ -2,6 +2,7 @@ package com.nick.nutritiontracker.data
 
 import androidx.annotation.Keep
 import com.google.firebase.firestore.Exclude
+import com.google.firebase.firestore.PropertyName
 import kotlinx.serialization.Serializable
 
 @Keep
@@ -22,7 +23,11 @@ data class MealIngredientEntity(
     var alcoholPercent: Double = 0.0,
     var baseUnit: String = "g",
     var store: String? = null,
-    var brand: String? = null
+    var brand: String? = null,
+    var category: String? = null,
+    var barcode: String? = null,
+    @get:PropertyName("isGeneric") @set:PropertyName("isGeneric")
+    var isGeneric: Boolean = false
 ) {
     @get:Exclude
     val kcal: Double get() = kcalPer100g * grams / 100.0

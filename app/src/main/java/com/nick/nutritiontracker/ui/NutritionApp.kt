@@ -49,6 +49,7 @@ import androidx.health.connect.client.PermissionController
 import com.nick.nutritiontracker.ReminderManager
 import com.nick.nutritiontracker.data.*
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
+import com.nick.nutritiontracker.viewmodel.PlanMatchStatus
 import com.nick.nutritiontracker.viewmodel.ProfileViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -1515,7 +1516,10 @@ fun EditEntryDialog(
         mutableStateOf(food?.packages?.find { it.name == entry.unitLabel })
     }
     var mealSlot by remember { mutableStateOf(entry.mealSlot) }
-    val isOrphaned = food == null
+    
+    val matchStatus = remember(entry, foods) { vm.getMatchStatus(entry) }
+    val isOrphaned = matchStatus == PlanMatchStatus.MISSING
+    val isDivergent = matchStatus == PlanMatchStatus.DIVERGENT
 
     val relatives = remember(food, foods) {
         val root = if (food?.isGeneric == true) food else parent
@@ -1539,7 +1543,7 @@ fun EditEntryDialog(
                         Text(
                             text = entry.name, 
                             style = MaterialTheme.typography.labelSmall, 
-                            color = if (isOrphaned) ProteinGreen else MaterialTheme.colorScheme.outline,
+                            color = if (isOrphaned) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.outline,
                             modifier = Modifier.weight(1f, fill = false)
                         )
                         if (relatives.isNotEmpty()) {
@@ -1597,20 +1601,52 @@ fun EditEntryDialog(
                         }
                     }
                 }
-                if (isOrphaned) {
-                    Icon(Icons.Default.Save, "Wird automatisch gespeichert", tint = ProteinGreen, modifier = Modifier.size(18.dp))
-                }
             }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (isOrphaned) {
-                    Text(
-                        "Wird beim Speichern automatisch in die Bibliothek übernommen.", 
-                        style = MaterialTheme.typography.labelSmall, 
-                        color = ProteinGreen,
-                        modifier = Modifier.padding(bottom = 4.dp)
-                    )
+                if (isOrphaned || isDivergent) {
+                    val color = if (isOrphaned) MaterialTheme.colorScheme.error else Color(0xFFFFA000)
+                    val title = if (isOrphaned) "Nicht in Bibliothek" else "Abweichende Werte"
+                    val desc = if (isOrphaned) "Dieser Artikel ist noch nicht in deiner Bibliothek." 
+                              else "Die Werte in deinem Planer weichen von deinem gespeicherten Artikel ab."
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.1f)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.5f))
+                    ) {
+                        Column(Modifier.padding(8.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(if (isOrphaned) Icons.Default.CloudDownload else Icons.Default.Warning, null, tint = color, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text(title, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = color)
+                            }
+                            Text(desc, style = MaterialTheme.typography.labelSmall, color = color.copy(alpha = 0.8f))
+                            
+                            Spacer(Modifier.height(8.dp))
+                            
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(
+                                    onClick = { vm.importPlannedEntryToLibrary(entry, replaceExisting = true) },
+                                    modifier = Modifier.weight(1f),
+                                    colors = ButtonDefaults.buttonColors(containerColor = color),
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Text(if (isOrphaned) "SPEICHERN" else "AKTUALISIEREN", style = MaterialTheme.typography.labelSmall)
+                                }
+                                if (isDivergent) {
+                                    OutlinedButton(
+                                        onClick = { vm.importPlannedEntryToLibrary(entry, replaceExisting = false) },
+                                        modifier = Modifier.weight(1f),
+                                        contentPadding = PaddingValues(0.dp)
+                                    ) {
+                                        Text("NEU ANLEGEN", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
                 }
 
                 AutoSelectTextField(
@@ -1756,6 +1792,35 @@ fun EditMealEntryDialog(
                 Text("Mahlzeit abwandeln", style = MaterialTheme.typography.headlineSmall)
                 Text(entry.name, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
+
+                val matchStatus = remember(entry, foods, vm.meals) { vm.getMatchStatus(entry) }
+                val hasMissingIngs = matchStatus == PlanMatchStatus.MISSING
+                val isTemplateMissing = matchStatus == PlanMatchStatus.TEMPLATE_MISSING
+                
+                if (hasMissingIngs || isTemplateMissing) {
+                    Button(
+                        onClick = { 
+                            vm.importPlannedMealToLibrary(entry)
+                            onDismiss()
+                        },
+                        modifier = Modifier.fillMaxWidth().height(36.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (hasMissingIngs) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.tertiaryContainer, 
+                            contentColor = if (hasMissingIngs) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onTertiaryContainer
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Icon(if (hasMissingIngs) Icons.Default.CloudDownload else Icons.Default.Save, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = if (hasMissingIngs) "GANZE MAHLZEIT IN BIBLIOTHEK SPEICHERN" else "REZEPT ALS VORLAGE SPEICHERN", 
+                            style = MaterialTheme.typography.labelSmall, 
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
                 
                 TabRow(selectedTabIndex = entryMode) {
                     Tab(selected = entryMode == 0, onClick = { entryMode = 0 }) { Text("Portionen") }
@@ -1928,12 +1993,31 @@ fun IngredientAdjustRow(
         baseList.distinctBy { it.id }.filter { it.id != food?.id }.sortedBy { it.name }
     }
     var showSwapMenu by remember { mutableStateOf(false) }
-    val isOrphaned = food == null
+    
+    val matchStatus = remember(ingredient, foods) {
+        val foodById = foods.find { it.id == ingredient.foodItemId }
+        if (foodById != null && foodById.matchesIngredient(ingredient)) PlanMatchStatus.EXACT
+        else {
+            val similar = foods.find { it.name.trim().equals(ingredient.name.trim(), ignoreCase = true) && (it.brand?.trim() ?: "").equals(ingredient.brand?.trim() ?: "", ignoreCase = true) }
+            when {
+                similar == null -> PlanMatchStatus.MISSING
+                similar.matchesIngredient(ingredient) -> PlanMatchStatus.EXACT
+                else -> PlanMatchStatus.DIVERGENT
+            }
+        }
+    }
+    
+    val isOrphaned = matchStatus == PlanMatchStatus.MISSING
+    val isDivergent = matchStatus == PlanMatchStatus.DIVERGENT
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        colors = if (isOrphaned) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)) 
-                 else CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+        colors = when {
+            isOrphaned -> CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f))
+            isDivergent -> CardDefaults.cardColors(containerColor = Color(0xFFFFE082).copy(alpha = 0.2f))
+            else -> CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+        },
+        border = if (isDivergent) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFC107).copy(alpha = 0.5f)) else null
     ) {
         Column(Modifier.padding(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1943,15 +2027,42 @@ fun IngredientAdjustRow(
                             text = ingredient.name, 
                             fontWeight = FontWeight.Bold, 
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (isOrphaned) Color.Red else Color.Unspecified
+                            color = when {
+                                isOrphaned -> Color.Red
+                                isDivergent -> Color(0xFFFFA000)
+                                else -> Color.Unspecified
+                            }
                         )
-                        if (isOrphaned) {
-                            Icon(
-                                imageVector = Icons.Default.Save, 
-                                contentDescription = "Wird automatisch gespeichert", 
-                                tint = ProteinGreen, 
-                                modifier = Modifier.size(14.dp).padding(start = 4.dp)
-                            )
+                        if (isOrphaned || isDivergent) {
+                            IconButton(
+                                onClick = {
+                                    val pseudoEntry = FoodEntryEntity(
+                                        foodItemId = ingredient.foodItemId,
+                                        name = ingredient.name,
+                                        brand = ingredient.brand,
+                                        kcalPer100g = ingredient.kcalPer100g,
+                                        proteinPer100g = ingredient.proteinPer100g,
+                                        carbsPer100g = ingredient.carbsPer100g,
+                                        sugarPer100g = ingredient.sugarPer100g,
+                                        fatPer100g = ingredient.fatPer100g,
+                                        saturatedFatPer100g = ingredient.saturatedFatPer100g,
+                                        alcoholPercent = ingredient.alcoholPercent,
+                                        baseUnit = ingredient.baseUnit,
+                                        store = ingredient.store,
+                                        category = ingredient.category,
+                                        isGeneric = ingredient.isGeneric
+                                    )
+                                    vm.importPlannedEntryToLibrary(pseudoEntry, replaceExisting = isDivergent)
+                                },
+                                modifier = Modifier.size(24.dp).padding(start = 4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isOrphaned) Icons.Default.CloudDownload else Icons.Default.Sync, 
+                                    contentDescription = if (isOrphaned) "Zutat übernehmen" else "Zutat aktualisieren", 
+                                    tint = if (isOrphaned) MaterialTheme.colorScheme.error else Color(0xFFFFA000),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                         
                         if (relatives.isNotEmpty()) {
@@ -2040,7 +2151,9 @@ fun IngredientAdjustRow(
                         }
                     }
                     if (isOrphaned) {
-                        Text("Wird automatisch gespeichert", style = MaterialTheme.typography.labelSmall, color = ProteinGreen)
+                        Text("Nicht in Bibliothek", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                    } else if (isDivergent) {
+                        Text("Abweichende Werte", style = MaterialTheme.typography.labelSmall, color = Color(0xFFFFA000))
                     } else {
                         food?.let { f ->
                             if (!f.brand.isNullOrBlank() || !f.store.isNullOrBlank()) {

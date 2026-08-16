@@ -43,6 +43,7 @@ import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import com.nick.nutritiontracker.data.*
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
+import com.nick.nutritiontracker.viewmodel.PlanMatchStatus
 import kotlinx.coroutines.launch
 import java.io.File
 
@@ -400,6 +401,38 @@ fun MealEditDialog(
             meal?.ingredients?.let { addAll(it) } 
         } 
     }
+
+    // Automatischer Abgleich mit der Bibliothek beim Öffnen
+    LaunchedEffect(meal?.id) {
+        var changed = false
+        val synced = ingredients.map { ing ->
+            val food = foods.find { it.id == ing.foodItemId } ?: foods.find { it.isSimilarTo(FoodEntryEntity(name = ing.name, brand = ing.brand, barcode = ing.barcode)) }
+            if (food != null && !food.matchesIngredient(ing)) {
+                changed = true
+                ing.copy(
+                    foodItemId = food.id,
+                    name = food.name,
+                    brand = food.brand,
+                    kcalPer100g = food.kcalPer100g,
+                    proteinPer100g = food.proteinPer100g,
+                    carbsPer100g = food.carbsPer100g,
+                    sugarPer100g = food.sugarPer100g,
+                    fatPer100g = food.fatPer100g,
+                    saturatedFatPer100g = food.saturatedFatPer100g,
+                    alcoholPercent = food.alcoholPercent,
+                    baseUnit = food.baseUnit,
+                    store = food.store,
+                    category = food.category,
+                    barcode = food.barcode,
+                    isGeneric = food.isGeneric
+                )
+            } else ing
+        }
+        if (changed) {
+            ingredients.clear()
+            ingredients.addAll(synced)
+        }
+    }
     
     var searchQuery by remember { mutableStateOf("") }
     var expanded by remember { mutableStateOf(false) }
@@ -469,19 +502,82 @@ fun MealEditDialog(
 
                 item {
                     val hasOrphans = ingredients.any { ing -> foods.none { it.id == ing.foodItemId } }
-                    if (hasOrphans) {
+                    val hasDivergent = ingredients.any { ing -> 
+                        val food = foods.find { it.id == ing.foodItemId }
+                        food != null && !food.matchesIngredient(ing)
+                    }
+
+                    if (hasOrphans || hasDivergent) {
                         Card(
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (hasOrphans) MaterialTheme.colorScheme.errorContainer 
+                                                else Color(0xFFFFECB3)
+                            ),
                             modifier = Modifier.padding(vertical = 8.dp)
                         ) {
-                            Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Info, null, tint = MaterialTheme.colorScheme.primary)
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    "Hinweis: Enthaltene Einzelartikel werden automatisch in deiner Bibliothek gespeichert.",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
+                            Column(Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = if (hasOrphans) Icons.Default.Warning else Icons.Default.Sync, 
+                                        null, 
+                                        tint = if (hasOrphans) MaterialTheme.colorScheme.error else Color(0xFFE65100)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = if (hasOrphans) "Einige Artikel fehlen in deiner Bibliothek."
+                                               else "Einige Artikel haben abweichende Werte zur Bibliothek.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = if (hasOrphans) MaterialTheme.colorScheme.error else Color(0xFFE65100),
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                Button(
+                                    onClick = { 
+                                        val resolved = ingredients.map { ing ->
+                                            val foodById = foods.find { it.id == ing.foodItemId }
+                                            val foodBySimilarity = foods.find { it.isSimilarTo(FoodEntryEntity(name = ing.name, brand = ing.brand, barcode = ing.barcode)) }
+                                            val bestFood = foodById ?: foodBySimilarity
+
+                                            if (bestFood != null) {
+                                                // Automatisch auf den Stand der Bibliothek bringen
+                                                ing.copy(
+                                                    foodItemId = bestFood.id,
+                                                    name = bestFood.name,
+                                                    brand = bestFood.brand,
+                                                    kcalPer100g = bestFood.kcalPer100g,
+                                                    proteinPer100g = bestFood.proteinPer100g,
+                                                    carbsPer100g = bestFood.carbsPer100g,
+                                                    sugarPer100g = bestFood.sugarPer100g,
+                                                    fatPer100g = bestFood.fatPer100g,
+                                                    saturatedFatPer100g = bestFood.saturatedFatPer100g,
+                                                    alcoholPercent = bestFood.alcoholPercent,
+                                                    baseUnit = bestFood.baseUnit,
+                                                    store = bestFood.store,
+                                                    category = bestFood.category,
+                                                    barcode = bestFood.barcode,
+                                                    isGeneric = bestFood.isGeneric
+                                                )
+                                            } else {
+                                                // Artikel fehlt wirklich komplett -> Pseudo-Import anbieten (passiert in IngredientRow)
+                                                ing
+                                            }
+                                        }
+                                        ingredients.clear()
+                                        ingredients.addAll(resolved)
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (hasOrphans) MaterialTheme.colorScheme.error else Color(0xFFFFA000)
+                                    ),
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Text(
+                                        if (hasOrphans) "ALLE FEHLENDEN ARTIKEL ÜBERNEHMEN" 
+                                        else "ALLE AN BIBLIOTHEK ANPASSEN", 
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
                             }
                         }
                     }
@@ -813,12 +909,31 @@ fun IngredientRow(
         baseList.distinctBy { it.id }.filter { it.id != food?.id }.sortedBy { it.name }
     }
     var showSwapMenu by remember { mutableStateOf(false) }
-    val isOrphaned = food == null
+    
+    val matchStatus = remember(ingredient, foods) {
+        val foodById = foods.find { it.id == ingredient.foodItemId }
+        if (foodById != null && foodById.matchesIngredient(ingredient)) PlanMatchStatus.EXACT
+        else {
+            val similar = foods.find { it.name.trim().equals(ingredient.name.trim(), ignoreCase = true) && (it.brand?.trim() ?: "").equals(ingredient.brand?.trim() ?: "", ignoreCase = true) }
+            when {
+                similar == null -> PlanMatchStatus.MISSING
+                similar.matchesIngredient(ingredient) -> PlanMatchStatus.EXACT
+                else -> PlanMatchStatus.DIVERGENT
+            }
+        }
+    }
+    
+    val isOrphaned = matchStatus == PlanMatchStatus.MISSING
+    val isDivergent = matchStatus == PlanMatchStatus.DIVERGENT
 
     Card(
         modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        colors = if (isOrphaned) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)) 
-                 else CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+        colors = when {
+            isOrphaned -> CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f))
+            isDivergent -> CardDefaults.cardColors(containerColor = Color(0xFFFFE082).copy(alpha = 0.2f))
+            else -> CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+        },
+        border = if (isDivergent) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFC107).copy(alpha = 0.5f)) else null
     ) {
         Column(Modifier.padding(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -827,15 +942,42 @@ fun IngredientRow(
                         Text(
                             text = ingredient.name, 
                             fontWeight = FontWeight.Bold,
-                            color = if (isOrphaned) Color(0xFF2E7D32) else Color.Unspecified
+                            color = when {
+                                isOrphaned -> Color.Red
+                                isDivergent -> Color(0xFFFFA000)
+                                else -> Color.Unspecified
+                            }
                         )
-                        if (isOrphaned) {
-                            Icon(
-                                imageVector = Icons.Default.Save, 
-                                contentDescription = "Wird automatisch gespeichert", 
-                                tint = Color(0xFF2E7D32), 
-                                modifier = Modifier.size(14.dp).padding(start = 4.dp)
-                            )
+                        if (isOrphaned || isDivergent) {
+                            IconButton(
+                                onClick = {
+                                    val pseudoEntry = FoodEntryEntity(
+                                        foodItemId = ingredient.foodItemId,
+                                        name = ingredient.name,
+                                        brand = ingredient.brand,
+                                        kcalPer100g = ingredient.kcalPer100g,
+                                        proteinPer100g = ingredient.proteinPer100g,
+                                        carbsPer100g = ingredient.carbsPer100g,
+                                        sugarPer100g = ingredient.sugarPer100g,
+                                        fatPer100g = ingredient.fatPer100g,
+                                        saturatedFatPer100g = ingredient.saturatedFatPer100g,
+                                        alcoholPercent = ingredient.alcoholPercent,
+                                        baseUnit = ingredient.baseUnit,
+                                        store = ingredient.store,
+                                        category = ingredient.category,
+                                        isGeneric = ingredient.isGeneric
+                                    )
+                                    vm.importPlannedEntryToLibrary(pseudoEntry, replaceExisting = isDivergent)
+                                },
+                                modifier = Modifier.size(24.dp).padding(start = 4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (isOrphaned) Icons.Default.CloudDownload else Icons.Default.Sync, 
+                                    contentDescription = if (isOrphaned) "Zutat übernehmen" else "Zutat aktualisieren", 
+                                    tint = if (isOrphaned) MaterialTheme.colorScheme.error else Color(0xFFFFA000),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
                         }
                         
                         if (relatives.isNotEmpty()) {
@@ -924,7 +1066,9 @@ fun IngredientRow(
                         }
                     }
                     if (isOrphaned) {
-                        Text("Wird automatisch gespeichert", style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32))
+                        Text("Nicht in Bibliothek", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                    } else if (isDivergent) {
+                        Text("Abweichende Werte", style = MaterialTheme.typography.labelSmall, color = Color(0xFFFFA000))
                     } else {
                         food?.let { f ->
                             if (!f.brand.isNullOrBlank() || !f.store.isNullOrBlank()) {

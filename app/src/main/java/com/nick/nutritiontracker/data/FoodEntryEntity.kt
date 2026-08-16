@@ -27,6 +27,10 @@ data class FoodEntryEntity(
     var alcoholPercent: Double = 0.0,
     var baseUnit: String = "g",
     var store: String? = null,
+    var category: String? = null,
+    var barcode: String? = null,
+    @get:PropertyName("isGeneric") @set:PropertyName("isGeneric")
+    var isGeneric: Boolean = false,
     
     // New fields for meal support
     @get:PropertyName("isMeal") @set:PropertyName("isMeal")
@@ -35,7 +39,13 @@ data class FoodEntryEntity(
     @get:PropertyName("isPlanned") @set:PropertyName("isPlanned")
     var isPlanned: Boolean = false,
     var imageUrl: String? = null,
-    var tags: List<String> = emptyList()
+    var tags: List<String> = emptyList(),
+    
+    // Tracking for shared plans
+    var plannedByUid: String? = null,
+    var plannedByName: String? = null,
+    var lastModifiedByUid: String? = null,
+    var lastModifiedByName: String? = null
 ) {
     @get:Exclude
     val kcal: Double get() = if (isMeal) mealIngredients?.sumOf { it.kcal } ?: 0.0 else kcalPer100g * grams / 100.0

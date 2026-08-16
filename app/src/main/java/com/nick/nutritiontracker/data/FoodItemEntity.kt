@@ -4,6 +4,8 @@ import androidx.annotation.Keep
 import com.google.firebase.firestore.PropertyName
 import kotlinx.serialization.Serializable
 
+import kotlin.math.abs
+
 @Keep
 @Serializable
 data class FoodItemEntity(
@@ -30,6 +32,52 @@ data class FoodItemEntity(
     var isPantryItem: Boolean = false,
     var lastModified: Long = System.currentTimeMillis()
 ) {
+    fun isSimilarTo(other: FoodEntryEntity): Boolean {
+        val otherBarcode = other.barcode?.trim() ?: ""
+        val thisBarcode = barcode?.trim() ?: ""
+        
+        // Barcode-Match ist am stärksten (wenn vorhanden)
+        if (otherBarcode.isNotEmpty() && thisBarcode.isNotEmpty() && otherBarcode == thisBarcode) return true
+        
+        val otherName = other.name.trim().lowercase()
+        val thisName = name.trim().lowercase()
+        val otherBrand = other.brand?.trim()?.lowercase() ?: ""
+        val thisBrand = brand?.trim()?.lowercase() ?: ""
+
+        // Namens-Match (Name & Marke müssen übereinstimmen)
+        return thisName == otherName && thisBrand == otherBrand
+    }
+
+    private fun eq(a: Double, b: Double) = abs(a - b) < 0.01
+
+    fun matchesDataOf(other: FoodEntryEntity): Boolean {
+        if (!isSimilarTo(other)) return false
+        
+        return eq(kcalPer100g, other.kcalPer100g) &&
+                eq(proteinPer100g, other.proteinPer100g) &&
+                eq(carbsPer100g, other.carbsPer100g) &&
+                eq(sugarPer100g, other.sugarPer100g) &&
+                eq(fatPer100g, other.fatPer100g) &&
+                eq(saturatedFatPer100g, other.saturatedFatPer100g) &&
+                eq(alcoholPercent, other.alcoholPercent) &&
+                baseUnit.trim().lowercase() == other.baseUnit.trim().lowercase() &&
+                (category?.trim() ?: "") == (other.category?.trim() ?: "") &&
+                (barcode?.trim() ?: "") == (other.barcode?.trim() ?: "") &&
+                isGeneric == other.isGeneric
+    }
+
+    fun matchesIngredient(ing: MealIngredientEntity): Boolean {
+        val other = FoodEntryEntity(
+            name = ing.name, brand = ing.brand, kcalPer100g = ing.kcalPer100g,
+            proteinPer100g = ing.proteinPer100g, carbsPer100g = ing.carbsPer100g,
+            sugarPer100g = ing.sugarPer100g, fatPer100g = ing.fatPer100g,
+            saturatedFatPer100g = ing.saturatedFatPer100g, alcoholPercent = ing.alcoholPercent,
+            baseUnit = ing.baseUnit, category = ing.category, barcode = ing.barcode,
+            isGeneric = ing.isGeneric
+        )
+        return matchesDataOf(other)
+    }
+
     val complexCarbsPer100g: Double
         get() = (carbsPer100g - sugarPer100g).coerceAtLeast(0.0)
 

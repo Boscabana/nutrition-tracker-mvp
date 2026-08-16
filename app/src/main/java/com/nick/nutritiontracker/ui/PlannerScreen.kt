@@ -39,6 +39,7 @@ import coil.compose.AsyncImage
 import com.nick.nutritiontracker.data.FoodEntryEntity
 import com.nick.nutritiontracker.data.FoodItemEntity
 import com.nick.nutritiontracker.data.MealEntity
+import com.nick.nutritiontracker.viewmodel.PlanMatchStatus
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -157,8 +158,17 @@ fun PlannerScreen(vm: NutritionViewModel, @Suppress("UNUSED_PARAMETER") userProf
                     date = date,
                     entries = vm.plannedEntries.filter { it.dateIso == date.toString() },
                     onAddClick = { showPickerForDate = date },
-                    onEntryClick = { entryToEdit = it },
-                    onDeleteEntry = { entryToDelete = it }
+                    onEntryClick = { entry ->
+                        val status = vm.getMatchStatus(entry)
+                        if (status == PlanMatchStatus.EXACT) {
+                            entryToEdit = entry
+                        } else {
+                            // Dialog wird im Edit-Flow von NutritionApp angezeigt
+                            entryToEdit = entry
+                        }
+                    },
+                    onDeleteEntry = { entryToDelete = it },
+                    vm = vm
                 )
             }
         }
@@ -188,7 +198,8 @@ fun DayPlannerCard(
     entries: List<FoodEntryEntity>,
     onAddClick: () -> Unit,
     onEntryClick: (FoodEntryEntity) -> Unit,
-    onDeleteEntry: (FoodEntryEntity) -> Unit
+    onDeleteEntry: (FoodEntryEntity) -> Unit,
+    vm: NutritionViewModel
 ) {
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEEE, d. MMMM", Locale.GERMAN) }
     val isToday = date == LocalDate.now()
@@ -224,7 +235,17 @@ fun DayPlannerCard(
                         onEditRequest = { onEntryClick(entry) },
                         key = entry.id
                     ) {
-                        PlannedEntryRow(entry)
+                        val status = vm.getMatchStatus(entry)
+                        
+                        val onImport: () -> Unit = {
+                            if (entry.isMeal) {
+                                vm.importPlannedMealToLibrary(entry)
+                            } else {
+                                vm.importPlannedEntryToLibrary(entry, replaceExisting = true)
+                            }
+                        }
+                        
+                        PlannedEntryRow(entry, status, onImportClick = onImport)
                     }
                     Spacer(Modifier.height(4.dp))
                 }
@@ -389,12 +410,25 @@ fun PlannedItemPickerBottomSheet(
 }
 
 @Composable
-fun PlannedEntryRow(entry: FoodEntryEntity) {
+fun PlannedEntryRow(entry: FoodEntryEntity, status: PlanMatchStatus = PlanMatchStatus.EXACT, onImportClick: () -> Unit = {}) {
+    val isMissing = status == PlanMatchStatus.MISSING
+    val isDivergent = status == PlanMatchStatus.DIVERGENT
+    val isTemplateMissing = status == PlanMatchStatus.TEMPLATE_MISSING
+    val isExact = status == PlanMatchStatus.EXACT
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+        border = androidx.compose.foundation.BorderStroke(
+            width = 1.dp, 
+            color = when {
+                isMissing -> MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                isDivergent -> Color(0xFFFFC107).copy(alpha = 0.6f)
+                isTemplateMissing -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.5f)
+                else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+            }
+        )
     ) {
         Row(
             Modifier.padding(10.dp),
@@ -402,8 +436,13 @@ fun PlannedEntryRow(entry: FoodEntryEntity) {
         ) {
             Surface(
                 shape = RoundedCornerShape(6.dp),
-                color = if (entry.isMeal) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f) 
-                        else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f),
+                color = when {
+                    isTemplateMissing -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.3f)
+                    entry.isMeal -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.1f)
+                    isMissing -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                    isDivergent -> Color(0xFFFFE082).copy(alpha = 0.3f)
+                    else -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)
+                },
                 modifier = Modifier.size(40.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -416,17 +455,79 @@ fun PlannedEntryRow(entry: FoodEntryEntity) {
                         )
                     } else {
                         Icon(
-                            if (entry.isMeal) Icons.Default.Restaurant else Icons.Default.Fastfood, 
-                            null, 
+                            imageVector = when {
+                                isMissing -> Icons.Default.CloudDownload
+                                isDivergent -> Icons.Default.SyncProblem
+                                isTemplateMissing -> Icons.Default.AutoAwesome
+                                entry.isMeal -> Icons.Default.Restaurant
+                                else -> Icons.Default.Fastfood
+                            }, 
+                            contentDescription = null, 
                             modifier = Modifier.size(20.dp),
-                            tint = if (entry.isMeal) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondary
+                            tint = when {
+                                isMissing -> MaterialTheme.colorScheme.error
+                                isDivergent -> Color(0xFFFFA000)
+                                isTemplateMissing -> MaterialTheme.colorScheme.tertiary
+                                entry.isMeal -> MaterialTheme.colorScheme.tertiary
+                                else -> MaterialTheme.colorScheme.secondary
+                            }
                         )
                     }
                 }
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(entry.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(entry.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                    if (!isExact) {
+                        Spacer(Modifier.width(8.dp))
+                        Surface(
+                            onClick = onImportClick,
+                            color = when {
+                                isMissing -> MaterialTheme.colorScheme.errorContainer
+                                isTemplateMissing -> MaterialTheme.colorScheme.tertiaryContainer
+                                else -> Color(0xFFFFECB3)
+                            },
+                            shape = RoundedCornerShape(4.dp),
+                            modifier = Modifier.height(20.dp)
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = when {
+                                        isMissing -> Icons.Default.CloudDownload
+                                        isTemplateMissing -> Icons.Default.Save
+                                        else -> Icons.Default.Sync
+                                    }, 
+                                    null, 
+                                    modifier = Modifier.size(10.dp), 
+                                    tint = when {
+                                        isMissing -> MaterialTheme.colorScheme.error
+                                        isTemplateMissing -> MaterialTheme.colorScheme.tertiary
+                                        else -> Color(0xFFE65100)
+                                    }
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = when {
+                                        isMissing -> "ÜBERNEHMEN"
+                                        isTemplateMissing -> "SPEICHERN"
+                                        else -> "AKTUALISIEREN"
+                                    }, 
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = MaterialTheme.typography.labelSmall.fontSize * 0.7), 
+                                    fontWeight = FontWeight.Black, 
+                                    color = when {
+                                        isMissing -> MaterialTheme.colorScheme.error
+                                        isTemplateMissing -> MaterialTheme.colorScheme.tertiary
+                                        else -> Color(0xFFE65100)
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
                 if (!entry.brand.isNullOrBlank() || !entry.store.isNullOrBlank()) {
                     Text(
                         text = (entry.brand ?: "") + (if (!entry.store.isNullOrBlank()) " @ ${entry.store}" else ""),
@@ -436,6 +537,20 @@ fun PlannedEntryRow(entry: FoodEntryEntity) {
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("${entry.mealSlot} · ${entry.displayAmount()}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                    
+                    // Verfasser-Info
+                    val creator = entry.plannedByName
+                    val modifier = entry.lastModifiedByName
+                    if (creator != null) {
+                        Spacer(Modifier.width(8.dp))
+                        val text = if (modifier != null && modifier != creator) "Von $creator (Geänd. $modifier)" else "Von $creator"
+                        Text(
+                            text = "($text)",
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = MaterialTheme.typography.labelSmall.fontSize * 0.9),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                        )
+                    }
+
                     if (entry.tags.isNotEmpty()) {
                         Spacer(Modifier.width(8.dp))
                         entry.tags.take(2).forEach { tag ->

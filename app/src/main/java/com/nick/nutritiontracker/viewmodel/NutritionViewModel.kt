@@ -19,6 +19,13 @@ import java.time.temporal.ChronoUnit
 import java.util.UUID
 import kotlin.random.Random
 
+enum class PlanMatchStatus {
+    EXACT,            // Alles vorhanden
+    DIVERGENT,        // Artikel existiert, aber Werte weichen ab
+    TEMPLATE_MISSING, // Alle Artikel da, aber Mahlzeit-Vorlage fehlt
+    MISSING           // Artikel fehlen komplett
+}
+
 class NutritionViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = application.getSharedPreferences("nutrition_tracker", Context.MODE_PRIVATE)
     private val json = Json {
@@ -379,6 +386,273 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun findFoodByBarcode(barcode: String): FoodItemEntity? = foods.find { it.barcode == barcode }
 
+    fun getMatchStatus(entry: FoodEntryEntity): PlanMatchStatus {
+        if (entry.isMeal) {
+            val ings = entry.mealIngredients ?: return PlanMatchStatus.EXACT
+            val statuses = ings.map { ing ->
+                // Pseudo-Objekt für Namens-Check erstellen, inklusive isGeneric!
+                val pseudo = FoodEntryEntity(
+                    name = ing.name, 
+                    brand = ing.brand, 
+                    barcode = ing.barcode, 
+                    isGeneric = ing.isGeneric
+                )
+                
+                // Priorität 1: ID-Match
+                val foodById = foods.find { it.id == ing.foodItemId }
+                
+                // Wenn ID gefunden, prüfen wir ob es wirklich derselbe Artikel ist
+                val food = if (foodById != null && foodById.isSimilarTo(pseudo)) {
+                    foodById
+                } else {
+                    // Priorität 2: Ähnlichkeits-Suche (Name/Marke/Barcode)
+                    foods.find { it.isSimilarTo(pseudo) }
+                }
+                
+                when {
+                    food == null -> PlanMatchStatus.MISSING
+                    food.matchesIngredient(ing) -> PlanMatchStatus.EXACT
+                    else -> PlanMatchStatus.DIVERGENT
+                }
+            }
+
+            if (statuses.any { it == PlanMatchStatus.MISSING }) return PlanMatchStatus.MISSING
+            if (statuses.any { it == PlanMatchStatus.DIVERGENT }) return PlanMatchStatus.DIVERGENT
+            
+            // Vorlagen-Check
+            val mealExists = meals.any { m -> 
+                m.name.equals(entry.name, ignoreCase = true) && 
+                m.ingredients.size == ings.size
+            }
+            
+            return if (mealExists) PlanMatchStatus.EXACT else PlanMatchStatus.TEMPLATE_MISSING
+        } else {
+            val pseudo = FoodEntryEntity(
+                name = entry.name, 
+                brand = entry.brand, 
+                barcode = entry.barcode, 
+                isGeneric = entry.isGeneric
+            )
+            
+            // Priorität 1: ID-Match
+            val foodById = foods.find { it.id == entry.foodItemId }
+            val food = if (foodById != null && foodById.isSimilarTo(pseudo)) {
+                foodById
+            } else {
+                // Priorität 2: Ähnlichkeits-Suche
+                foods.find { it.isSimilarTo(pseudo) }
+            }
+
+            return when {
+                food == null -> PlanMatchStatus.MISSING
+                food.matchesDataOf(entry) -> PlanMatchStatus.EXACT
+                else -> PlanMatchStatus.DIVERGENT
+            }
+        }
+    }
+
+    fun importPlannedMealToLibrary(entry: FoodEntryEntity) {
+        if (!entry.isMeal) return
+        val ingredients = entry.mealIngredients ?: return
+        
+        val householdId = firebaseManager.household.value?.id
+        val user = firebaseManager.currentUser.value
+        
+        // 1. Alle Zutaten importieren/zuordnen
+        val localIngredients = resolveIngredients(ingredients)
+
+        // 2. Mahlzeit als Vorlage in die eigene Bibliothek speichern
+        val newMealTemplate = MealEntity(
+            id = nextMealId++,
+            name = entry.name,
+            ingredients = localIngredients,
+            servings = entry.amount, // Wir nehmen die Menge aus dem Planer als Basis-Portion
+            tags = entry.tags,
+            imageUrl = entry.imageUrl,
+            lastModified = System.currentTimeMillis()
+        )
+        meals.add(newMealTemplate)
+        saveMeals()
+        if (user != null) {
+            viewModelScope.launch { firestoreRepository.savePersonalMeal(user.uid, newMealTemplate) }
+        }
+
+        // 3. Den Planer-Eintrag aktualisieren (Zutaten-Links korrigieren)
+        val entryIdx = plannedEntries.indexOfFirst { it.id == entry.id }
+        if (entryIdx != -1) {
+            val updated = plannedEntries[entryIdx].copy(
+                mealIngredients = localIngredients,
+                lastModifiedByUid = user?.uid,
+                lastModifiedByName = userProfile.firstName
+            )
+            plannedEntries[entryIdx] = updated
+            savePlannedEntries()
+            if (householdId != null) {
+                viewModelScope.launch { firestoreRepository.addPlannedEntry(householdId, updated) }
+            }
+        }
+    }
+
+    private fun resolveIngredients(ingredients: List<MealIngredientEntity>): List<MealIngredientEntity> {
+        return ingredients.map { ing ->
+            val pseudoEntry = FoodEntryEntity(
+                foodItemId = ing.foodItemId,
+                name = ing.name,
+                brand = ing.brand,
+                kcalPer100g = ing.kcalPer100g,
+                proteinPer100g = ing.proteinPer100g,
+                carbsPer100g = ing.carbsPer100g,
+                sugarPer100g = ing.sugarPer100g,
+                fatPer100g = ing.fatPer100g,
+                saturatedFatPer100g = ing.saturatedFatPer100g,
+                alcoholPercent = ing.alcoholPercent,
+                baseUnit = ing.baseUnit,
+                store = ing.store,
+                category = ing.category,
+                barcode = ing.barcode,
+                isGeneric = ing.isGeneric
+            )
+            
+            val similar = foods.find { it.isSimilarTo(pseudoEntry) }
+            val finalFoodId = if (similar != null) {
+                similar.id
+            } else {
+                val newFood = addFood(
+                    name = pseudoEntry.name,
+                    kcal = pseudoEntry.kcalPer100g,
+                    protein = pseudoEntry.proteinPer100g,
+                    carbs = pseudoEntry.carbsPer100g,
+                    sugar = pseudoEntry.sugarPer100g,
+                    fat = pseudoEntry.fatPer100g,
+                    saturatedFat = pseudoEntry.saturatedFatPer100g,
+                    alcoholPercent = pseudoEntry.alcoholPercent,
+                    baseUnit = pseudoEntry.baseUnit,
+                    portions = emptyList(),
+                    packages = emptyList(),
+                    brand = pseudoEntry.brand,
+                    store = pseudoEntry.store,
+                    category = pseudoEntry.category,
+                    barcode = pseudoEntry.barcode,
+                    isGeneric = pseudoEntry.isGeneric
+                )
+                newFood.id
+            }
+            ing.copy(foodItemId = finalFoodId)
+        }
+    }
+
+    fun fixMealTemplateArticles(meal: MealEntity) {
+        val user = firebaseManager.currentUser.value ?: return
+        val resolved = resolveIngredients(meal.ingredients)
+        val updatedMeal = meal.copy(ingredients = resolved, lastModified = System.currentTimeMillis())
+        
+        val idx = meals.indexOfFirst { it.id == meal.id }
+        if (idx != -1) {
+            meals[idx] = updatedMeal
+            saveMeals()
+            viewModelScope.launch { firestoreRepository.savePersonalMeal(user.uid, updatedMeal) }
+        }
+    }
+
+    fun importPlannedEntryToLibrary(entry: FoodEntryEntity, replaceExisting: Boolean = false) {
+        if (entry.isMeal) return 
+        
+        val similar = foods.find { it.isSimilarTo(entry) }
+        val householdId = firebaseManager.household.value?.id
+        val finalFoodId: Long
+
+        if (similar != null && replaceExisting) {
+            // Existierenden Artikel aktualisieren
+            val updated = similar.copy(
+                kcalPer100g = entry.kcalPer100g,
+                proteinPer100g = entry.proteinPer100g,
+                carbsPer100g = entry.carbsPer100g,
+                sugarPer100g = entry.sugarPer100g,
+                fatPer100g = entry.fatPer100g,
+                saturatedFatPer100g = entry.saturatedFatPer100g,
+                alcoholPercent = entry.alcoholPercent,
+                baseUnit = entry.baseUnit,
+                category = entry.category,
+                barcode = entry.barcode,
+                store = entry.store,
+                isGeneric = entry.isGeneric,
+                lastModified = System.currentTimeMillis()
+            )
+            updateFood(updated)
+            finalFoodId = updated.id
+        } else {
+            // Neuen Artikel anlegen (entweder weil MISSING oder weil User "Nebeneinander" wollte)
+            val newFood = addFood(
+                name = entry.name,
+                kcal = entry.kcalPer100g,
+                protein = entry.proteinPer100g,
+                carbs = entry.carbsPer100g,
+                sugar = entry.sugarPer100g,
+                fat = entry.fatPer100g,
+                saturatedFat = entry.saturatedFatPer100g,
+                alcoholPercent = entry.alcoholPercent,
+                baseUnit = entry.baseUnit,
+                portions = emptyList(),
+                packages = emptyList(),
+                brand = entry.brand,
+                store = entry.store,
+                category = entry.category,
+                barcode = entry.barcode,
+                isGeneric = entry.isGeneric
+            )
+            finalFoodId = newFood.id
+        }
+
+        // Alle Planer-Einträge aktualisieren
+        var changedAny = false
+        val currentUser = firebaseManager.currentUser.value
+        plannedEntries.forEachIndexed { idx, planned ->
+            if (planned.isMeal) {
+                val ingredients = planned.mealIngredients
+                if (ingredients != null) {
+                    var mealChanged = false
+                    val updatedIngs = ingredients.map { ing ->
+                        if (ing.name.trim().equals(entry.name.trim(), ignoreCase = true) && 
+                            (ing.brand?.trim() ?: "").equals(entry.brand?.trim() ?: "", ignoreCase = true)) {
+                            mealChanged = true
+                            ing.copy(foodItemId = finalFoodId)
+                        } else ing
+                    }
+                    if (mealChanged) {
+                        val updatedMeal = planned.copy(
+                            mealIngredients = updatedIngs,
+                            lastModifiedByUid = currentUser?.uid,
+                            lastModifiedByName = userProfile.firstName
+                        )
+                        plannedEntries[idx] = updatedMeal
+                        if (householdId != null) {
+                            viewModelScope.launch { firestoreRepository.addPlannedEntry(householdId, updatedMeal) }
+                        }
+                        changedAny = true
+                    }
+                }
+            } else {
+                if (planned.name.trim().equals(entry.name.trim(), ignoreCase = true) && 
+                    (planned.brand?.trim() ?: "").equals(entry.brand?.trim() ?: "", ignoreCase = true)) {
+                    val updated = planned.copy(
+                        foodItemId = finalFoodId,
+                        lastModifiedByUid = currentUser?.uid,
+                        lastModifiedByName = userProfile.firstName
+                    )
+                    plannedEntries[idx] = updated
+                    if (householdId != null) {
+                        viewModelScope.launch { firestoreRepository.addPlannedEntry(householdId, updated) }
+                    }
+                    changedAny = true
+                }
+            }
+        }
+
+        if (changedAny) {
+            savePlannedEntries()
+        }
+    }
+
     // --- Calorie Calculation ---
     fun calculateStepKcal(dateIso: String, profile: UserProfile): Double {
         val steps = dailySteps[dateIso] ?: 0
@@ -543,7 +817,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         saturatedFatPer100g = finalFood.saturatedFatPer100g,
                         alcoholPercent = finalFood.alcoholPercent,
                         baseUnit = finalFood.baseUnit,
-                        store = finalFood.store
+                        store = finalFood.store,
+                        category = finalFood.category,
+                        barcode = finalFood.barcode,
+                        isGeneric = finalFood.isGeneric
                     )
                     allEntries[i] = updatedEntry
                     if (user != null) {
@@ -566,7 +843,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                                     saturatedFatPer100g = finalFood.saturatedFatPer100g,
                                     baseUnit = finalFood.baseUnit,
                                     store = finalFood.store,
-                                    brand = finalFood.brand
+                                    brand = finalFood.brand,
+                                    category = finalFood.category,
+                                    barcode = finalFood.barcode,
+                                    isGeneric = finalFood.isGeneric
                                 )
                             } else ing
                         }
@@ -598,7 +878,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                             saturatedFatPer100g = finalFood.saturatedFatPer100g,
                             baseUnit = finalFood.baseUnit,
                             store = finalFood.store,
-                            brand = finalFood.brand
+                            brand = finalFood.brand,
+                            category = finalFood.category,
+                            barcode = finalFood.barcode,
+                            isGeneric = finalFood.isGeneric
                         )
                     } else ing
                 }
@@ -626,7 +909,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         saturatedFatPer100g = finalFood.saturatedFatPer100g,
                         alcoholPercent = finalFood.alcoholPercent,
                         baseUnit = finalFood.baseUnit,
-                        store = finalFood.store
+                        store = finalFood.store,
+                        category = finalFood.category,
+                        barcode = finalFood.barcode,
+                        isGeneric = finalFood.isGeneric
                     )
                     plannedEntries[i] = updatedEntry
                     if (householdId != null) {
@@ -649,7 +935,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                                     saturatedFatPer100g = finalFood.saturatedFatPer100g,
                                     baseUnit = finalFood.baseUnit,
                                     store = finalFood.store,
-                                    brand = finalFood.brand
+                                    brand = finalFood.brand,
+                                    category = finalFood.category,
+                                    barcode = finalFood.barcode,
+                                    isGeneric = finalFood.isGeneric
                                 )
                             } else ing
                         }
@@ -778,7 +1067,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             saturatedFatPer100g = food.saturatedFatPer100g,
             alcoholPercent = food.alcoholPercent,
             baseUnit = food.baseUnit,
-            store = food.store
+            store = food.store,
+            isGeneric = food.isGeneric
         )
         addEntry(entry)
     }
@@ -797,10 +1087,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun addMealEntry(meal: MealEntity, mealSlot: String, servings: Double = 1.0) {
         val ratio = servings / meal.servings
         val adjustedIngredients = meal.ingredients.map { ing ->
+            val food = foods.find { it.id == ing.foodItemId }
             ing.copy(
                 id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
                 amount = ing.amount * ratio,
-                grams = ing.grams * ratio
+                grams = ing.grams * ratio,
+                category = food?.category ?: ing.category,
+                barcode = food?.barcode ?: ing.barcode,
+                isGeneric = food?.isGeneric ?: ing.isGeneric
             )
         }
         val entry = FoodEntryEntity(
@@ -875,6 +1169,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val unitLabel = pkg?.name ?: portion?.name ?: food.baseUnit
 
         val entryId = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000)
+        val user = firebaseManager.currentUser.value
         val entry = FoodEntryEntity(
             id = entryId,
             dateIso = date.toString(),
@@ -894,7 +1189,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             alcoholPercent = food.alcoholPercent,
             baseUnit = food.baseUnit,
             store = food.store,
-            isPlanned = true
+            category = food.category,
+            barcode = food.barcode,
+            isGeneric = food.isGeneric,
+            isPlanned = true,
+            plannedByUid = user?.uid,
+            plannedByName = userProfile.firstName,
+            lastModifiedByUid = user?.uid,
+            lastModifiedByName = userProfile.firstName
         )
         addPlannedEntry(entry)
         internalAddToShoppingList(food, amount, unitLabel, pkg, sourceName = "Einzelartikel @ ${date}", plannedEntryId = entryId)
@@ -919,11 +1221,16 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val source = "${meal.name} @ ${date}"
 
         val entryId = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000)
+        val user = firebaseManager.currentUser.value
         val adjustedIngredients = meal.ingredients.map { ing ->
+            val food = foods.find { it.id == ing.foodItemId }
             ing.copy(
                 id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
                 amount = ing.amount * ratio,
-                grams = ing.grams * ratio
+                grams = ing.grams * ratio,
+                category = food?.category ?: ing.category,
+                barcode = food?.barcode ?: ing.barcode,
+                isGeneric = food?.isGeneric ?: ing.isGeneric
             )
         }
         val entry = FoodEntryEntity(
@@ -937,7 +1244,11 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             unitLabel = "Portion(en)",
             imageUrl = meal.imageUrl,
             tags = meal.tags,
-            isPlanned = true
+            isPlanned = true,
+            plannedByUid = user?.uid,
+            plannedByName = userProfile.firstName,
+            lastModifiedByUid = user?.uid,
+            lastModifiedByName = userProfile.firstName
         )
         addPlannedEntry(entry)
 
@@ -945,40 +1256,66 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             val food = foods.find { it.id == ing.foodItemId }
             // Nur hinzufügen, wenn es kein Vorratsartikel ist
             if (food?.isPantryItem != true) {
-                internalAddToShoppingList(food ?: FoodItemEntity(name = ing.name), ing.amount * ratio, ing.unitLabel, sourceName = source, plannedEntryId = entryId)
+                internalAddToShoppingList(
+                    food ?: FoodItemEntity(name = ing.name, category = ing.category), 
+                    ing.amount * ratio, 
+                    ing.unitLabel, 
+                    sourceName = source, 
+                    plannedEntryId = entryId
+                )
             }
         }
     }
 
     fun updatePlannedEntry(updatedEntry: FoodEntryEntity) {
+        val user = firebaseManager.currentUser.value
         val householdId = firebaseManager.household.value?.id
         val index = plannedEntries.indexOfFirst { it.id == updatedEntry.id }
         if (index != -1) {
-            plannedEntries[index] = updatedEntry
+            val finalEntry = updatedEntry.copy(
+                lastModifiedByUid = user?.uid,
+                lastModifiedByName = userProfile.firstName
+            )
+            plannedEntries[index] = finalEntry
             savePlannedEntries()
             if (householdId != null) {
                 viewModelScope.launch { 
-                    firestoreRepository.addPlannedEntry(householdId, updatedEntry)
+                    firestoreRepository.addPlannedEntry(householdId, finalEntry)
                     
                     // Einkaufsliste aktualisieren
                     // 1. Bestehende Items für diesen Eintrag entfernen
-                    val itemsToDelete = shoppingList.filter { it.plannedEntryId == updatedEntry.id }.map { it.id }
+                    val itemsToDelete = shoppingList.filter { it.plannedEntryId == finalEntry.id }.map { it.id }
                     itemsToDelete.forEach { deleteShoppingItem(it) }
                     
                     // 2. Neue Items hinzufügen (basierend auf geänderter Menge/Portionen)
-                    if (updatedEntry.isMeal) {
-                        val ingredients = updatedEntry.mealIngredients ?: emptyList()
-                        val source = "${updatedEntry.name} @ ${updatedEntry.dateIso}"
+                    if (finalEntry.isMeal) {
+                        val ingredients = finalEntry.mealIngredients ?: emptyList()
+                        val source = "${finalEntry.name} @ ${finalEntry.dateIso}"
                         ingredients.forEach { ing ->
                             val food = foods.find { it.id == ing.foodItemId }
                             if (food?.isPantryItem != true) {
-                                internalAddToShoppingList(food ?: FoodItemEntity(name = ing.name), ing.amount, ing.unitLabel, sourceName = source, plannedEntryId = updatedEntry.id)
+                                internalAddToShoppingList(
+                                    food ?: FoodItemEntity(name = ing.name, category = ing.category), 
+                                    ing.amount, 
+                                    ing.unitLabel, 
+                                    sourceName = source, 
+                                    plannedEntryId = finalEntry.id
+                                )
                             }
                         }
                     } else {
-                        val food = foods.find { it.id == updatedEntry.foodItemId }
+                        val food = foods.find { it.id == finalEntry.foodItemId }
                         if (food != null && !food.isPantryItem) {
-                            internalAddToShoppingList(food, updatedEntry.amount, updatedEntry.unitLabel, sourceName = "Einzelartikel @ ${updatedEntry.dateIso}", plannedEntryId = updatedEntry.id)
+                            internalAddToShoppingList(food, finalEntry.amount, finalEntry.unitLabel, sourceName = "Einzelartikel @ ${finalEntry.dateIso}", plannedEntryId = finalEntry.id)
+                        } else if (food == null) {
+                            // Fallback für unbekannte Einzelartikel (z.B. vom Partner geplant)
+                            internalAddToShoppingList(
+                                FoodItemEntity(name = finalEntry.name, category = finalEntry.category, brand = finalEntry.brand),
+                                finalEntry.amount,
+                                finalEntry.unitLabel,
+                                sourceName = "Einzelartikel @ ${finalEntry.dateIso}",
+                                plannedEntryId = finalEntry.id
+                            )
                         }
                     }
                 }

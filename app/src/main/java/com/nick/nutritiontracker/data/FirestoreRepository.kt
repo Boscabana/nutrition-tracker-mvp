@@ -46,6 +46,7 @@ class FirestoreRepository {
                         if (entry != null) {
                             entry.isMeal = doc.getBoolean("isMeal") ?: entry.isMeal
                             entry.isPlanned = doc.getBoolean("isPlanned") ?: entry.isPlanned
+                            entry.isGeneric = doc.getBoolean("isGeneric") ?: doc.getBoolean("generic") ?: entry.isGeneric
                         }
                         entry
                     } ?: emptyList()
@@ -200,6 +201,7 @@ class FirestoreRepository {
                         if (entry != null) {
                             entry.isMeal = doc.getBoolean("isMeal") ?: entry.isMeal
                             entry.isPlanned = doc.getBoolean("isPlanned") ?: entry.isPlanned
+                            entry.isGeneric = doc.getBoolean("isGeneric") ?: doc.getBoolean("generic") ?: entry.isGeneric
                         }
                         entry
                     } ?: emptyList()
