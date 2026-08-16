@@ -21,5 +21,6 @@ data class ShoppingItem(
     var weightGrams: Double = 0.0,
     var baseUnit: String = "g",
     @get:PropertyName("isPantryItem") @set:PropertyName("isPantryItem")
-    var isPantryItem: Boolean = false
+    var isPantryItem: Boolean = false,
+    var plannedEntryId: Long? = null
 )

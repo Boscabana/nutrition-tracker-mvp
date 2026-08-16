@@ -874,8 +874,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         }
         val unitLabel = pkg?.name ?: portion?.name ?: food.baseUnit
 
+        val entryId = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000)
         val entry = FoodEntryEntity(
-            id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
+            id = entryId,
             dateIso = date.toString(),
             mealSlot = mealSlot,
             amount = amount,
@@ -896,7 +897,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             isPlanned = true
         )
         addPlannedEntry(entry)
-        internalAddToShoppingList(food, amount, unitLabel, pkg, sourceName = "Einzelartikel @ ${date}")
+        internalAddToShoppingList(food, amount, unitLabel, pkg, sourceName = "Einzelartikel @ ${date}", plannedEntryId = entryId)
     }
 
     fun addPlannedEntry(entry: FoodEntryEntity) {
@@ -917,6 +918,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val ratio = servings / meal.servings
         val source = "${meal.name} @ ${date}"
 
+        val entryId = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000)
         val adjustedIngredients = meal.ingredients.map { ing ->
             ing.copy(
                 id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
@@ -925,7 +927,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             )
         }
         val entry = FoodEntryEntity(
-            id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
+            id = entryId,
             dateIso = date.toString(),
             mealSlot = mealSlot,
             name = meal.name,
@@ -943,7 +945,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             val food = foods.find { it.id == ing.foodItemId }
             // Nur hinzufügen, wenn es kein Vorratsartikel ist
             if (food?.isPantryItem != true) {
-                internalAddToShoppingList(food ?: FoodItemEntity(name = ing.name), ing.amount * ratio, ing.unitLabel, sourceName = source)
+                internalAddToShoppingList(food ?: FoodItemEntity(name = ing.name), ing.amount * ratio, ing.unitLabel, sourceName = source, plannedEntryId = entryId)
             }
         }
     }
@@ -955,7 +957,31 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             plannedEntries[index] = updatedEntry
             savePlannedEntries()
             if (householdId != null) {
-                viewModelScope.launch { firestoreRepository.addPlannedEntry(householdId, updatedEntry) }
+                viewModelScope.launch { 
+                    firestoreRepository.addPlannedEntry(householdId, updatedEntry)
+                    
+                    // Einkaufsliste aktualisieren
+                    // 1. Bestehende Items für diesen Eintrag entfernen
+                    val itemsToDelete = shoppingList.filter { it.plannedEntryId == updatedEntry.id }.map { it.id }
+                    itemsToDelete.forEach { deleteShoppingItem(it) }
+                    
+                    // 2. Neue Items hinzufügen (basierend auf geänderter Menge/Portionen)
+                    if (updatedEntry.isMeal) {
+                        val ingredients = updatedEntry.mealIngredients ?: emptyList()
+                        val source = "${updatedEntry.name} @ ${updatedEntry.dateIso}"
+                        ingredients.forEach { ing ->
+                            val food = foods.find { it.id == ing.foodItemId }
+                            if (food?.isPantryItem != true) {
+                                internalAddToShoppingList(food ?: FoodItemEntity(name = ing.name), ing.amount, ing.unitLabel, sourceName = source, plannedEntryId = updatedEntry.id)
+                            }
+                        }
+                    } else {
+                        val food = foods.find { it.id == updatedEntry.foodItemId }
+                        if (food != null && !food.isPantryItem) {
+                            internalAddToShoppingList(food, updatedEntry.amount, updatedEntry.unitLabel, sourceName = "Einzelartikel @ ${updatedEntry.dateIso}", plannedEntryId = updatedEntry.id)
+                        }
+                    }
+                }
             }
         }
     }
@@ -965,15 +991,20 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val entry = plannedEntries.find { it.id == entryId } ?: return
         
         if (deleteFromShoppingList && householdId != null) {
-            val sourceName = if (entry.isMeal) {
-                "${entry.name} @ ${entry.dateIso}"
+            // Erst versuchen über ID zu löschen (präziser)
+            val itemsToDeleteById = shoppingList.filter { it.plannedEntryId == entryId }.map { it.id }
+            if (itemsToDeleteById.isNotEmpty()) {
+                itemsToDeleteById.forEach { deleteShoppingItem(it) }
             } else {
-                "Einzelartikel @ ${entry.dateIso}"
+                // Fallback auf sourceName für ältere Einträge
+                val sourceName = if (entry.isMeal) {
+                    "${entry.name} @ ${entry.dateIso}"
+                } else {
+                    "Einzelartikel @ ${entry.dateIso}"
+                }
+                val itemsToDeleteBySource = shoppingList.filter { it.sourceName == sourceName }.map { it.id }
+                itemsToDeleteBySource.forEach { deleteShoppingItem(it) }
             }
-            
-            // Suche alle Items mit dieser exakten Quelle und lösche sie
-            val itemsToDelete = shoppingList.filter { it.sourceName == sourceName }.map { it.id }
-            itemsToDelete.forEach { deleteShoppingItem(it) }
         }
 
         plannedEntries.removeAll { it.id == entryId }
@@ -1010,7 +1041,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         return food.name.split(",").first().trim()
     }
 
-    private fun internalAddToShoppingList(food: FoodItemEntity, amount: Double, unit: String, pkg: FoodPackageEntity? = null, sourceName: String? = null) {
+    private fun internalAddToShoppingList(food: FoodItemEntity, amount: Double, unit: String, pkg: FoodPackageEntity? = null, sourceName: String? = null, plannedEntryId: Long? = null) {
         val householdId = firebaseManager.household.value?.id ?: return
         val name = getGeneralName(food)
         
@@ -1020,14 +1051,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             else -> 0.0 
         }
 
-        // Wir suchen NUR dann nach einem existierenden Item, wenn Name, Einheit UND Quelle 
-        // exakt gleich sind. Das verhindert, dass Zutaten aus Mahlzeiten in "Manuell" verschwinden.
+        // Wir suchen NUR dann nach einem existierenden Item, wenn Name, Einheit UND Quelle/ID
+        // exakt gleich sind.
         val existingIndex = shoppingList.indexOfFirst { 
             it.name.equals(name, ignoreCase = true) && 
             it.unit == unit && 
             !it.isChecked && 
             it.isPantryItem == food.isPantryItem &&
-            it.sourceName == (sourceName ?: "Manuell hinzugefügt")
+            (if (plannedEntryId != null) it.plannedEntryId == plannedEntryId else it.sourceName == (sourceName ?: "Manuell hinzugefügt"))
         }
         
         if (existingIndex != -1) {
@@ -1050,7 +1081,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 isPantryItem = food.isPantryItem,
                 baseUnit = food.baseUnit,
                 weightGrams = addedWeight,
-                sourceName = sourceName ?: "Manuell hinzugefügt"
+                sourceName = sourceName ?: "Manuell hinzugefügt",
+                plannedEntryId = plannedEntryId
             )
             shoppingList.add(newItem)
             viewModelScope.launch { firestoreRepository.addShoppingItem(householdId, newItem) }
