@@ -29,6 +29,8 @@
     <application
         android:name=".NutritionApplication"
         android:allowBackup="true"
+        android:icon="@drawable/app_icon_main"
+        android:roundIcon="@drawable/app_icon_main"
         android:label="Nutrition MVP"
         android:theme="@style/AppTheme">
         <activity android:name=".MainActivity" android:exported="true">

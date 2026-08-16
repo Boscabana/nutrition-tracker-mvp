@@ -8,8 +8,9 @@ import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
+import androidx.glance.Image
+import androidx.glance.ImageProvider
 import androidx.glance.action.actionStartActivity
-import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
@@ -20,10 +21,12 @@ import androidx.glance.layout.Box
 import androidx.glance.layout.Column
 import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.padding
+import androidx.glance.layout.size
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import com.nick.nutritiontracker.MainActivity
+import com.nick.nutritiontracker.R
 
 class ScanWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
@@ -54,9 +57,10 @@ class ScanWidget : GlanceAppWidget() {
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "🔍",
-                    style = TextStyle(fontSize = 24.sp)
+                Image(
+                    provider = ImageProvider(R.drawable.widget_scan_icon),
+                    contentDescription = null,
+                    modifier = GlanceModifier.size(48.dp)
                 )
                 Text(
                     text = "Schnell-Scan",
@@ -65,7 +69,7 @@ class ScanWidget : GlanceAppWidget() {
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.sp
                     ),
-                    modifier = GlanceModifier.padding(top = 4.dp)
+                    modifier = GlanceModifier.padding(top = 8.dp)
                 )
             }
         }
