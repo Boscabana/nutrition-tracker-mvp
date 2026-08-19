@@ -41,6 +41,22 @@ data class MealIngredientEntity(
     val fat: Double get() = fatPer100g * grams / 100.0
     @get:Exclude
     val saturatedFat: Double get() = saturatedFatPer100g * grams / 100.0
+    @get:Exclude
+    val complexCarbs: Double get() = (carbsPer100g - sugarPer100g).coerceAtLeast(0.0) * grams / 100.0
+    @get:Exclude
+    val unsaturatedFat: Double get() = (fatPer100g - saturatedFatPer100g).coerceAtLeast(0.0) * grams / 100.0
+
+    fun displayAmount(): String = displayAmountFor(amount, grams)
+
+    fun displayAmountFor(amt: Double, g: Double): String {
+        val amountStr = if (amt % 1.0 == 0.0) "%.0f".format(amt) else "%.1f".format(amt)
+        val gramsStr = if (g % 1.0 == 0.0) "%.0f".format(g) else "%.1f".format(g)
+        return if (unitLabel == "g" || unitLabel == "ml") {
+            "$gramsStr $unitLabel"
+        } else {
+            "$gramsStr$baseUnit ($amountStr $unitLabel)"
+        }
+    }
 }
 
 @Keep
@@ -62,6 +78,14 @@ data class MealEntity(
     val totalCarbs: Double get() = ingredients.sumOf { it.carbs }
     @get:Exclude
     val totalFat: Double get() = ingredients.sumOf { it.fat }
+    @get:Exclude
+    val totalSugar: Double get() = ingredients.sumOf { it.sugar }
+    @get:Exclude
+    val totalSaturatedFat: Double get() = ingredients.sumOf { it.saturatedFat }
+    @get:Exclude
+    val totalComplexCarbs: Double get() = ingredients.sumOf { it.complexCarbs }
+    @get:Exclude
+    val totalUnsaturatedFat: Double get() = ingredients.sumOf { it.unsaturatedFat }
 
     @get:Exclude
     val totalWeight: Double get() = ingredients.sumOf { it.grams }

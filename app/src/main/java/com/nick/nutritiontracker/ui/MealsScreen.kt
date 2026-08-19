@@ -255,8 +255,21 @@ fun MealsScreen(
                                         }
                                     }
                                 }
-                                Text("${meal.kcalPerServing.round0()} kcal pro Portion", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
+                                Text(
+                                    text = "${(meal.totalWeight / meal.servings).round0()}g (1 Portion)",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
                             }
+                            CompactMacroRow(
+                                kcal = meal.kcalPerServing,
+                                protein = meal.totalProtein / meal.servings,
+                                complexCarbs = meal.totalComplexCarbs / meal.servings,
+                                sugar = meal.totalSugar / meal.servings,
+                                unsaturatedFat = meal.totalUnsaturatedFat / meal.servings,
+                                saturatedFat = meal.totalSaturatedFat / meal.servings
+                            )
+                            Spacer(Modifier.width(4.dp))
                             Icon(
                                 if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                                 contentDescription = null,
@@ -267,28 +280,78 @@ fun MealsScreen(
                         AnimatedVisibility(visible = expanded) {
                             Column(Modifier.padding(top = 8.dp)) {
                                 HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                                Text("Zutaten pro Portion:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                meal.ingredients.forEach { ingredient ->
-                                    val amountPerServing = ingredient.amount / meal.servings
-                                    val brandInfo = if (!ingredient.brand.isNullOrBlank()) " (${ingredient.brand}${if (!ingredient.store.isNullOrBlank()) " @ ${ingredient.store}" else ""})" else ""
-                                    Text(
-                                        "• ${ingredient.name}$brandInfo: ${amountPerServing.roundString()} ${ingredient.unitLabel}",
-                                        style = MaterialTheme.typography.bodySmall
+                                
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Zutaten pro Portion:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                    CompactMacroRow(
+                                        kcal = meal.kcalPerServing,
+                                        protein = meal.totalProtein / meal.servings,
+                                        complexCarbs = meal.totalComplexCarbs / meal.servings,
+                                        sugar = meal.totalSugar / meal.servings,
+                                        unsaturatedFat = meal.totalUnsaturatedFat / meal.servings,
+                                        saturatedFat = meal.totalSaturatedFat / meal.servings
                                     )
                                 }
+                                
+                                meal.ingredients.forEach { ingredient ->
+                                    val amountPerServing = ingredient.amount / meal.servings
+                                    val gramsPerServing = ingredient.grams / meal.servings
+                                    val ratio = if (meal.servings > 0) 1.0 / meal.servings else 1.0
+                                    
+                                    Row(
+                                        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = "• ${ingredient.displayAmountFor(amountPerServing, gramsPerServing)} ${ingredient.name}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            modifier = Modifier.weight(1f),
+                                            maxLines = 1
+                                        )
+                                        CompactMacroRow(
+                                            kcal = ingredient.kcal * ratio,
+                                            protein = ingredient.protein * ratio,
+                                            complexCarbs = ingredient.complexCarbs * ratio,
+                                            sugar = ingredient.sugar * ratio,
+                                            unsaturatedFat = ingredient.unsaturatedFat * ratio,
+                                            saturatedFat = ingredient.saturatedFat * ratio
+                                        )
+                                    }
+                                }
                                 if (meal.servings != 1.0) {
+                                    HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Gesamt (${meal.servings.roundString()} Portionen):", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                        CompactMacroRow(
+                                            kcal = meal.totalKcal,
+                                            protein = meal.totalProtein,
+                                            complexCarbs = meal.totalComplexCarbs,
+                                            sugar = meal.totalSugar,
+                                            unsaturatedFat = meal.totalUnsaturatedFat,
+                                            saturatedFat = meal.totalSaturatedFat
+                                        )
+                                    }
                                     Text(
-                                        "Gesamtportionen: ${meal.servings.roundString()}",
+                                        "Gesamtgewicht: ${meal.totalWeight.round0()}g",
                                         style = MaterialTheme.typography.labelSmall,
-                                        modifier = Modifier.padding(top = 4.dp),
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+                                } else {
+                                    Text(
+                                        "Gesamtgewicht: ${meal.totalWeight.round0()}g",
+                                        style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.outline
                                     )
                                 }
-                                Text(
-                                    "Gesamtgewicht: ${meal.totalWeight.round0()}g (${(meal.totalWeight / meal.servings).round0()}g pro Portion)",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.outline
-                                )
                             }
                         }
                     }

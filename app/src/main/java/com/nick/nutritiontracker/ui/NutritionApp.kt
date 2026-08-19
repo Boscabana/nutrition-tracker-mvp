@@ -60,11 +60,6 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.roundToInt
 
-private val ProteinGreen = Color(0xFF2E7D32)
-private val CarbOrange = Color(0xFFFF9800)
-private val SugarRed = Color(0xFFD32F2F)
-private val SaturatedGrey = Color(0xFF757575)
-private val UnsaturatedYellow = Color(0xFFFBC02D)
 private val ActionEditYellow = Color(0xFFFFC107) 
 private val ActionDeleteRed = Color(0xFFD32F2F)
 
@@ -1082,10 +1077,10 @@ private fun MealGroupHeader(
             verticalAlignment = Alignment.CenterVertically
         ) {
             MacroNumber(totalProtein, ProteinGreen)
-            Separator()
+            MacroSeparator()
             MacroNumber(totalComplexCarbs, CarbOrange)
             MacroNumber(totalSugar, SugarRed)
-            Separator()
+            MacroSeparator()
             MacroNumber(totalUnsaturatedFat, UnsaturatedYellow)
             MacroNumber(totalSaturatedFat, SaturatedGrey)
         }
@@ -2342,19 +2337,19 @@ private fun CompactEntryRow(
                         }
                     }
                     Text(
-                        text = if (entry.isMeal) "${entry.amount.roundString()} ${entry.unitLabel} (${entry.grams.round0()}g)" else entry.displayAmount(),
+                        text = entry.displayAmount(),
                         style = MaterialTheme.typography.labelSmall, 
                         maxLines = 1
                     )
                 }
-                Text(entry.kcal.round0(), modifier = Modifier.width(36.dp), fontWeight = FontWeight.Bold)
-                MacroNumber(entry.protein, ProteinGreen)
-                Separator()
-                MacroNumber(entry.complexCarbs, CarbOrange)
-                MacroNumber(entry.sugar, SugarRed)
-                Separator()
-                MacroNumber(entry.unsaturatedFat, UnsaturatedYellow)
-                MacroNumber(entry.saturatedFat, SaturatedGrey)
+                CompactMacroRow(
+                    kcal = entry.kcal,
+                    protein = entry.protein,
+                    complexCarbs = entry.complexCarbs,
+                    sugar = entry.sugar,
+                    unsaturatedFat = entry.unsaturatedFat,
+                    saturatedFat = entry.saturatedFat
+                )
             }
             
             val ingredients = entry.mealIngredients
@@ -2363,13 +2358,20 @@ private fun CompactEntryRow(
                 Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     ingredients.forEach { ing ->
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("${ing.amount.roundString()} ${ing.unitLabel} ${ing.name}", style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("${ing.kcal.round0()} kcal", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                Text("P:${ing.protein.round0()}", style = MaterialTheme.typography.labelSmall, color = ProteinGreen)
-                                Text("C:${ing.carbs.round0()}", style = MaterialTheme.typography.labelSmall, color = CarbOrange)
-                                Text("F:${ing.fat.round0()}", style = MaterialTheme.typography.labelSmall, color = UnsaturatedYellow)
-                            }
+                            Text(
+                                text = "• ${ing.displayAmount()} ${ing.name}", 
+                                style = MaterialTheme.typography.labelSmall, 
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1
+                            )
+                            CompactMacroRow(
+                                kcal = ing.kcal,
+                                protein = ing.protein,
+                                complexCarbs = ing.complexCarbs,
+                                sugar = ing.sugar,
+                                unsaturatedFat = ing.unsaturatedFat,
+                                saturatedFat = ing.saturatedFat
+                            )
                         }
                     }
                 }
@@ -2397,15 +2399,6 @@ private fun LegendDot(color: Color, text: String) {
     }
 }
 
-@Composable
-private fun MacroNumber(value: Double, color: Color) {
-    Text(value.round0(), color = color, fontWeight = FontWeight.Bold, modifier = Modifier.widthIn(min = 28.dp))
-}
-
-@Composable
-private fun Separator() {
-    Text("|", color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-}
 
 @Composable
 fun FoodsScreen(
@@ -2779,10 +2772,10 @@ fun FoodItemRow(
                         Spacer(Modifier.height(4.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             MacroNumber(food.proteinPer100g, ProteinGreen)
-                            Separator()
+                            MacroSeparator()
                             MacroNumber(food.complexCarbsPer100g, CarbOrange)
                             MacroNumber(food.sugarPer100g, SugarRed)
-                            Separator()
+                            MacroSeparator()
                             MacroNumber(food.unsaturatedFatPer100g, UnsaturatedYellow)
                             MacroNumber(food.saturatedFatPer100g, SaturatedGrey)
                         }

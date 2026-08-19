@@ -72,7 +72,15 @@ data class FoodEntryEntity(
         (fatPer100g - saturatedFatPer100g).coerceAtLeast(0.0) * grams / 100.0
     }
 
-    fun displayAmount(): String = if (isMeal) "Meal" else "${clean(amount)} $unitLabel"
+    fun displayAmount(): String {
+        val effectiveGrams = if (isMeal) mealIngredients?.sumOf { it.grams } ?: 0.0 else grams
+        val gramsStr = clean(effectiveGrams)
+        return if (unitLabel == "g" || unitLabel == "ml") {
+            "$gramsStr $unitLabel"
+        } else {
+            "$gramsStr$baseUnit (${clean(amount)} $unitLabel)"
+        }
+    }
 
     private fun clean(v: Double): String =
         if (v % 1.0 == 0.0) "%.0f".format(v) else "%.1f".format(v)
