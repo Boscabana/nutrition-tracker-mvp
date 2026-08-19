@@ -2,6 +2,7 @@ package com.nick.nutritiontracker.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
@@ -78,6 +79,16 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
 
     // 2. Wait until the profile is loaded from disk
     val userProfile = userProfileState ?: return // Show nothing while loading (brief flash)
+
+    // Wiederherstellungs-Logik: Falls Firestore ein Profil hat, aber lokal noch nichts ist
+    val cloudProfile by vm.firebaseManager.userProfile.collectAsState()
+    LaunchedEffect(cloudProfile) {
+        cloudProfile?.let { cloud ->
+            if (!userProfile.setupCompleted && cloud.setupCompleted) {
+                profileVm.updateProfile(cloud)
+            }
+        }
+    }
 
     var showSetup by remember { mutableStateOf(false) }
     var initialCheckPerformed by remember { mutableStateOf(false) }
@@ -180,6 +191,26 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
         if (granted.containsAll(vm.healthConnectManager.permissions)) {
             vm.syncActivityForSelectedDate()
             scope.launch { snackbarHostState.showSnackbar("Berechtigung erteilt!") }
+        }
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        if (!isGranted) {
+            scope.launch { snackbarHostState.showSnackbar("Benachrichtigungen sind deaktiviert.") }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            val status = androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.POST_NOTIFICATIONS
+            )
+            if (status != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
         }
     }
 

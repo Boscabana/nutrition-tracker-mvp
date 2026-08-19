@@ -37,6 +37,7 @@ class ProfileRepository(private val context: Context) {
         val IS_PREMIUM = booleanPreferencesKey("is_premium")
         val AI_IMAGES_TODAY = intPreferencesKey("ai_images_today")
         val LAST_AI_IMAGE_DATE = stringPreferencesKey("last_ai_image_date")
+        val FCM_TOKEN = stringPreferencesKey("fcm_token")
     }
 
     val userProfileFlow: Flow<UserProfile> = context.dataStore.data
@@ -69,7 +70,8 @@ class ProfileRepository(private val context: Context) {
                 breakfastReminderTime = preferences[PreferencesKeys.BREAKFAST_REMINDER_TIME] ?: "09:00",
                 premium = preferences[PreferencesKeys.IS_PREMIUM] ?: false,
                 aiImagesGeneratedToday = preferences[PreferencesKeys.AI_IMAGES_TODAY] ?: 0,
-                lastAiImageDate = preferences[PreferencesKeys.LAST_AI_IMAGE_DATE] ?: ""
+                lastAiImageDate = preferences[PreferencesKeys.LAST_AI_IMAGE_DATE] ?: "",
+                fcmToken = preferences[PreferencesKeys.FCM_TOKEN]
             )
         }
 
@@ -96,6 +98,7 @@ class ProfileRepository(private val context: Context) {
             preferences[PreferencesKeys.IS_PREMIUM] = profile.isPremium
             preferences[PreferencesKeys.AI_IMAGES_TODAY] = profile.aiImagesGeneratedToday
             preferences[PreferencesKeys.LAST_AI_IMAGE_DATE] = profile.lastAiImageDate
+            profile.fcmToken?.let { preferences[PreferencesKeys.FCM_TOKEN] = it }
         }
     }
 }

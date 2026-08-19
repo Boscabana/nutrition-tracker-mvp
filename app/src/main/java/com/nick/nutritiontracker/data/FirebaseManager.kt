@@ -63,7 +63,8 @@ class FirebaseManager {
                                 heightCm = (data["heightCm"] as? Long)?.toInt() ?: 175,
                                 gender = Gender.valueOf(data["gender"] as? String ?: "MALE"),
                                 goal = UserGoal.valueOf(data["goal"] as? String ?: "MAINTAIN"),
-                                setupCompleted = data["setupCompleted"] as? Boolean ?: false
+                                setupCompleted = data["setupCompleted"] as? Boolean ?: false,
+                                fcmToken = data["fcmToken"] as? String
                             )
                             
                             profile.premium = cloudPremium
@@ -170,6 +171,14 @@ class FirebaseManager {
             doc.getString("firstName") ?: "Unbekannter Nutzer"
         } catch (e: Exception) {
             "Unbekannter Nutzer"
+        }
+    }
+
+    suspend fun updateFcmToken(uid: String, token: String) {
+        try {
+            db.collection("users").document(uid).update("fcmToken", token).await()
+        } catch (e: Exception) {
+            Log.e("FirebaseManager", "Failed to update FCM token", e)
         }
     }
 }

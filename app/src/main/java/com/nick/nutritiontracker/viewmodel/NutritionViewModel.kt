@@ -8,6 +8,8 @@ import androidx.compose.runtime.*
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.nick.nutritiontracker.data.*
+import com.nick.nutritiontracker.NotificationHelper
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -201,12 +203,30 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    private fun registerFcmToken(uid: String) {
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (task.isSuccessful) {
+                val token = task.result
+                Log.d("NutritionViewModel", "FCM Token: $token")
+                viewModelScope.launch {
+                    val current = userProfile
+                    // Only update if we have a valid profile (avoid overwriting with defaults during load)
+                    if (current.setupCompleted && current.fcmToken != token) {
+                        profileRepository.saveProfile(current.copy(fcmToken = token))
+                        firebaseManager.updateFcmToken(uid, token)
+                    }
+                }
+            }
+        }
+    }
+
     // --- Sync Logic ---
     private fun setupFirebaseSync() {
         syncJob?.cancel()
         syncJob = viewModelScope.launch {
             firebaseManager.currentUser.collectLatest { user ->
                 if (user != null) {
+                    registerFcmToken(user.uid)
                     coroutineScope {
                         launch {
                             firestoreRepository.getPersonalFoods(user.uid).collect { cloudFoods ->
@@ -237,7 +257,20 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                             }
                         }
                         launch {
+                            var lastMessageCount = -1
                             firestoreRepository.getInboxMessages(user.uid).collect { cloudMessages ->
+                                // Show notification only if count increased and it's not the first load
+                                if (lastMessageCount != -1 && cloudMessages.size > lastMessageCount) {
+                                    val newestMessage = cloudMessages.firstOrNull()
+                                    if (newestMessage != null && !newestMessage.isRead) {
+                                        NotificationHelper.showInboxNotification(
+                                            getApplication(),
+                                            newestMessage.fromName,
+                                            newestMessage.type.name
+                                        )
+                                    }
+                                }
+                                lastMessageCount = cloudMessages.size
                                 inboxMessages.clear()
                                 inboxMessages.addAll(cloudMessages)
                             }

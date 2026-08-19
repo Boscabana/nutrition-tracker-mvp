@@ -44,6 +44,16 @@ object NotificationHelper {
         )
     }
 
+    fun showInboxNotification(context: Context, senderName: String, type: String) {
+        val typeLabel = if (type == "FOOD") "einen Artikel" else "ein Rezept"
+        showNotification(
+            context,
+            2001,
+            "Neue Nachricht",
+            "$senderName hat dir $typeLabel gesendet!"
+        )
+    }
+
     private fun showNotification(context: Context, notificationId: Int, title: String, text: String) {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK

@@ -51,7 +51,8 @@ data class UserProfile(
     @set:PropertyName("isPremium")
     var premium: Boolean = false,
     var aiImagesGeneratedToday: Int = 0,
-    var lastAiImageDate: String = ""
+    var lastAiImageDate: String = "",
+    var fcmToken: String? = null
 ) {
     @get:com.google.firebase.firestore.Exclude
     val isPremium: Boolean get() = premium
