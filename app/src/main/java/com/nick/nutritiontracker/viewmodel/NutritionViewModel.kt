@@ -49,6 +49,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     val foods = mutableStateListOf<FoodItemEntity>()
     val meals = mutableStateListOf<MealEntity>()
     val allEntries = mutableStateListOf<FoodEntryEntity>()
+    val plannedMealPool = mutableStateListOf<PlannedMealPoolEntity>()
     val categories = mutableStateListOf<String>()
     val plannedEntries = mutableStateListOf<FoodEntryEntity>()
     val shoppingList = mutableStateListOf<ShoppingItem>()
@@ -275,6 +276,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                                 inboxMessages.addAll(cloudMessages)
                             }
                         }
+                        launch {
+                            firestoreRepository.getPersonalPlannedEntries(user.uid).collect { cloudPlanned ->
+                                syncList(plannedEntries, cloudPlanned) { it.id }
+                                updateNextIds()
+                                savePlannedEntries()
+                            }
+                        }
                     }
                 }
             }
@@ -285,10 +293,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 if (household != null) {
                     coroutineScope {
                         launch {
-                            firestoreRepository.getPlannedEntries(household.id).collect { cloudPlanned ->
-                                syncList(plannedEntries, cloudPlanned) { it.id }
-                                updateNextIds()
-                                savePlannedEntries()
+                            firestoreRepository.getPlannedMealPool(household.id).collect { cloudPool ->
+                                syncList(plannedMealPool, cloudPool) { it.id }
+                                savePlannedMealPool()
                             }
                         }
                         launch {
@@ -418,7 +425,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         val idx = plannedEntries.indexOfFirst { it.id == entry.id }
                         if (idx != -1) plannedEntries[idx] = updatedEntry
                     }
-                    firestoreRepository.addPlannedEntry(householdId, updatedEntry)
+                    val user = firebaseManager.currentUser.value
+                    if (user != null) {
+                        firestoreRepository.savePersonalPlannedEntry(user.uid, updatedEntry)
+                    }
                     delay(100) // Sequentialize and throttle writes
                 }
             }
@@ -548,8 +558,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             )
             plannedEntries[entryIdx] = updated
             savePlannedEntries()
-            if (householdId != null) {
-                viewModelScope.launch { firestoreRepository.addPlannedEntry(householdId, updated) }
+            if (user != null) {
+                viewModelScope.launch { firestoreRepository.savePersonalPlannedEntry(user.uid, updated) }
             }
         }
     }
@@ -686,8 +696,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                             lastModifiedByName = userProfile.firstName
                         )
                         plannedEntries[idx] = updatedMeal
-                        if (householdId != null) {
-                            viewModelScope.launch { firestoreRepository.addPlannedEntry(householdId, updatedMeal) }
+                        if (currentUser != null) {
+                            viewModelScope.launch { firestoreRepository.savePersonalPlannedEntry(currentUser.uid, updatedMeal) }
                         }
                         changedAny = true
                     }
@@ -701,8 +711,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         lastModifiedByName = userProfile.firstName
                     )
                     plannedEntries[idx] = updated
-                    if (householdId != null) {
-                        viewModelScope.launch { firestoreRepository.addPlannedEntry(householdId, updated) }
+                    if (currentUser != null) {
+                        viewModelScope.launch { firestoreRepository.savePersonalPlannedEntry(currentUser.uid, updated) }
                     }
                     changedAny = true
                 }
@@ -804,9 +814,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             val service = GeminiService()
             val models = listOf("gemini-1.5-flash", "gemini-1.5-pro", "gemini-3.6-flash")
             models.forEach { model ->
-                availableAiModels.add(service.testModelAvailability(model))
-            }
+            availableAiModels.add(service.testModelAvailability(model))
         }
+    }
     }
 
     // --- Data Management ---
@@ -976,8 +986,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         isGeneric = finalFood.isGeneric
                     )
                     plannedEntries[i] = updatedEntry
-                    if (householdId != null) {
-                        viewModelScope.launch { firestoreRepository.addPlannedEntry(householdId, updatedEntry) }
+                    val user = firebaseManager.currentUser.value
+                    if (user != null) {
+                        viewModelScope.launch { firestoreRepository.savePersonalPlannedEntry(user.uid, updatedEntry) }
                     }
                 } else if (entry.isMeal) {
                     val ingredients = entry.mealIngredients
@@ -1006,8 +1017,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         if (changed) {
                             val updatedMealEntry = entry.copy(mealIngredients = updatedIngs)
                             plannedEntries[i] = updatedMealEntry
-                            if (householdId != null) {
-                                viewModelScope.launch { firestoreRepository.addPlannedEntry(householdId, updatedMealEntry) }
+                            val user = firebaseManager.currentUser.value
+                            if (user != null) {
+                                viewModelScope.launch { firestoreRepository.savePersonalPlannedEntry(user.uid, updatedMealEntry) }
                             }
                         }
                     }
@@ -1153,6 +1165,16 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
                 amount = ing.amount * ratio,
                 grams = ing.grams * ratio,
+                name = food?.name ?: ing.name,
+                brand = food?.brand ?: ing.brand,
+                kcalPer100g = food?.kcalPer100g ?: ing.kcalPer100g,
+                proteinPer100g = food?.proteinPer100g ?: ing.proteinPer100g,
+                carbsPer100g = food?.carbsPer100g ?: ing.carbsPer100g,
+                sugarPer100g = food?.sugarPer100g ?: ing.sugarPer100g,
+                fatPer100g = food?.fatPer100g ?: ing.fatPer100g,
+                saturatedFatPer100g = food?.saturatedFatPer100g ?: ing.saturatedFatPer100g,
+                alcoholPercent = food?.alcoholPercent ?: ing.alcoholPercent,
+                baseUnit = food?.baseUnit ?: ing.baseUnit,
                 category = food?.category ?: ing.category,
                 barcode = food?.barcode ?: ing.barcode,
                 isGeneric = food?.isGeneric ?: ing.isGeneric
@@ -1221,6 +1243,182 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         saveVerifications()
     }
 
+    // --- Planner Pool ---
+    fun addMealToPool(meal: MealEntity, portions: Double, isFrozen: Boolean = false, providedId: String? = null) {
+        val householdId = firebaseManager.household.value?.id ?: return
+        val user = firebaseManager.currentUser.value
+        
+        // Scale ingredients to the desired total pool portions
+        val scale = portions / meal.servings
+        val poolIngredients = meal.ingredients.map { ing ->
+            val food = foods.find { it.id == ing.foodItemId }
+            ing.copy(
+                id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
+                amount = ing.amount * scale,
+                grams = ing.grams * scale,
+                name = food?.name ?: ing.name,
+                brand = food?.brand ?: ing.brand,
+                kcalPer100g = food?.kcalPer100g ?: ing.kcalPer100g,
+                proteinPer100g = food?.proteinPer100g ?: ing.proteinPer100g,
+                carbsPer100g = food?.carbsPer100g ?: ing.carbsPer100g,
+                sugarPer100g = food?.sugarPer100g ?: ing.sugarPer100g,
+                fatPer100g = food?.fatPer100g ?: ing.fatPer100g,
+                saturatedFatPer100g = food?.saturatedFatPer100g ?: ing.saturatedFatPer100g,
+                alcoholPercent = food?.alcoholPercent ?: ing.alcoholPercent,
+                baseUnit = food?.baseUnit ?: ing.baseUnit,
+                category = food?.category ?: ing.category,
+                barcode = food?.barcode ?: ing.barcode,
+                isGeneric = food?.isGeneric ?: ing.isGeneric
+            )
+        }
+
+        val poolId = providedId ?: UUID.randomUUID().toString()
+        val poolEntry = PlannedMealPoolEntity(
+            id = poolId,
+            mealName = meal.name,
+            mealIngredients = poolIngredients,
+            plannedPortions = portions,
+            remainingPortions = portions,
+            imageUrl = meal.imageUrl,
+            tags = meal.tags,
+            createdByUid = user?.uid ?: "",
+            createdByName = userProfile.firstName,
+            isFrozen = isFrozen
+        )
+        viewModelScope.launch {
+            firestoreRepository.addPlannedMealToPool(householdId, poolEntry)
+            
+            // Add ingredients to shopping list ONLY if NOT frozen
+            if (!isFrozen) {
+                poolIngredients.forEach { ing ->
+                    val food = foods.find { it.id == ing.foodItemId }
+                    if (food?.isPantryItem != true) {
+                        internalAddToShoppingList(
+                            food ?: FoodItemEntity(name = ing.name, category = ing.category),
+                            ing.amount,
+                            ing.unitLabel,
+                            sourceName = meal.name,
+                            poolItemId = poolEntry.id
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun takeFromPool(poolItem: PlannedMealPoolEntity, date: LocalDate, servings: Double, addToDiary: Boolean) {
+        val householdId = firebaseManager.household.value?.id ?: return
+        val user = firebaseManager.currentUser.value
+        
+        // Sum up already planned portions for this pool item to see if we need to increase the total
+        val alreadyPlanned = plannedEntries.filter { it.poolItemId == poolItem.id }.sumOf { it.amount }
+        val newTotalPlanned = alreadyPlanned + servings
+        
+        val updatedPool = if (newTotalPlanned > poolItem.plannedPortions) {
+            // Increase pool portions and update shopping list
+            val scaleFactor = newTotalPlanned / poolItem.plannedPortions
+            val newIngredients = poolItem.mealIngredients.map { it.copy(
+                amount = it.amount * scaleFactor,
+                grams = it.grams * scaleFactor
+            ) }
+            poolItem.copy(
+                plannedPortions = newTotalPlanned,
+                remainingPortions = poolItem.remainingPortions, // unused but for safety
+                mealIngredients = newIngredients
+            )
+        } else {
+            poolItem // Stay as is, just take some portions
+        }
+        
+        val entryId = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000)
+        val factor = servings / poolItem.plannedPortions
+        
+        // Use resolveIngredients logic to ensure the ingredients match the taker's local library
+        val localIngredients = resolveIngredients(poolItem.mealIngredients.map { 
+            it.copy(
+                id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
+                amount = it.amount * factor,
+                grams = it.grams * factor
+            )
+        })
+
+        val entry = FoodEntryEntity(
+            id = entryId,
+            dateIso = date.toString(),
+            mealSlot = "Mittag",
+            name = poolItem.mealName,
+            isMeal = true,
+            mealIngredients = localIngredients,
+            amount = servings,
+            unitLabel = "Portion(en)",
+            imageUrl = poolItem.imageUrl,
+            tags = poolItem.tags,
+            isPlanned = true,
+            poolItemId = poolItem.id,
+            isFromFreezer = poolItem.isFrozen,
+            plannedByUid = user?.uid,
+            plannedByName = userProfile.firstName,
+            lastModifiedByUid = user?.uid,
+            lastModifiedByName = userProfile.firstName
+        )
+
+        viewModelScope.launch {
+            if (updatedPool != poolItem) {
+                updatePoolItem(updatedPool) // This also syncs shopping list
+            }
+            addPlannedEntry(entry)
+            if (addToDiary) {
+                addEntry(entry.copy(id = 0, isPlanned = false, originPlannedEntryId = entryId))
+            }
+        }
+    }
+
+    fun deletePoolItem(poolId: String, deleteFromShoppingList: Boolean) {
+        val householdId = firebaseManager.household.value?.id ?: return
+        val item = plannedMealPool.find { it.id == poolId } ?: return
+        
+        viewModelScope.launch {
+            firestoreRepository.deletePlannedMealFromPool(householdId, poolId)
+            if (deleteFromShoppingList) {
+                val itemsToDelete = shoppingList.filter { it.poolItemId == poolId }.map { it.id }
+                if (itemsToDelete.isNotEmpty()) {
+                    itemsToDelete.forEach { deleteShoppingItem(it) }
+                } else {
+                    // Fallback für ältere Einträge
+                    val sourceName = item.mealName
+                    val itemsBySource = shoppingList.filter { it.sourceName == sourceName }.map { it.id }
+                    itemsBySource.forEach { deleteShoppingItem(it) }
+                }
+            }
+        }
+    }
+
+    fun updatePoolItem(updatedItem: PlannedMealPoolEntity) {
+        val householdId = firebaseManager.household.value?.id ?: return
+        viewModelScope.launch {
+            firestoreRepository.updatePlannedMealInPool(householdId, updatedItem)
+
+            // Shopping list sync
+            val itemsToDelete = shoppingList.filter { it.poolItemId == updatedItem.id }.map { it.id }
+            itemsToDelete.forEach { deleteShoppingItem(it) }
+
+            if (!updatedItem.isFrozen) {
+                updatedItem.mealIngredients.forEach { ing ->
+                    val food = foods.find { it.id == ing.foodItemId }
+                    if (food?.isPantryItem != true) {
+                        internalAddToShoppingList(
+                            food ?: FoodItemEntity(name = ing.name, category = ing.category),
+                            ing.amount,
+                            ing.unitLabel,
+                            sourceName = updatedItem.mealName,
+                            poolItemId = updatedItem.id
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     // --- Planner ---
     fun addPlannedEntry(food: FoodItemEntity, amount: Double, portion: FoodPortionEntity?, mealSlot: String, date: LocalDate, pkg: FoodPackageEntity? = null) {
         val grams = when {
@@ -1265,7 +1463,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun addPlannedEntry(entry: FoodEntryEntity) {
-        val householdId = firebaseManager.household.value?.id
+        val user = firebaseManager.currentUser.value
         // Sicherstellen, dass die ID absolut eindeutig ist
         val newEntry = if (entry.id == 0L) {
             entry.copy(id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000))
@@ -1273,14 +1471,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         
         plannedEntries.add(newEntry)
         savePlannedEntries()
-        if (householdId != null) {
-            viewModelScope.launch { firestoreRepository.addPlannedEntry(householdId, newEntry) }
+        if (user != null) {
+            viewModelScope.launch { firestoreRepository.savePersonalPlannedEntry(user.uid, newEntry) }
         }
     }
 
     fun addPlannedMeal(meal: MealEntity, mealSlot: String, date: LocalDate, servings: Double = 1.0) {
         val ratio = servings / meal.servings
-        val source = "${meal.name} @ ${date}"
 
         val entryId = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000)
         val user = firebaseManager.currentUser.value
@@ -1290,11 +1487,39 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
                 amount = ing.amount * ratio,
                 grams = ing.grams * ratio,
+                name = food?.name ?: ing.name,
+                brand = food?.brand ?: ing.brand,
+                kcalPer100g = food?.kcalPer100g ?: ing.kcalPer100g,
+                proteinPer100g = food?.proteinPer100g ?: ing.proteinPer100g,
+                carbsPer100g = food?.carbsPer100g ?: ing.carbsPer100g,
+                sugarPer100g = food?.sugarPer100g ?: ing.sugarPer100g,
+                fatPer100g = food?.fatPer100g ?: ing.fatPer100g,
+                saturatedFatPer100g = food?.saturatedFatPer100g ?: ing.saturatedFatPer100g,
+                alcoholPercent = food?.alcoholPercent ?: ing.alcoholPercent,
+                baseUnit = food?.baseUnit ?: ing.baseUnit,
                 category = food?.category ?: ing.category,
                 barcode = food?.barcode ?: ing.barcode,
                 isGeneric = food?.isGeneric ?: ing.isGeneric
             )
         }
+
+        // Sync with pool: Every planned meal should be in the pool
+        val existingPoolItem = plannedMealPool.find { it.mealName == meal.name && !it.isFrozen }
+        val poolId = if (existingPoolItem != null) {
+            // Check if we need to increase portions
+            val currentlyPlanned = plannedEntries.filter { it.poolItemId == existingPoolItem.id }.sumOf { it.amount }
+            val newTotal = currentlyPlanned + servings
+            if (newTotal > existingPoolItem.plannedPortions) {
+                updatePoolItem(existingPoolItem.copy(plannedPortions = newTotal))
+            }
+            existingPoolItem.id
+        } else {
+            // Create new pool item
+            val newId = UUID.randomUUID().toString()
+            addMealToPool(meal, servings, isFrozen = false, providedId = newId) 
+            newId 
+        }
+
         val entry = FoodEntryEntity(
             id = entryId,
             dateIso = date.toString(),
@@ -1308,26 +1533,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             imageUrl = meal.imageUrl,
             tags = meal.tags,
             isPlanned = true,
+            poolItemId = poolId,
             plannedByUid = user?.uid,
             plannedByName = userProfile.firstName,
             lastModifiedByUid = user?.uid,
             lastModifiedByName = userProfile.firstName
         )
         addPlannedEntry(entry)
-
-        meal.ingredients.forEach { ing ->
-            val food = foods.find { it.id == ing.foodItemId }
-            // Nur hinzufügen, wenn es kein Vorratsartikel ist
-            if (food?.isPantryItem != true) {
-                internalAddToShoppingList(
-                    food ?: FoodItemEntity(name = ing.name, category = ing.category), 
-                    ing.amount * ratio, 
-                    ing.unitLabel, 
-                    sourceName = source, 
-                    plannedEntryId = entryId
-                )
-            }
-        }
     }
 
     fun updatePlannedEntry(updatedEntry: FoodEntryEntity) {
@@ -1341,32 +1553,66 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             )
             plannedEntries[index] = finalEntry
             savePlannedEntries()
-            if (householdId != null) {
+
+            // Pool-Synchronisierung: Wenn die Menge im Planer geändert wird, muss der Pool angepasst werden
+            if (finalEntry.poolItemId != null && householdId != null) {
+                val poolItem = plannedMealPool.find { it.id == finalEntry.poolItemId }
+                if (poolItem != null) {
+                    val currentlyPlanned = plannedEntries.filter { it.poolItemId == poolItem.id }.sumOf { it.amount }
+                    if (currentlyPlanned > poolItem.plannedPortions) {
+                        updatePoolItem(poolItem.copy(plannedPortions = currentlyPlanned))
+                    }
+                }
+            }
+
+            // Tagebuch-Synchronisierung: Wenn ein zugehöriger Eintrag im Tagebuch existiert, diesen aktualisieren
+            val diaryEntryIndex = allEntries.indexOfFirst { it.originPlannedEntryId == finalEntry.id }
+            if (diaryEntryIndex != -1) {
+                val oldDiary = allEntries[diaryEntryIndex]
+                val updatedDiary = oldDiary.copy(
+                    dateIso = finalEntry.dateIso,
+                    mealSlot = finalEntry.mealSlot,
+                    amount = finalEntry.amount,
+                    grams = finalEntry.grams,
+                    mealIngredients = finalEntry.mealIngredients,
+                    name = finalEntry.name,
+                    brand = finalEntry.brand,
+                    barcode = finalEntry.barcode,
+                    isGeneric = finalEntry.isGeneric,
+                    isMeal = finalEntry.isMeal,
+                    imageUrl = finalEntry.imageUrl,
+                    tags = finalEntry.tags,
+                    kcalPer100g = finalEntry.kcalPer100g,
+                    proteinPer100g = finalEntry.proteinPer100g,
+                    carbsPer100g = finalEntry.carbsPer100g,
+                    sugarPer100g = finalEntry.sugarPer100g,
+                    fatPer100g = finalEntry.fatPer100g,
+                    saturatedFatPer100g = finalEntry.saturatedFatPer100g,
+                    alcoholPercent = finalEntry.alcoholPercent,
+                    baseUnit = finalEntry.baseUnit,
+                    category = finalEntry.category,
+                    store = finalEntry.store
+                )
+                allEntries[diaryEntryIndex] = updatedDiary
+                saveEntries()
+                if (user != null) {
+                    viewModelScope.launch { firestoreRepository.savePersonalEntry(user.uid, updatedDiary) }
+                }
+            }
+
+            if (user != null) {
                 viewModelScope.launch { 
-                    firestoreRepository.addPlannedEntry(householdId, finalEntry)
+                    firestoreRepository.savePersonalPlannedEntry(user.uid, finalEntry)
                     
                     // Einkaufsliste aktualisieren
-                    // 1. Bestehende Items für diesen Eintrag entfernen
-                    val itemsToDelete = shoppingList.filter { it.plannedEntryId == finalEntry.id }.map { it.id }
-                    itemsToDelete.forEach { deleteShoppingItem(it) }
-                    
-                    // 2. Neue Items hinzufügen (basierend auf geänderter Menge/Portionen)
-                    if (finalEntry.isMeal) {
-                        val ingredients = finalEntry.mealIngredients ?: emptyList()
-                        val source = "${finalEntry.name} @ ${finalEntry.dateIso}"
-                        ingredients.forEach { ing ->
-                            val food = foods.find { it.id == ing.foodItemId }
-                            if (food?.isPantryItem != true) {
-                                internalAddToShoppingList(
-                                    food ?: FoodItemEntity(name = ing.name, category = ing.category), 
-                                    ing.amount, 
-                                    ing.unitLabel, 
-                                    sourceName = source, 
-                                    plannedEntryId = finalEntry.id
-                                )
-                            }
-                        }
-                    } else {
+                    // NUR für Einzelartikel (poolItemId == null) und NICHT aus dem Gefrierschrank
+                    if (finalEntry.poolItemId == null && !finalEntry.isFromFreezer) {
+                        // 1. Bestehende Items für diesen Eintrag entfernen
+                        val itemsToDelete = shoppingList.filter { it.plannedEntryId == finalEntry.id }.map { it.id }
+                        itemsToDelete.forEach { deleteShoppingItem(it) }
+                        
+                        // 2. Neue Items hinzufügen (basierend auf geänderter Menge/Portionen)
+                        // Da poolItemId null ist, kann es eigentlich nur ein Einzelartikel sein
                         val food = foods.find { it.id == finalEntry.foodItemId }
                         if (food != null && !food.isPantryItem) {
                             internalAddToShoppingList(food, finalEntry.amount, finalEntry.unitLabel, sourceName = "Einzelartikel @ ${finalEntry.dateIso}", plannedEntryId = finalEntry.id)
@@ -1380,6 +1626,76 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                                 plannedEntryId = finalEntry.id
                             )
                         }
+                    } else if (finalEntry.isFromFreezer) {
+                        // Falls es eine Freezer-Mahlzeit ist, stellen wir sicher, dass nichts auf der Liste steht
+                        val itemsToDelete = shoppingList.filter { it.plannedEntryId == finalEntry.id }.map { it.id }
+                        itemsToDelete.forEach { deleteShoppingItem(it) }
+                    }
+                }
+            }
+        }
+    }
+
+    fun movePlannedEntry(entryId: Long, targetDate: LocalDate, portionsToMove: Double) {
+        val entry = plannedEntries.find { it.id == entryId } ?: return
+        val user = firebaseManager.currentUser.value
+        val householdId = firebaseManager.household.value?.id
+
+        if (portionsToMove >= entry.amount) {
+            // Move entire entry
+            val updated = entry.copy(
+                dateIso = targetDate.toString(),
+                lastModifiedByUid = user?.uid,
+                lastModifiedByName = userProfile.firstName
+            )
+            val idx = plannedEntries.indexOfFirst { it.id == entryId }
+            if (idx != -1) {
+                plannedEntries[idx] = updated
+                savePlannedEntries()
+                if (user != null) {
+                    viewModelScope.launch { firestoreRepository.savePersonalPlannedEntry(user.uid, updated) }
+                }
+            }
+        } else {
+            // Split entry: reduce source, create new for target
+            val ratioSource = (entry.amount - portionsToMove) / entry.amount
+            val ratioTarget = portionsToMove / entry.amount
+
+            val updatedSource = entry.copy(
+                amount = entry.amount - portionsToMove,
+                grams = entry.grams * ratioSource,
+                mealIngredients = entry.mealIngredients?.map { it.copy(
+                    amount = it.amount * ratioSource,
+                    grams = it.grams * ratioSource
+                )},
+                lastModifiedByUid = user?.uid,
+                lastModifiedByName = userProfile.firstName
+            )
+
+            val newId = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000)
+            val newEntry = entry.copy(
+                id = newId,
+                dateIso = targetDate.toString(),
+                amount = portionsToMove,
+                grams = entry.grams * ratioTarget,
+                mealIngredients = entry.mealIngredients?.map { it.copy(
+                    id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
+                    amount = it.amount * ratioTarget,
+                    grams = it.grams * ratioTarget
+                )},
+                lastModifiedByUid = user?.uid,
+                lastModifiedByName = userProfile.firstName
+            )
+
+            val idx = plannedEntries.indexOfFirst { it.id == entryId }
+            if (idx != -1) {
+                plannedEntries[idx] = updatedSource
+                plannedEntries.add(newEntry)
+                savePlannedEntries()
+                if (user != null) {
+                    viewModelScope.launch {
+                        firestoreRepository.savePersonalPlannedEntry(user.uid, updatedSource)
+                        firestoreRepository.savePersonalPlannedEntry(user.uid, newEntry)
                     }
                 }
             }
@@ -1409,8 +1725,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
         plannedEntries.removeAll { it.id == entryId }
         savePlannedEntries()
-        if (householdId != null) {
-            viewModelScope.launch { firestoreRepository.deletePlannedEntry(householdId, entryId) }
+
+        val user = firebaseManager.currentUser.value
+        if (user != null) {
+            viewModelScope.launch { firestoreRepository.deletePersonalPlannedEntry(user.uid, entryId) }
         }
     }
 
@@ -1441,7 +1759,15 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         return food.name.split(",").first().trim()
     }
 
-    private fun internalAddToShoppingList(food: FoodItemEntity, amount: Double, unit: String, pkg: FoodPackageEntity? = null, sourceName: String? = null, plannedEntryId: Long? = null) {
+    private fun internalAddToShoppingList(
+        food: FoodItemEntity, 
+        amount: Double, 
+        unit: String, 
+        pkg: FoodPackageEntity? = null, 
+        sourceName: String? = null, 
+        plannedEntryId: Long? = null,
+        poolItemId: String? = null
+    ) {
         val householdId = firebaseManager.household.value?.id ?: return
         val name = getGeneralName(food)
         
@@ -1458,7 +1784,11 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             it.unit == unit && 
             !it.isChecked && 
             it.isPantryItem == food.isPantryItem &&
-            (if (plannedEntryId != null) it.plannedEntryId == plannedEntryId else it.sourceName == (sourceName ?: "Manuell hinzugefügt"))
+            (when {
+                poolItemId != null -> it.poolItemId == poolItemId
+                plannedEntryId != null -> it.plannedEntryId == plannedEntryId
+                else -> it.sourceName == (sourceName ?: "Manuell hinzugefügt")
+            })
         }
         
         if (existingIndex != -1) {
@@ -1482,7 +1812,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 baseUnit = food.baseUnit,
                 weightGrams = addedWeight,
                 sourceName = sourceName ?: "Manuell hinzugefügt",
-                plannedEntryId = plannedEntryId
+                plannedEntryId = plannedEntryId,
+                poolItemId = poolItemId
             )
             shoppingList.add(newItem)
             viewModelScope.launch { firestoreRepository.addShoppingItem(householdId, newItem) }
@@ -1721,8 +2052,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             meals.forEach { firestoreRepository.savePersonalMeal(user.uid, it) }
             allEntries.forEach { firestoreRepository.savePersonalEntry(user.uid, it) }
             weightHistory.forEach { firestoreRepository.saveWeightEntry(user.uid, it) }
+            plannedEntries.forEach { firestoreRepository.savePersonalPlannedEntry(user.uid, it) }
             if (householdId != null) {
-                plannedEntries.forEach { firestoreRepository.addPlannedEntry(householdId, it) }
                 shoppingList.forEach { firestoreRepository.addShoppingItem(householdId, it) }
             }
         }
@@ -1802,6 +2133,11 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         prefs.edit().putString("categories", json.encodeToString(data)).apply()
     }
 
+    private fun savePlannedMealPool() = viewModelScope.launch(Dispatchers.IO) {
+        val data = plannedMealPool.toList()
+        prefs.edit().putString("planned_meal_pool", json.encodeToString(data)).apply()
+    }
+
     private fun savePlannedEntries() = viewModelScope.launch(Dispatchers.IO) {
         val data = plannedEntries.toList()
         prefs.edit().putString("planned_entries", json.encodeToString(data)).apply()
@@ -1841,6 +2177,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             prefs.getString("entries", null)?.let { allEntries.addAll(json.decodeFromString<List<FoodEntryEntity>>(it)) }
             prefs.getString("categories", null)?.let { categories.addAll(json.decodeFromString<List<String>>(it)) }
             prefs.getString("planned_entries", null)?.let { plannedEntries.addAll(json.decodeFromString<List<FoodEntryEntity>>(it)) }
+            prefs.getString("planned_meal_pool", null)?.let { plannedMealPool.addAll(json.decodeFromString<List<PlannedMealPoolEntity>>(it)) }
             prefs.getString("shopping_list", null)?.let { shoppingList.addAll(json.decodeFromString<List<ShoppingItem>>(it)) }
             prefs.getString("weight_history", null)?.let { weightHistory.addAll(json.decodeFromString<List<WeightEntry>>(it)) }
             prefs.getString("verifications", null)?.let { dayVerifications.putAll(json.decodeFromString<Map<String, Boolean>>(it)) }

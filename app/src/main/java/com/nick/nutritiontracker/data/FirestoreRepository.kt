@@ -29,52 +29,54 @@ class FirestoreRepository {
         }
     }
 
-    fun getPlannedEntries(householdId: String): Flow<List<FoodEntryEntity>> = callbackFlow {
+
+    fun getPlannedMealPool(householdId: String): Flow<List<PlannedMealPoolEntity>> = callbackFlow {
         val subscription = db.collection("households")
             .document(householdId)
-            .collection("planner")
-            .orderBy("dateIso", Query.Direction.DESCENDING)
+            .collection("meal_pool")
+            .orderBy("createdAt", Query.Direction.DESCENDING)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e("Firestore", "Error listening to planner", error)
+                    Log.e("Firestore", "Error listening to meal pool", error)
                     close(error)
                     return@addSnapshotListener
                 }
                 launch(Dispatchers.Default) {
-                    val entries = snapshot?.documents?.mapNotNull { doc ->
-                        val entry = doc.toObject(FoodEntryEntity::class.java)
-                        if (entry != null) {
-                            entry.isMeal = doc.getBoolean("isMeal") ?: entry.isMeal
-                            entry.isPlanned = doc.getBoolean("isPlanned") ?: entry.isPlanned
-                            entry.isGeneric = doc.getBoolean("isGeneric") ?: doc.getBoolean("generic") ?: entry.isGeneric
-                        }
-                        entry
+                    val pool = snapshot?.documents?.mapNotNull { doc ->
+                        doc.toObject(PlannedMealPoolEntity::class.java)?.copy(id = doc.id)
                     } ?: emptyList()
-                    Log.d("Firestore", "Loaded ${entries.size} planned entries")
-                    trySend(entries)
+                    trySend(pool)
                 }
             }
         awaitClose { subscription.remove() }
     }
 
-    suspend fun addPlannedEntry(householdId: String, entry: FoodEntryEntity) {
+    suspend fun addPlannedMealToPool(householdId: String, poolEntry: PlannedMealPoolEntity) {
         db.collection("households")
             .document(householdId)
-            .collection("planner")
-            .document(entry.id.toString())
-            .set(entry)
+            .collection("meal_pool")
+            .add(poolEntry)
             .await()
-        Log.d("Firestore", "Success: Planned entry written to Cloud")
     }
 
-    suspend fun deletePlannedEntry(householdId: String, entryId: Long) {
+    suspend fun updatePlannedMealInPool(householdId: String, poolEntry: PlannedMealPoolEntity) {
         db.collection("households")
             .document(householdId)
-            .collection("planner")
-            .document(entryId.toString())
+            .collection("meal_pool")
+            .document(poolEntry.id)
+            .set(poolEntry)
+            .await()
+    }
+
+    suspend fun deletePlannedMealFromPool(householdId: String, poolId: String) {
+        db.collection("households")
+            .document(householdId)
+            .collection("meal_pool")
+            .document(poolId)
             .delete()
             .await()
     }
+
 
     fun getShoppingList(householdId: String): Flow<List<ShoppingItem>> = callbackFlow {
         val subscription = db.collection("households")
@@ -120,7 +122,52 @@ class FirestoreRepository {
             .await()
     }
 
-    // --- PERSONAL DATA (Foods & Meals) ---
+    // --- PERSONAL DATA (Foods, Meals, Diary & Private Planner) ---
+
+    fun getPersonalPlannedEntries(uid: String): Flow<List<FoodEntryEntity>> = callbackFlow {
+        val subscription = db.collection("users")
+            .document(uid)
+            .collection("personal_planner")
+            .orderBy("dateIso", Query.Direction.DESCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    close(error)
+                    return@addSnapshotListener
+                }
+                launch(Dispatchers.Default) {
+                    val entries = snapshot?.documents?.mapNotNull { doc ->
+                        val entry = doc.toObject(FoodEntryEntity::class.java)
+                        if (entry != null) {
+                            entry.id = doc.id.toLongOrNull() ?: 0L
+                            entry.isMeal = doc.getBoolean("isMeal") ?: entry.isMeal
+                            entry.isPlanned = doc.getBoolean("isPlanned") ?: entry.isPlanned
+                            entry.isGeneric = doc.getBoolean("isGeneric") ?: doc.getBoolean("generic") ?: entry.isGeneric
+                        }
+                        entry
+                    } ?: emptyList()
+                    trySend(entries)
+                }
+            }
+        awaitClose { subscription.remove() }
+    }
+
+    suspend fun savePersonalPlannedEntry(uid: String, entry: FoodEntryEntity) {
+        db.collection("users")
+            .document(uid)
+            .collection("personal_planner")
+            .document(entry.id.toString())
+            .set(entry)
+            .await()
+    }
+
+    suspend fun deletePersonalPlannedEntry(uid: String, entryId: Long) {
+        db.collection("users")
+            .document(uid)
+            .collection("personal_planner")
+            .document(entryId.toString())
+            .delete()
+            .await()
+    }
 
     fun getPersonalFoods(uid: String): Flow<List<FoodItemEntity>> = callbackFlow {
         val subscription = db.collection("users")

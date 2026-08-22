@@ -22,5 +22,6 @@ data class ShoppingItem(
     var baseUnit: String = "g",
     @get:PropertyName("isPantryItem") @set:PropertyName("isPantryItem")
     var isPantryItem: Boolean = false,
-    var plannedEntryId: Long? = null
+    var plannedEntryId: Long? = null,
+    var poolItemId: String? = null
 )

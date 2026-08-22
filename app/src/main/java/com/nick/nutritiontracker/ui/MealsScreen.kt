@@ -534,7 +534,10 @@ fun MealEditDialog(
                         alcoholPercent = foodToConfigure!!.alcoholPercent,
                         baseUnit = foodToConfigure!!.baseUnit,
                         store = foodToConfigure!!.store,
-                        brand = foodToConfigure!!.brand
+                        brand = foodToConfigure!!.brand,
+                        category = foodToConfigure!!.category,
+                        barcode = foodToConfigure!!.barcode,
+                        isGeneric = foodToConfigure!!.isGeneric
                     )
                 )
                 foodToConfigure = null

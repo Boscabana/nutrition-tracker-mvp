@@ -41,7 +41,12 @@ data class FoodEntryEntity(
     var imageUrl: String? = null,
     var tags: List<String> = emptyList(),
     
-    // Tracking for shared plans
+    // Tracking for shared plans and pool
+    var poolItemId: String? = null,
+    var originPlannedEntryId: Long? = null,
+    @get:PropertyName("isFromFreezer") @set:PropertyName("isFromFreezer")
+    var isFromFreezer: Boolean = false,
+
     var plannedByUid: String? = null,
     var plannedByName: String? = null,
     var lastModifiedByUid: String? = null,
