@@ -21,12 +21,15 @@ import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 import kotlin.random.Random
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 enum class PlanMatchStatus {
     EXACT,            // Alles vorhanden
     DIVERGENT,        // Artikel existiert, aber Werte weichen ab
     TEMPLATE_MISSING, // Alle Artikel da, aber Mahlzeit-Vorlage fehlt
-    MISSING           // Artikel fehlen komplett
+    MISSING,          // Artikel fehlen komplett
+    DELETED_INGREDIENT // Zutat wurde aus der Bibliothek gelöscht
 }
 
 class NutritionViewModel(application: Application) : AndroidViewModel(application) {
@@ -65,6 +68,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
     private var userProfile by mutableStateOf(UserProfile())
     private var isRepairing = false
+    private val shoppingMutex = Mutex()
 
     // --- Mandatory Properties for NutritionApp.kt ---
     val todayEntries: List<FoodEntryEntity>
@@ -458,68 +462,95 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun findFoodByBarcode(barcode: String): FoodItemEntity? = foods.find { it.barcode == barcode }
 
     fun getMatchStatus(entry: FoodEntryEntity): PlanMatchStatus {
+        val currentUid = firebaseManager.currentUser.value?.uid
+        val isOwnEntry = entry.plannedByUid == null || entry.plannedByUid == currentUid
+
+        if (!isOwnEntry) return PlanMatchStatus.EXACT
+
         if (entry.isMeal) {
             val ings = entry.mealIngredients ?: return PlanMatchStatus.EXACT
-            val statuses = ings.map { ing ->
-                // Pseudo-Objekt für Namens-Check erstellen, inklusive isGeneric!
-                val pseudo = FoodEntryEntity(
-                    name = ing.name, 
-                    brand = ing.brand, 
-                    barcode = ing.barcode, 
-                    isGeneric = ing.isGeneric
-                )
-                
-                // Priorität 1: ID-Match
-                val foodById = foods.find { it.id == ing.foodItemId }
-                
-                // Wenn ID gefunden, prüfen wir ob es wirklich derselbe Artikel ist
-                val food = if (foodById != null && foodById.isSimilarTo(pseudo)) {
-                    foodById
-                } else {
-                    // Priorität 2: Ähnlichkeits-Suche (Name/Marke/Barcode)
-                    foods.find { it.isSimilarTo(pseudo) }
-                }
-                
-                when {
-                    food == null -> PlanMatchStatus.MISSING
-                    food.matchesIngredient(ing) -> PlanMatchStatus.EXACT
-                    else -> PlanMatchStatus.DIVERGENT
+            
+            val missingAny = ings.any { ing -> 
+                foods.none { 
+                    it.id == ing.foodItemId || 
+                    (!ing.barcode.isNullOrBlank() && it.barcode == ing.barcode) ||
+                    (it.name.trim().equals(ing.name.trim(), ignoreCase = true) && (it.brand?.trim() ?: "") == (ing.brand?.trim() ?: "")) 
                 }
             }
-
-            if (statuses.any { it == PlanMatchStatus.MISSING }) return PlanMatchStatus.MISSING
-            if (statuses.any { it == PlanMatchStatus.DIVERGENT }) return PlanMatchStatus.DIVERGENT
             
-            // Vorlagen-Check
-            val mealExists = meals.any { m -> 
-                m.name.equals(entry.name, ignoreCase = true) && 
-                m.ingredients.size == ings.size
-            }
+            if (missingAny) return PlanMatchStatus.DELETED_INGREDIENT
             
-            return if (mealExists) PlanMatchStatus.EXACT else PlanMatchStatus.TEMPLATE_MISSING
+            return PlanMatchStatus.EXACT
         } else {
-            val pseudo = FoodEntryEntity(
-                name = entry.name, 
-                brand = entry.brand, 
-                barcode = entry.barcode, 
-                isGeneric = entry.isGeneric
-            )
-            
-            // Priorität 1: ID-Match
-            val foodById = foods.find { it.id == entry.foodItemId }
-            val food = if (foodById != null && foodById.isSimilarTo(pseudo)) {
-                foodById
-            } else {
-                // Priorität 2: Ähnlichkeits-Suche
-                foods.find { it.isSimilarTo(pseudo) }
+            val exists = foods.any { 
+                it.id == entry.foodItemId || 
+                (!entry.barcode.isNullOrBlank() && it.barcode == entry.barcode) ||
+                (it.name.trim().equals(entry.name.trim(), ignoreCase = true) && (it.brand?.trim() ?: "") == (entry.brand?.trim() ?: "")) 
             }
+            
+            if (!exists) return PlanMatchStatus.MISSING
+            
+            return PlanMatchStatus.EXACT
+        }
+    }
 
-            return when {
-                food == null -> PlanMatchStatus.MISSING
-                food.matchesDataOf(entry) -> PlanMatchStatus.EXACT
-                else -> PlanMatchStatus.DIVERGENT
+    fun isMealModified(entry: FoodEntryEntity): Boolean {
+        if (!entry.isMeal) return false
+        val currentUid = firebaseManager.currentUser.value?.uid
+        val isOwnEntry = entry.plannedByUid == null || entry.plannedByUid == currentUid
+        if (!isOwnEntry) return false
+
+        val template = meals.find { it.name.trim().equals(entry.name.trim(), ignoreCase = true) } ?: return false
+        
+        val ings = entry.mealIngredients ?: return false
+        if (ings.size != template.ingredients.size) return true
+        
+        val ratio = entry.amount / template.servings
+        
+        return !ingredientsMatch(ings, template.ingredients, ratio)
+    }
+
+    fun isPoolItemModified(item: PlannedMealPoolEntity): Boolean {
+        val currentUid = firebaseManager.currentUser.value?.uid
+        if (item.createdByUid != currentUid) return false
+
+        val template = meals.find { it.name.trim().equals(item.mealName.trim(), ignoreCase = true) } ?: return false
+        val ings = item.mealIngredients
+        if (ings.size != template.ingredients.size) return true
+        
+        val ratio = item.plannedPortions / template.servings
+        return !ingredientsMatch(ings, template.ingredients, ratio)
+    }
+
+    private fun ingredientsMatch(current: List<MealIngredientEntity>, template: List<MealIngredientEntity>, ratio: Double): Boolean {
+        if (current.size != template.size) return false
+        
+        return current.all { cIng ->
+            template.any { tIng ->
+                (tIng.name.trim().equals(cIng.name.trim(), ignoreCase = true) &&
+                 (tIng.brand?.trim() ?: "").equals(cIng.brand?.trim() ?: "", ignoreCase = true)) &&
+                kotlin.math.abs(cIng.amount - (tIng.amount * ratio)) < 0.01 &&
+                kotlin.math.abs(cIng.kcalPer100g - tIng.kcalPer100g) < 0.1 &&
+                kotlin.math.abs(cIng.proteinPer100g - tIng.proteinPer100g) < 0.1
             }
         }
+    }
+
+    private fun isDataCompatible(existing: FoodItemEntity, incoming: FoodItemEntity): Boolean {
+        val kcalDiff = kotlin.math.abs(existing.kcalPer100g - incoming.kcalPer100g)
+        val proteinDiff = kotlin.math.abs(existing.proteinPer100g - incoming.proteinPer100g)
+        // Max 5% Abweichung oder 5 kcal / 1g Protein
+        val kcalCompatible = kcalDiff < 5.0 || kcalDiff / incoming.kcalPer100g.coerceAtLeast(1.0) < 0.05
+        val proteinCompatible = proteinDiff < 1.0 || proteinDiff / incoming.proteinPer100g.coerceAtLeast(1.0) < 0.05
+        return kcalCompatible && proteinCompatible
+    }
+
+    private fun isDataCompatible(existing: FoodItemEntity, incoming: MealIngredientEntity): Boolean {
+        val kcalDiff = kotlin.math.abs(existing.kcalPer100g - incoming.kcalPer100g)
+        val proteinDiff = kotlin.math.abs(existing.proteinPer100g - incoming.proteinPer100g)
+        val kcalCompatible = kcalDiff < 5.0 || kcalDiff / incoming.kcalPer100g.coerceAtLeast(1.0) < 0.05
+        val proteinCompatible = proteinDiff < 1.0 || proteinDiff / incoming.proteinPer100g.coerceAtLeast(1.0) < 0.05
+        return kcalCompatible && proteinCompatible
     }
 
     fun importPlannedMealToLibrary(entry: FoodEntryEntity) {
@@ -1287,22 +1318,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         )
         viewModelScope.launch {
             firestoreRepository.addPlannedMealToPool(householdId, poolEntry)
-            
-            // Add ingredients to shopping list ONLY if NOT frozen
-            if (!isFrozen) {
-                poolIngredients.forEach { ing ->
-                    val food = foods.find { it.id == ing.foodItemId }
-                    if (food?.isPantryItem != true) {
-                        internalAddToShoppingList(
-                            food ?: FoodItemEntity(name = ing.name, category = ing.category),
-                            ing.amount,
-                            ing.unitLabel,
-                            sourceName = meal.name,
-                            poolItemId = poolEntry.id
-                        )
-                    }
-                }
-            }
+            // Centralized shopping list logic in updatePoolItem
+            updatePoolItem(poolEntry)
         }
     }
 
@@ -1310,30 +1327,34 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val householdId = firebaseManager.household.value?.id ?: return
         val user = firebaseManager.currentUser.value
         
-        // Sum up already planned portions for this pool item to see if we need to increase the total
-        val alreadyPlanned = plannedEntries.filter { it.poolItemId == poolItem.id }.sumOf { it.amount }
-        val newTotalPlanned = alreadyPlanned + servings
-        
-        val updatedPool = if (newTotalPlanned > poolItem.plannedPortions) {
-            // Increase pool portions and update shopping list
-            val scaleFactor = newTotalPlanned / poolItem.plannedPortions
-            val newIngredients = poolItem.mealIngredients.map { it.copy(
-                amount = it.amount * scaleFactor,
-                grams = it.grams * scaleFactor
-            ) }
+        val updatedPool = if (poolItem.isFrozen) {
+            // Gefrierschrank-Logik: Bestand verringern (Inventar-Modus)
             poolItem.copy(
-                plannedPortions = newTotalPlanned,
-                remainingPortions = poolItem.remainingPortions, // unused but for safety
-                mealIngredients = newIngredients
+                plannedPortions = (poolItem.plannedPortions - servings).coerceAtLeast(0.0)
             )
         } else {
-            poolItem // Stay as is, just take some portions
+            // Pool-Logik: Gesamtbedarf tracken (Einkaufs-Modus)
+            val alreadyPlanned = plannedEntries.filter { it.poolItemId == poolItem.id }.sumOf { it.amount }
+            val newTotalPlanned = alreadyPlanned + servings
+            if (newTotalPlanned > poolItem.plannedPortions) {
+                val scaleFactor = newTotalPlanned / poolItem.plannedPortions
+                val newIngredients = poolItem.mealIngredients.map { it.copy(
+                    amount = it.amount * scaleFactor,
+                    grams = it.grams * scaleFactor
+                ) }
+                poolItem.copy(
+                    plannedPortions = newTotalPlanned,
+                    mealIngredients = newIngredients
+                )
+            } else {
+                poolItem
+            }
         }
         
         val entryId = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000)
         val factor = servings / poolItem.plannedPortions
         
-        // Use resolveIngredients logic to ensure the ingredients match the taker's local library
+        // Nährwerte und Zutaten auflösen
         val localIngredients = resolveIngredients(poolItem.mealIngredients.map { 
             it.copy(
                 id = (System.currentTimeMillis() * 1000) + Random.nextLong(1000000),
@@ -1364,7 +1385,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
 
         viewModelScope.launch {
             if (updatedPool != poolItem) {
-                updatePoolItem(updatedPool) // This also syncs shopping list
+                updatePoolItem(updatedPool)
             }
             addPlannedEntry(entry)
             if (addToDiary) {
@@ -1396,25 +1417,61 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun updatePoolItem(updatedItem: PlannedMealPoolEntity) {
         val householdId = firebaseManager.household.value?.id ?: return
         viewModelScope.launch {
-            firestoreRepository.updatePlannedMealInPool(householdId, updatedItem)
+            shoppingMutex.withLock {
+                firestoreRepository.updatePlannedMealInPool(householdId, updatedItem)
 
-            // Shopping list sync
-            val itemsToDelete = shoppingList.filter { it.poolItemId == updatedItem.id }.map { it.id }
-            itemsToDelete.forEach { deleteShoppingItem(it) }
+                // Shopping list sync (Authoritative Clean Slate Strategy)
+                // 1. Identify all items that currently belong to this meal
+                val itemsToRemove = shoppingList.filter { 
+                    it.poolItemId == updatedItem.id || 
+                    (it.sourceName?.trim()?.equals(updatedItem.mealName.trim(), ignoreCase = true) == true && !it.isPantryItem)
+                }
+                
+                // 2. Remember checked status
+                val checkedNames = itemsToRemove.filter { it.isChecked }.map { it.name.trim().lowercase() }.toSet()
+                
+                // 3. Remove all old items from Local and Cloud and WAIT
+                itemsToRemove.forEach { item ->
+                    shoppingList.removeAll { it.id == item.id }
+                    firestoreRepository.deleteShoppingItem(householdId, item.id)
+                }
+                
+                if (!updatedItem.isFrozen) {
+                    // 4. Group and add fresh ingredients
+                    val newIngredientsGrouped = updatedItem.mealIngredients
+                        .filter { ing -> 
+                            val food = foods.find { it.id == ing.foodItemId }
+                            food?.isPantryItem != true 
+                        }
+                        .groupBy { it.name.trim().lowercase() to it.unitLabel }
 
-            if (!updatedItem.isFrozen) {
-                updatedItem.mealIngredients.forEach { ing ->
-                    val food = foods.find { it.id == ing.foodItemId }
-                    if (food?.isPantryItem != true) {
-                        internalAddToShoppingList(
-                            food ?: FoodItemEntity(name = ing.name, category = ing.category),
-                            ing.amount,
-                            ing.unitLabel,
+                    newIngredientsGrouped.forEach { (key, ings) ->
+                        val (name, unit) = key
+                        val totalAmount = ings.sumOf { it.amount }
+                        val totalWeight = ings.sumOf { it.grams }
+                        val firstIng = ings.first()
+                        
+                        val newItemId = UUID.randomUUID().toString()
+                        val newItem = ShoppingItem(
+                            id = newItemId,
+                            name = firstIng.name,
+                            amount = totalAmount,
+                            unit = unit,
+                            isChecked = checkedNames.contains(name),
+                            category = firstIng.category,
+                            householdId = householdId,
+                            isAutoGenerated = true,
+                            isPantryItem = false,
+                            baseUnit = firstIng.baseUnit,
+                            weightGrams = totalWeight,
                             sourceName = updatedItem.mealName,
                             poolItemId = updatedItem.id
                         )
+                        shoppingList.add(newItem)
+                        firestoreRepository.addShoppingItem(householdId, newItem)
                     }
                 }
+                saveShoppingList()
             }
         }
     }
@@ -1547,6 +1604,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val householdId = firebaseManager.household.value?.id
         val index = plannedEntries.indexOfFirst { it.id == updatedEntry.id }
         if (index != -1) {
+            val oldEntry = plannedEntries[index]
             val finalEntry = updatedEntry.copy(
                 lastModifiedByUid = user?.uid,
                 lastModifiedByName = userProfile.firstName
@@ -1558,9 +1616,16 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             if (finalEntry.poolItemId != null && householdId != null) {
                 val poolItem = plannedMealPool.find { it.id == finalEntry.poolItemId }
                 if (poolItem != null) {
-                    val currentlyPlanned = plannedEntries.filter { it.poolItemId == poolItem.id }.sumOf { it.amount }
-                    if (currentlyPlanned > poolItem.plannedPortions) {
-                        updatePoolItem(poolItem.copy(plannedPortions = currentlyPlanned))
+                    val diff = finalEntry.amount - oldEntry.amount
+                    if (poolItem.isFrozen) {
+                        // Gefrierschrank: Bestand anpassen (Inventar)
+                        updatePoolItem(poolItem.copy(plannedPortions = (poolItem.plannedPortions - diff).coerceAtLeast(0.0)))
+                    } else {
+                        // Pool: Gesamtbedarf anpassen (Einkauf)
+                        val currentlyPlanned = plannedEntries.filter { it.poolItemId == poolItem.id }.sumOf { it.amount }
+                        if (currentlyPlanned > poolItem.plannedPortions) {
+                            updatePoolItem(poolItem.copy(plannedPortions = currentlyPlanned))
+                        }
                     }
                 }
             }
@@ -1706,6 +1771,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val householdId = firebaseManager.household.value?.id
         val entry = plannedEntries.find { it.id == entryId } ?: return
         
+        // "Zurücklegen"-Logik für Gefrierschrank
+        if (entry.poolItemId != null && householdId != null) {
+            val poolItem = plannedMealPool.find { it.id == entry.poolItemId }
+            if (poolItem != null && poolItem.isFrozen) {
+                updatePoolItem(poolItem.copy(plannedPortions = poolItem.plannedPortions + entry.amount))
+            }
+        }
+        
         if (deleteFromShoppingList && householdId != null) {
             // Erst versuchen über ID zu löschen (präziser)
             val itemsToDeleteById = shoppingList.filter { it.plannedEntryId == entryId }.map { it.id }
@@ -1765,8 +1838,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         unit: String, 
         pkg: FoodPackageEntity? = null, 
         sourceName: String? = null, 
-        plannedEntryId: Long? = null,
-        poolItemId: String? = null
+        plannedEntryId: Long? = null
     ) {
         val householdId = firebaseManager.household.value?.id ?: return
         val name = getGeneralName(food)
@@ -1777,18 +1849,12 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             else -> 0.0 
         }
 
-        // Wir suchen NUR dann nach einem existierenden Item, wenn Name, Einheit UND Quelle/ID
-        // exakt gleich sind.
+        // NUR für Einzelartikel (keine Mahlzeiten-Bestandteile)
         val existingIndex = shoppingList.indexOfFirst { 
             it.name.equals(name, ignoreCase = true) && 
             it.unit == unit && 
-            !it.isChecked && 
             it.isPantryItem == food.isPantryItem &&
-            (when {
-                poolItemId != null -> it.poolItemId == poolItemId
-                plannedEntryId != null -> it.plannedEntryId == plannedEntryId
-                else -> it.sourceName == (sourceName ?: "Manuell hinzugefügt")
-            })
+            (if (plannedEntryId != null) it.plannedEntryId == plannedEntryId else it.sourceName == (sourceName ?: "Manuell hinzugefügt"))
         }
         
         if (existingIndex != -1) {
@@ -1800,8 +1866,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             shoppingList[existingIndex] = updated
             viewModelScope.launch { firestoreRepository.updateShoppingItem(householdId, updated) }
         } else {
+            val newItemId = UUID.randomUUID().toString()
             val newItem = ShoppingItem(
-                id = UUID.randomUUID().toString(),
+                id = newItemId,
                 name = name,
                 amount = amount,
                 unit = unit,
@@ -1812,8 +1879,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 baseUnit = food.baseUnit,
                 weightGrams = addedWeight,
                 sourceName = sourceName ?: "Manuell hinzugefügt",
-                plannedEntryId = plannedEntryId,
-                poolItemId = poolItemId
+                plannedEntryId = plannedEntryId
             )
             shoppingList.add(newItem)
             viewModelScope.launch { firestoreRepository.addShoppingItem(householdId, newItem) }
@@ -1990,18 +2056,31 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     finalMeal = meal.copy(imageUrl = cloudUrl)
                 }
             }
+            
+            // Get all related foods for this meal
+            val relatedFoods = finalMeal.ingredients.mapNotNull { ing ->
+                foods.find { it.id == ing.foodItemId }
+            }.distinctBy { it.id }
+
+            val recipeData = RecipeData(meal = finalMeal, relatedFoods = relatedFoods)
+
             val message = InboxMessage(
                 fromUid = user.uid,
                 fromName = userProfile.firstName,
                 type = MessageType.RECIPE,
-                payloadJson = json.encodeToString(finalMeal),
+                payloadJson = json.encodeToString(recipeData),
                 timestamp = System.currentTimeMillis()
             )
             firestoreRepository.sendInboxMessage(targetUid, message)
         }
     }
 
-    fun getRecipeJson(meal: MealEntity): String = json.encodeToString(meal)
+    fun getRecipeJson(meal: MealEntity): String {
+        val relatedFoods = meal.ingredients.mapNotNull { ing ->
+            foods.find { it.id == ing.foodItemId }
+        }.distinctBy { it.id }
+        return json.encodeToString(RecipeData(meal = meal, relatedFoods = relatedFoods))
+    }
 
     fun startRecipeImport(jsonStr: String): Boolean {
         return try {
@@ -2016,10 +2095,18 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun resolveRecipeImport(supplement: Boolean) {
         val importData = pendingRecipeImport ?: return
         viewModelScope.launch {
+            // Map old ID to new local ID
+            val idMapping = mutableMapOf<Long, Long>()
+            
             importData.relatedFoods.forEach { food ->
-                val existing = foods.find { it.id == food.id }
+                val existing = foods.find { 
+                    (!food.barcode.isNullOrBlank() && it.barcode == food.barcode) ||
+                    (it.name.trim().equals(food.name.trim(), ignoreCase = true) && 
+                     (it.brand?.trim() ?: "").equals(food.brand?.trim() ?: "", ignoreCase = true))
+                }
+                
                 if (existing == null) {
-                    addFood(
+                    val added = addFood(
                         name = food.name, kcal = food.kcalPer100g, protein = food.proteinPer100g,
                         carbs = food.carbsPer100g, sugar = food.sugarPer100g, fat = food.fatPer100g,
                         saturatedFat = food.saturatedFatPer100g, alcoholPercent = food.alcoholPercent,
@@ -2027,18 +2114,62 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         barcode = food.barcode, brand = food.brand, category = food.category,
                         isGeneric = food.isGeneric, store = food.store
                     )
-                } else if (supplement) {
-                    updateFood(food)
+                    idMapping[food.id] = added.id
+                } else {
+                    if (isDataCompatible(existing, food)) {
+                        if (supplement) {
+                            updateFood(existing.copy(
+                                kcalPer100g = food.kcalPer100g,
+                                proteinPer100g = food.proteinPer100g,
+                                carbsPer100g = food.carbsPer100g,
+                                sugarPer100g = food.sugarPer100g,
+                                fatPer100g = food.fatPer100g,
+                                saturatedFatPer100g = food.saturatedFatPer100g,
+                                alcoholPercent = food.alcoholPercent,
+                                portions = food.portions,
+                                packages = food.packages,
+                                category = food.category,
+                                barcode = food.barcode,
+                                brand = food.brand,
+                                isGeneric = food.isGeneric
+                            ))
+                        }
+                        idMapping[food.id] = existing.id
+                    } else {
+                        // Smart Conflict: Create variant
+                        val added = addFood(
+                            name = "${food.name} (Import)", kcal = food.kcalPer100g, protein = food.proteinPer100g,
+                            carbs = food.carbsPer100g, sugar = food.sugarPer100g, fat = food.fatPer100g,
+                            saturatedFat = food.saturatedFatPer100g, alcoholPercent = food.alcoholPercent,
+                            baseUnit = food.baseUnit, portions = food.portions, packages = food.packages,
+                            barcode = food.barcode, brand = food.brand, category = food.category,
+                            isGeneric = food.isGeneric, store = food.store
+                        )
+                        idMapping[food.id] = added.id
+                    }
                 }
             }
-            val existingMeal = meals.find { it.id == importData.meal.id }
+            
+            // Update ingredient links
+            val updatedIngredients = importData.meal.ingredients.map { ing ->
+                ing.copy(foodItemId = idMapping[ing.foodItemId] ?: ing.foodItemId)
+            }
+            
+            val localMeal = importData.meal.copy(ingredients = updatedIngredients)
+            
+            val existingMeal = meals.find { it.name.trim().equals(localMeal.name.trim(), ignoreCase = true) }
             if (existingMeal == null) {
                 addMealTemplate(
-                    importData.meal.name, importData.meal.ingredients,
-                    importData.meal.servings, importData.meal.tags, importData.meal.imageUrl
+                    localMeal.name, localMeal.ingredients,
+                    localMeal.servings, localMeal.tags, localMeal.imageUrl
                 )
             } else if (supplement) {
-                updateMealTemplate(importData.meal)
+                updateMealTemplate(existingMeal.copy(
+                    ingredients = localMeal.ingredients,
+                    servings = localMeal.servings,
+                    tags = localMeal.tags,
+                    imageUrl = localMeal.imageUrl
+                ))
             }
             pendingRecipeImport = null
         }

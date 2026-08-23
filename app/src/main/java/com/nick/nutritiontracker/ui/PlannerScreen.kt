@@ -493,6 +493,7 @@ fun DayPlannerCard(
                             key = entry.id
                         ) {
                             val status = vm.getMatchStatus(entry)
+                            val isModified = vm.isMealModified(entry)
                             
                             val onImport: () -> Unit = {
                                 if (entry.isMeal) {
@@ -506,7 +507,7 @@ fun DayPlannerCard(
                                 onClick = { onEntryClick(entry) },
                                 onLongClick = { onLongClickEntry(entry) }
                             )) {
-                                PlannedEntryRow(entry, status, onImportClick = onImport)
+                                PlannedEntryRow(entry, status, onImportClick = onImport, isModified = isModified)
                             }
                         }
                     }
@@ -674,8 +675,14 @@ fun PlannedItemPickerBottomSheet(
 }
 
 @Composable
-fun PlannedEntryRow(entry: FoodEntryEntity, status: PlanMatchStatus = PlanMatchStatus.EXACT, onImportClick: () -> Unit = {}) {
+fun PlannedEntryRow(
+    entry: FoodEntryEntity, 
+    status: PlanMatchStatus = PlanMatchStatus.EXACT, 
+    onImportClick: () -> Unit = {},
+    isModified: Boolean = false
+) {
     val isMissing = status == PlanMatchStatus.MISSING
+    val isDeletedIngredient = status == PlanMatchStatus.DELETED_INGREDIENT
     val isDivergent = status == PlanMatchStatus.DIVERGENT
     val isTemplateMissing = status == PlanMatchStatus.TEMPLATE_MISSING
     val isExact = status == PlanMatchStatus.EXACT
@@ -687,6 +694,7 @@ fun PlannedEntryRow(entry: FoodEntryEntity, status: PlanMatchStatus = PlanMatchS
         border = androidx.compose.foundation.BorderStroke(
             width = 1.dp, 
             color = when {
+                isDeletedIngredient -> MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
                 isMissing -> MaterialTheme.colorScheme.error.copy(alpha = 0.4f)
                 isDivergent -> Color(0xFFFFC107).copy(alpha = 0.4f)
                 isTemplateMissing -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.4f)
@@ -704,7 +712,7 @@ fun PlannedEntryRow(entry: FoodEntryEntity, status: PlanMatchStatus = PlanMatchS
                     entry.isFromFreezer -> Color(0xFFE3F2FD).copy(alpha = 0.5f)
                     isTemplateMissing -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.2f)
                     entry.isMeal -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.1f)
-                    isMissing -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)
+                    isMissing || isDeletedIngredient -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)
                     isDivergent -> Color(0xFFFFE082).copy(alpha = 0.2f)
                     else -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.2f)
                 },
@@ -722,7 +730,7 @@ fun PlannedEntryRow(entry: FoodEntryEntity, status: PlanMatchStatus = PlanMatchS
                         Icon(
                             imageVector = when {
                                 entry.isFromFreezer -> Icons.Default.AcUnit
-                                isMissing -> Icons.Default.CloudDownload
+                                isMissing || isDeletedIngredient -> Icons.Default.Warning
                                 isDivergent -> Icons.Default.SyncProblem
                                 isTemplateMissing -> Icons.Default.AutoAwesome
                                 entry.isMeal -> Icons.Default.Restaurant
@@ -732,7 +740,7 @@ fun PlannedEntryRow(entry: FoodEntryEntity, status: PlanMatchStatus = PlanMatchS
                             modifier = Modifier.size(18.dp),
                             tint = when {
                                 entry.isFromFreezer -> Color(0xFF1976D2)
-                                isMissing -> MaterialTheme.colorScheme.error
+                                isMissing || isDeletedIngredient -> MaterialTheme.colorScheme.error
                                 isDivergent -> Color(0xFFFFA000)
                                 isTemplateMissing -> MaterialTheme.colorScheme.tertiary
                                 entry.isMeal -> MaterialTheme.colorScheme.tertiary
@@ -745,13 +753,25 @@ fun PlannedEntryRow(entry: FoodEntryEntity, status: PlanMatchStatus = PlanMatchS
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    val displayName = remember(entry.name, isModified) {
+                        if (isModified) "${entry.name} (abgewandelt)" else entry.name
+                    }
                     Text(
-                        entry.name, 
+                        text = displayName,
                         fontWeight = FontWeight.Bold, 
                         style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1
                     )
-                    if (!isExact) {
+                    if (isDeletedIngredient) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "Gelöschte Zutat!",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    if (!isExact && !isDeletedIngredient) {
                         Spacer(Modifier.width(6.dp))
                         Icon(
                             imageVector = if (isMissing) Icons.Default.CloudDownload else Icons.Default.Sync,
@@ -947,6 +967,7 @@ fun PoolItemRow(
         )
     }
     val status = vm.getMatchStatus(tempEntry)
+    val isModified = vm.isPoolItemModified(item)
     val isExact = status == PlanMatchStatus.EXACT
 
     Surface(
@@ -983,14 +1004,17 @@ fun PoolItemRow(
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    val displayName = remember(item.mealName, isModified) {
+                        if (isModified) "${item.mealName} (abgewandelt)" else item.mealName
+                    }
                     Text(
-                        item.mealName, 
+                        text = displayName,
                         fontWeight = FontWeight.SemiBold, 
                         style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
                         color = if (isFinished) MaterialTheme.colorScheme.outline else Color.Unspecified
                     )
-                    if (!isExact && !isFinished && !isFrozen) {
+                    if (!isExact && !isFinished && !isFrozen && status != PlanMatchStatus.DELETED_INGREDIENT) {
                         Spacer(Modifier.width(4.dp))
                         Icon(
                             imageVector = if (status == PlanMatchStatus.MISSING) Icons.Default.CloudDownload else Icons.Default.Sync,
@@ -999,9 +1023,18 @@ fun PoolItemRow(
                             tint = if (status == PlanMatchStatus.MISSING) MaterialTheme.colorScheme.error else Color(0xFFFFA000)
                         )
                     }
+                    if (status == PlanMatchStatus.DELETED_INGREDIENT) {
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            "!",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
                 Text(
-                    "Gesamt geplant: ${item.plannedPortions.roundString()}", 
+                    "Gesamt geplant: ${item.plannedPortions.roundString()} · Von: ${item.createdByName}", 
                     style = MaterialTheme.typography.labelSmall,
                     color = when {
                         isFrozen -> Color(0xFF1976D2)
@@ -1009,6 +1042,19 @@ fun PoolItemRow(
                         else -> MaterialTheme.colorScheme.tertiary
                     }
                 )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "${item.kcalPerServing.toInt()} kcal", 
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    Text(
+                        "P: ${item.proteinPerServing.toInt()}g · KH: ${item.carbsPerServing.toInt()}g · F: ${item.fatPerServing.toInt()}g",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.8f)
+                    )
+                }
             }
             
             if (!isFinished) {

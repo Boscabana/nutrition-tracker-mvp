@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.tasks.await
 import java.io.File
+import java.util.UUID
 
 class FirestoreRepository {
     private val db = FirebaseFirestore.getInstance()
@@ -55,7 +56,8 @@ class FirestoreRepository {
         db.collection("households")
             .document(householdId)
             .collection("meal_pool")
-            .add(poolEntry)
+            .document(poolEntry.id)
+            .set(poolEntry)
             .await()
     }
 
@@ -96,12 +98,14 @@ class FirestoreRepository {
     }
 
     suspend fun addShoppingItem(householdId: String, item: ShoppingItem) {
+        val finalId = if (item.id.isBlank()) UUID.randomUUID().toString() else item.id
         db.collection("households")
             .document(householdId)
             .collection("shopping_list")
-            .add(item)
+            .document(finalId)
+            .set(item.copy(id = finalId))
             .await()
-        Log.d("Firestore", "Success: Shopping item written to Cloud")
+        Log.d("Firestore", "Success: Shopping item written to Cloud with ID $finalId")
     }
 
     suspend fun updateShoppingItem(householdId: String, item: ShoppingItem) {
