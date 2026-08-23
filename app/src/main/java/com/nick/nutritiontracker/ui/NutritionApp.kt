@@ -66,7 +66,7 @@ private val ActionDeleteRed = Color(0xFFD32F2F)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
+fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel, adManager: RewardedAdManager) {
     val currentUser by vm.firebaseManager.currentUser.collectAsState()
     val userProfileState by profileVm.userProfile.collectAsState()
     
@@ -80,12 +80,15 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
     // 2. Wait until the profile is loaded from disk
     val userProfile = userProfileState ?: return // Show nothing while loading (brief flash)
 
-    // Wiederherstellungs-Logik: Falls Firestore ein Profil hat, aber lokal noch nichts ist
+    // Wiederherstellungs-Logik: Falls Firestore ein Profil hat, aber lokal noch nichts ist oder Premium-Status abweicht
     val cloudProfile by vm.firebaseManager.userProfile.collectAsState()
     LaunchedEffect(cloudProfile) {
         cloudProfile?.let { cloud ->
             if (!userProfile.setupCompleted && cloud.setupCompleted) {
                 profileVm.updateProfile(cloud)
+            } else if (userProfile.premium != cloud.premium) {
+                // Sync only premium status if it changed in the cloud
+                profileVm.updateProfile(userProfile.copy(premium = cloud.premium))
             }
         }
     }
@@ -117,13 +120,13 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel) {
         LaunchedEffect(userProfile) {
             ReminderManager.scheduleReminders(context, userProfile)
         }
-        MainApp(vm, profileVm, userProfile)
+        MainApp(vm, profileVm, userProfile, adManager)
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userProfile: UserProfile) {
+private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userProfile: UserProfile, adManager: RewardedAdManager) {
     val scope = rememberCoroutineScope()
     var tab by remember { mutableIntStateOf(0) }
     
@@ -341,10 +344,10 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                                 DiarySelectionActions(vm, selectedEntryIds, scope, snackbarHostState, dateFormatter, userProfile)
                             }
                             if (isFoodSelection) {
-                                FoodSelectionActions(vm, selectedFoodIds, scope, snackbarHostState)
+                                FoodSelectionActions(vm, selectedFoodIds, scope, snackbarHostState, userProfile.isPremium)
                             }
                             if (isMealSelection) {
-                                MealSelectionActions(vm, selectedMealIds, scope, snackbarHostState)
+                                MealSelectionActions(vm, selectedMealIds, scope, snackbarHostState, userProfile.isPremium)
                             }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(
@@ -493,8 +496,12 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                 }
             },
             bottomBar = {
-                NavigationBar {
-                    NavigationBarItem(
+                Column {
+                    if (!userProfile.isPremium) {
+                        BannerAdView()
+                    }
+                    NavigationBar {
+                        NavigationBarItem(
                         selected = tab == 0,
                         onClick = { tab = 0 },
                         label = { Text("Tagebuch") },
@@ -544,18 +551,30 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                     )
                 }
             }
-        ) { padding ->
+        }
+    ) { padding ->
             Box(Modifier.padding(padding).fillMaxSize()) {
+                val isPremium = userProfile.isPremium
+                
                 when (tab) {
-                    0 -> TodayScreen(userProfile, foods, entries, vm, snackbarHostState, selectedEntryIds, selectedFoodIds, selectedMealIds, scannerService)
+                    0 -> TodayScreen(userProfile, foods, entries, vm, snackbarHostState, selectedEntryIds, selectedFoodIds, selectedMealIds, scannerService, adManager)
                     1 -> FoodsScreen(vm, snackbarHostState, selectedFoodIds)
                     2 -> MealsScreen(vm, snackbarHostState, selectedMealIds, userProfile)
                     3 -> ProfileScreen(profileVm, vm, userProfile)
-                    4 -> PlannerScreen(vm, userProfile)
-                    5 -> ShoppingListScreen(vm, userProfile)
+                    4 -> {
+                        if (isPremium) PlannerScreen(vm, userProfile)
+                        else PremiumLockScreen("Mahlzeiten-Planer") { tab = 3 }
+                    }
+                    5 -> {
+                        if (isPremium) ShoppingListScreen(vm, userProfile)
+                        else PremiumLockScreen("Einkaufsliste") { tab = 3 }
+                    }
                     6 -> WeightScreen(vm, profileVm)
                     7 -> InboxScreen(vm, onBack = { tab = 0 })
-                    8 -> CommunityScreen(vm)
+                    8 -> {
+                        if (isPremium) CommunityScreen(vm)
+                        else PremiumLockScreen("Community & Haushalt") { tab = 3 }
+                    }
                 }
             }
         }
@@ -700,7 +719,8 @@ private fun TodayScreen(
     selectedEntryIds: MutableState<Set<Long>>,
     selectedFoodIds: MutableState<Set<Long>>,
     selectedMealIds: MutableState<Set<Long>>,
-    scannerService: BarcodeScannerService // Übergeben von MainApp
+    scannerService: BarcodeScannerService,
+    adManager: RewardedAdManager
 ) {
     val scope = rememberCoroutineScope()
 
@@ -962,7 +982,8 @@ private fun TodayScreen(
                 onCaptureRequested = { food -> vm.pendingAskToCapture = food },
                 vm = vm,
                 snackbarHostState = snackbarHostState,
-                isPremium = userProfile.isPremium
+                isPremium = userProfile.isPremium,
+                adManager = adManager
             ) 
         }
 
@@ -1239,7 +1260,8 @@ fun AddEntryCard(
     onCaptureRequested: (FoodItemEntity) -> Unit,
     vm: NutritionViewModel,
     snackbarHostState: SnackbarHostState,
-    isPremium: Boolean
+    isPremium: Boolean,
+    adManager: RewardedAdManager
 ) {
     val scope = rememberCoroutineScope()
     var query by remember { mutableStateOf("") }
@@ -1255,6 +1277,9 @@ fun AddEntryCard(
     var showImageSourceDialog by remember { mutableStateOf(false) }
     var tempImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
 
+    var showAdOfferDialog by remember { mutableStateOf(false) }
+    var adRewardActive by remember { mutableStateOf(false) }
+
     val imagePicker = rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
         onResult = { uri ->
@@ -1267,7 +1292,8 @@ fun AddEntryCard(
                         android.graphics.BitmapFactory.decodeStream(context.contentResolver.openInputStream(it))
                     }
                     bitmap?.let { b ->
-                        vm.analyzeMealImage(b.copy(android.graphics.Bitmap.Config.ARGB_8888, true), isPremium)
+                        vm.analyzeMealImage(b.copy(android.graphics.Bitmap.Config.ARGB_8888, true), isPremium || adRewardActive)
+                        adRewardActive = false
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -1288,7 +1314,8 @@ fun AddEntryCard(
                         android.graphics.BitmapFactory.decodeStream(context.contentResolver.openInputStream(tempImageUri!!))
                     }
                     bitmap?.let { b ->
-                        vm.analyzeMealImage(b.copy(android.graphics.Bitmap.Config.ARGB_8888, true), isPremium)
+                        vm.analyzeMealImage(b.copy(android.graphics.Bitmap.Config.ARGB_8888, true), isPremium || adRewardActive)
+                        adRewardActive = false
                     }
                 } catch (e: Exception) {
                     e.printStackTrace()
@@ -1307,6 +1334,31 @@ fun AddEntryCard(
             }
         }
     )
+
+    if (showAdOfferDialog) {
+        AlertDialog(
+            onDismissRequest = { showAdOfferDialog = false },
+            title = { Text("KI-Bildanalyse 🤖") },
+            text = { Text("Diese Funktion ist Teil von Premium. Du kannst ein kurzes Video ansehen, um diese Mahlzeit einmalig kostenlos per KI zu analysieren.") },
+            confirmButton = {
+                Button(onClick = {
+                    showAdOfferDialog = false
+                    adManager.showAd {
+                        // Reward earned: open image source selection
+                        adRewardActive = true
+                        showImageSourceDialog = true
+                    }
+                }) {
+                    Icon(Icons.Default.PlayCircle, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Video ansehen")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAdOfferDialog = false }) { Text("Vielleicht später") }
+            }
+        )
+    }
 
     if (selectedFood != null) {
         AddAmountDialog(
@@ -1512,9 +1564,7 @@ fun AddEntryCard(
                             if (isPremium) {
                                 showImageSourceDialog = true 
                             } else {
-                                scope.launch {
-                                    snackbarHostState.showSnackbar("Premium-Funktion: Upgrade erforderlich für die AI Bilderkennung.")
-                                }
+                                showAdOfferDialog = true
                             }
                         },
                         shape = RoundedCornerShape(12.dp),
@@ -3362,37 +3412,41 @@ private fun DiarySelectionActions(
     }
 
     IconButton(onClick = { 
-        val selectedEntries = vm.allEntries.filter { it.id in selectedEntryIds.value }
-        val flattenedIngredients = selectedEntries.flatMap { entry ->
-            if (entry.isMeal) {
-                entry.mealIngredients ?: emptyList()
-            } else {
-                listOf(MealIngredientEntity(
-                    foodItemId = entry.foodItemId,
-                    name = entry.name,
-                    amount = entry.amount,
-                    unitLabel = entry.unitLabel,
-                    grams = entry.grams,
-                    kcalPer100g = entry.kcalPer100g,
-                    proteinPer100g = entry.proteinPer100g,
-                    carbsPer100g = entry.carbsPer100g,
-                    sugarPer100g = entry.sugarPer100g,
-                    fatPer100g = entry.fatPer100g,
-                    saturatedFatPer100g = entry.saturatedFatPer100g,
-                    alcoholPercent = entry.alcoholPercent,
-                    baseUnit = entry.baseUnit,
-                    store = entry.store,
-                    brand = entry.brand
-                ))
-            }
-        }.mapIndexed { idx, ing -> ing.copy(id = System.currentTimeMillis() + idx) }
+        if (userProfile.isPremium) {
+            val selectedEntries = vm.allEntries.filter { it.id in selectedEntryIds.value }
+            val flattenedIngredients = selectedEntries.flatMap { entry ->
+                if (entry.isMeal) {
+                    entry.mealIngredients ?: emptyList()
+                } else {
+                    listOf(MealIngredientEntity(
+                        foodItemId = entry.foodItemId,
+                        name = entry.name,
+                        amount = entry.amount,
+                        unitLabel = entry.unitLabel,
+                        grams = entry.grams,
+                        kcalPer100g = entry.kcalPer100g,
+                        proteinPer100g = entry.proteinPer100g,
+                        carbsPer100g = entry.carbsPer100g,
+                        sugarPer100g = entry.sugarPer100g,
+                        fatPer100g = entry.fatPer100g,
+                        saturatedFatPer100g = entry.saturatedFatPer100g,
+                        alcoholPercent = entry.alcoholPercent,
+                        baseUnit = entry.baseUnit,
+                        store = entry.store,
+                        brand = entry.brand
+                    ))
+                }
+            }.mapIndexed { idx, ing -> ing.copy(id = System.currentTimeMillis() + idx) }
 
-        mealFromSelection = MealEntity(
-            name = "",
-            ingredients = flattenedIngredients,
-            servings = 1.0
-        )
-        showCreateMealDialog = true
+            mealFromSelection = MealEntity(
+                name = "",
+                ingredients = flattenedIngredients,
+                servings = 1.0
+            )
+            showCreateMealDialog = true
+        } else {
+            scope.launch { snackbarHostState.showSnackbar("Premium erforderlich für Mahlzeit-Erstellung aus Auswahl") }
+        }
     }) {
         Icon(Icons.Default.SoupKitchen, "Mahlzeit aus Auswahl erstellen")
     }
@@ -3423,7 +3477,8 @@ private fun FoodSelectionActions(
     vm: NutritionViewModel,
     selectedFoodIds: MutableState<Set<Long>>,
     scope: kotlinx.coroutines.CoroutineScope,
-    snackbarHostState: SnackbarHostState
+    snackbarHostState: SnackbarHostState,
+    isPremium: Boolean
 ) {
     var showMergeDialog by remember { mutableStateOf(false) }
     var showSendDialog by remember { mutableStateOf(false) }
@@ -3459,7 +3514,13 @@ private fun FoodSelectionActions(
     }
 
     if (selectedFoodIds.value.size == 1) {
-        IconButton(onClick = { showSendDialog = true }) {
+        IconButton(onClick = { 
+            if (isPremium) {
+                showSendDialog = true 
+            } else {
+                scope.launch { snackbarHostState.showSnackbar("Premium erforderlich für Haushalts-Versand") }
+            }
+        }) {
             Icon(Icons.AutoMirrored.Filled.Send, "An Haushaltsmitglied senden")
         }
 
@@ -3494,7 +3555,8 @@ private fun MealSelectionActions(
     vm: NutritionViewModel,
     selectedMealIds: MutableState<Set<Long>>,
     scope: kotlinx.coroutines.CoroutineScope,
-    snackbarHostState: SnackbarHostState
+    snackbarHostState: SnackbarHostState,
+    isPremium: Boolean
 ) {
     val context = LocalContext.current
     var showSendDialog by remember { mutableStateOf(false) }
@@ -3517,7 +3579,13 @@ private fun MealSelectionActions(
     }
 
     if (selectedMealIds.value.size == 1) {
-        IconButton(onClick = { showSendDialog = true }) {
+        IconButton(onClick = { 
+            if (isPremium) {
+                showSendDialog = true 
+            } else {
+                scope.launch { snackbarHostState.showSnackbar("Premium erforderlich für Haushalts-Versand") }
+            }
+        }) {
             Icon(Icons.AutoMirrored.Filled.Send, "An Haushaltsmitglied senden")
         }
         val mealId = selectedMealIds.value.first()

@@ -88,4 +88,10 @@ dependencies {
     // Jetpack Glance (Widgets)
     implementation("androidx.glance:glance-appwidget:1.1.0")
     implementation("androidx.glance:glance-material3:1.1.0")
+
+    // Google Mobile Ads (AdMob)
+    implementation("com.google.android.gms:play-services-ads:25.4.0")
+
+    // Google Play Billing
+    implementation("com.android.billingclient:billing-ktx:7.1.1")
 }

@@ -1,5 +1,6 @@
 package com.nick.nutritiontracker.ui
 
+import android.app.Activity
 import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -106,6 +107,25 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
                         Text(" Aktiv", color = Color(0xFFFBC02D), fontWeight = FontWeight.Bold)
                     } else {
                         Text(" Basis", color = Color.Gray)
+                    }
+                }
+
+                if (!isPremium) {
+                    val premiumProduct by viewModel.premiumProduct.collectAsState()
+                    val activity = LocalContext.current as? Activity
+                    
+                    Button(
+                        onClick = { activity?.let { viewModel.purchasePremium(it) } },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFFBC02D),
+                            contentColor = Color.Black
+                        )
+                    ) {
+                        Icon(Icons.Default.WorkspacePremium, null)
+                        Spacer(Modifier.width(8.dp))
+                        val price = premiumProduct?.oneTimePurchaseOfferDetails?.formattedPrice ?: "Upgrade"
+                        Text("Premium kaufen ($price)")
                     }
                 }
                 

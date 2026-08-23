@@ -1,7 +1,10 @@
 package com.nick.nutritiontracker.viewmodel
 
+import android.app.Activity
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.nick.nutritiontracker.data.BillingManager
 import com.nick.nutritiontracker.data.FirebaseManager
 import com.nick.nutritiontracker.data.ProfileRepository
 import com.nick.nutritiontracker.data.UserProfile
@@ -13,9 +16,32 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class ProfileViewModel(
+    context: Context,
     private val repository: ProfileRepository,
     private val firebaseManager: FirebaseManager
 ) : ViewModel() {
+
+    private val billingManager = BillingManager(context, viewModelScope) { isPremium ->
+        setPremiumStatus(isPremium)
+    }
+
+    val premiumProduct = billingManager.premiumProduct
+
+    fun purchasePremium(activity: Activity) {
+        billingManager.purchasePremium(activity)
+    }
+
+    private fun setPremiumStatus(isPremium: Boolean) {
+        viewModelScope.launch {
+            userProfile.value?.let { current ->
+                if (current.premium != isPremium) {
+                    val updated = current.copy(premium = isPremium)
+                    repository.saveProfile(updated)
+                    firebaseManager.syncProfileToFirestore(updated)
+                }
+            }
+        }
+    }
 
     val userProfile: StateFlow<UserProfile?> = repository.userProfileFlow
         .stateIn(
