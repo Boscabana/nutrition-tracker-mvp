@@ -3,6 +3,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -24,6 +25,10 @@
     <queries>
         <package android:name="com.google.android.apps.healthdata" />
         <package android:name="com.google.android.gms" />
+        <package android:name="com.android.vending" />
+        <intent>
+            <action android:name="com.google.android.gms.ads.IDENTIFIER" />
+        </intent>
     </queries>
 
     <application
@@ -92,5 +97,15 @@
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="ca-app-pub-9703845298019468~9460026344"/>
+
+        <!-- GMS Version -->
+        <meta-data
+            android:name="com.google.android.gms.version"
+            android:value="@integer/google_play_services_version" />
+
+        <!-- ML Kit Dependencies for Code Scanner -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode" />
     </application>
 </manifest>

@@ -34,8 +34,11 @@ class ProfileViewModel(
     private fun setPremiumStatus(isPremium: Boolean) {
         viewModelScope.launch {
             userProfile.value?.let { current ->
-                if (current.premium != isPremium) {
-                    val updated = current.copy(premium = isPremium)
+                // Only update if we gain premium.
+                // If we lose it according to BillingManager, we DON'T automatically overwrite
+                // to allow manual overrides/gifts in Firestore to persist.
+                if (isPremium && !current.premium) {
+                    val updated = current.copy(premium = true)
                     repository.saveProfile(updated)
                     firebaseManager.syncProfileToFirestore(updated)
                 }

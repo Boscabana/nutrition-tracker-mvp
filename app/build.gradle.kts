@@ -80,6 +80,7 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-storage")
     implementation("com.google.firebase:firebase-messaging")
+    implementation("com.google.firebase:firebase-config")
     implementation("com.google.firebase:firebase-appcheck-debug")
 
     // Biometrics

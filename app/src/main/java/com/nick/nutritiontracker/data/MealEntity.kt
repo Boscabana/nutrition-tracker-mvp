@@ -2,6 +2,7 @@ package com.nick.nutritiontracker.data
 
 import androidx.annotation.Keep
 import com.google.firebase.firestore.Exclude
+import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.PropertyName
 import kotlinx.serialization.Serializable
 
@@ -61,6 +62,7 @@ data class MealIngredientEntity(
 
 @Keep
 @Serializable
+@IgnoreExtraProperties
 data class MealEntity(
     var id: Long = 0,
     var name: String = "",
@@ -70,6 +72,8 @@ data class MealEntity(
     var imageUrl: String? = null,
     var lastModified: Long = System.currentTimeMillis()
 ) {
+    constructor() : this(0)
+
     @get:Exclude
     val totalKcal: Double get() = ingredients.sumOf { it.kcal }
     @get:Exclude

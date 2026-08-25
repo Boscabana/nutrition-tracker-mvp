@@ -24,4 +24,6 @@ data class ShoppingItem(
     var isPantryItem: Boolean = false,
     var plannedEntryId: Long? = null,
     var poolItemId: String? = null
-)
+) {
+    constructor() : this("")
+}

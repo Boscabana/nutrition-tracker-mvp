@@ -18,4 +18,6 @@ data class InboxMessage(
     val payloadJson: String = "",
     @get:PropertyName("isRead") @set:PropertyName("isRead")
     var isRead: Boolean = false
-)
+) {
+    constructor() : this("")
+}

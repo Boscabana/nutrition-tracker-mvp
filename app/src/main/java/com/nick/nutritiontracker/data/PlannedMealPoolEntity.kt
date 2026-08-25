@@ -1,11 +1,13 @@
 package com.nick.nutritiontracker.data
 
 import androidx.annotation.Keep
+import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.PropertyName
 import kotlinx.serialization.Serializable
 
 @Keep
 @Serializable
+@IgnoreExtraProperties
 data class PlannedMealPoolEntity(
     var id: String = "",
     var mealName: String = "",
@@ -20,6 +22,8 @@ data class PlannedMealPoolEntity(
     @get:PropertyName("isFrozen") @set:PropertyName("isFrozen")
     var isFrozen: Boolean = false
 ) {
+    constructor() : this("")
+
     val isFinished: Boolean get() = remainingPortions <= 0
 
     val totalKcal: Double get() = mealIngredients.sumOf { it.kcal }

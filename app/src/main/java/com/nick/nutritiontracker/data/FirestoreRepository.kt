@@ -90,9 +90,11 @@ class FirestoreRepository {
                     close(error)
                     return@addSnapshotListener
                 }
-                val items = snapshot?.documents?.mapNotNull { it.toObject(ShoppingItem::class.java)?.copy(id = it.id) } ?: emptyList()
-                Log.d("Firestore", "Loaded ${items.size} shopping items")
-                trySend(items)
+                launch(Dispatchers.Default) {
+                    val items = snapshot?.documents?.mapNotNull { it.toObject(ShoppingItem::class.java)?.copy(id = it.id) } ?: emptyList()
+                    Log.d("Firestore", "Loaded ${items.size} shopping items")
+                    trySend(items)
+                }
             }
         awaitClose { subscription.remove() }
     }
@@ -297,21 +299,31 @@ class FirestoreRepository {
     }
 
     suspend fun saveWeightEntry(uid: String, entry: WeightEntry) {
-        db.collection("users")
-            .document(uid)
-            .collection("weight_history")
-            .document(entry.dateIso)
-            .set(entry)
-            .await()
+        try {
+            db.collection("users")
+                .document(uid)
+                .collection("weight_history")
+                .document(entry.dateIso)
+                .set(entry)
+                .await()
+            Log.d("Firestore", "Weight entry saved for $uid: ${entry.weight}")
+        } catch (e: Exception) {
+            Log.e("Firestore", "Failed to save weight entry", e)
+        }
     }
 
     suspend fun deleteWeightEntry(uid: String, dateIso: String) {
-        db.collection("users")
-            .document(uid)
-            .collection("weight_history")
-            .document(dateIso)
-            .delete()
-            .await()
+        try {
+            db.collection("users")
+                .document(uid)
+                .collection("weight_history")
+                .document(dateIso)
+                .delete()
+                .await()
+            Log.d("Firestore", "Weight entry deleted for $uid: $dateIso")
+        } catch (e: Exception) {
+            Log.e("Firestore", "Failed to delete weight entry", e)
+        }
     }
 
     // --- SHARED DATA (Planner & Shopping List) ---
@@ -365,10 +377,27 @@ class FirestoreRepository {
     suspend fun getHouseholdMembers(uids: List<String>): List<Map<String, String>> {
         val results = mutableListOf<Map<String, String>>()
         for (uid in uids) {
-            val doc = db.collection("users").document(uid).get().await()
-            val name = doc.getString("firstName") ?: "Unbekannt"
-            results.add(mapOf("uid" to uid, "name" to name))
+            try {
+                val doc = db.collection("users").document(uid).get().await()
+                val name = doc.getString("firstName") ?: "Unbekannt"
+                results.add(mapOf("uid" to uid, "name" to name))
+            } catch (e: Exception) {
+                Log.e("Firestore", "Failed to fetch user $uid", e)
+                results.add(mapOf("uid" to uid, "name" to "Unbekannt"))
+            }
         }
         return results
+    }
+
+    suspend fun logAiUsage(uid: String, usageData: Map<String, Any>) {
+        try {
+            db.collection("users")
+                .document(uid)
+                .collection("ai_usage_logs")
+                .add(usageData + mapOf("timestamp" to System.currentTimeMillis()))
+                .await()
+        } catch (e: Exception) {
+            Log.e("Firestore", "Failed to log AI usage", e)
+        }
     }
 }

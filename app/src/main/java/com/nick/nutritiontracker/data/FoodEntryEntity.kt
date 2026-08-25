@@ -52,6 +52,8 @@ data class FoodEntryEntity(
     var lastModifiedByUid: String? = null,
     var lastModifiedByName: String? = null
 ) {
+    constructor() : this(0)
+
     @get:Exclude
     val kcal: Double get() = if (isMeal) mealIngredients?.sumOf { it.kcal } ?: 0.0 else kcalPer100g * grams / 100.0
     @get:Exclude

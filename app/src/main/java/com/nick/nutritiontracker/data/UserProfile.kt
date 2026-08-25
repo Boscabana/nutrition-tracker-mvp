@@ -1,6 +1,7 @@
 package com.nick.nutritiontracker.data
 
 import androidx.annotation.Keep
+import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.PropertyName
 import kotlinx.serialization.Serializable
 
@@ -21,6 +22,7 @@ enum class DietaryPreference {
 
 @Keep
 @Serializable
+@IgnoreExtraProperties
 data class UserProfile(
     var firstName: String = "",
     var age: Int = 30,
@@ -56,12 +58,17 @@ data class UserProfile(
 ) {
     @get:com.google.firebase.firestore.Exclude
     val isPremium: Boolean get() = premium
+    
+    @get:com.google.firebase.firestore.Exclude
     val totalPercent: Int get() = proteinPercent + complexCarbsPercent + sugarPercent + unsaturatedFatPercent + saturatedFatPercent
+    
+    @get:com.google.firebase.firestore.Exclude
     val isPercentValid: Boolean get() = totalPercent == 100
 
     /**
      * Grundumsatz (BMR) nach der Mifflin-St Jeor Formel.
      */
+    @get:com.google.firebase.firestore.Exclude
     val bmr: Double get() {
         return if (gender == Gender.MALE) {
             (10.0 * weightKg) + (6.25 * heightCm) - (5.0 * age) + 5.0
@@ -74,6 +81,7 @@ data class UserProfile(
      * Das berechnete Kalorienbudget basierend auf dem Grundumsatz und dem Ziel.
      * Aktivitätskalorien sind hier NICHT enthalten.
      */
+    @get:com.google.firebase.firestore.Exclude
     val calorieBudget: Int get() {
         val adjustment = when (goal) {
             UserGoal.LOSE_WEIGHT -> -goalIntensity
@@ -84,13 +92,25 @@ data class UserProfile(
     }
 
     // Goals in grams based on calorieBudget
+    @get:com.google.firebase.firestore.Exclude
     val proteinGoalGrams: Double get() = (calorieBudget * (proteinPercent / 100.0)) / 4.0
+    
+    @get:com.google.firebase.firestore.Exclude
     val complexCarbsGoalGrams: Double get() = (calorieBudget * (complexCarbsPercent / 100.0)) / 4.0
+    
+    @get:com.google.firebase.firestore.Exclude
     val sugarGoalGrams: Double get() = (calorieBudget * (sugarPercent / 100.0)) / 4.0
+    
+    @get:com.google.firebase.firestore.Exclude
     val unsaturatedFatGoalGrams: Double get() = (calorieBudget * (unsaturatedFatPercent / 100.0)) / 9.0
+    
+    @get:com.google.firebase.firestore.Exclude
     val saturatedFatGoalGrams: Double get() = (calorieBudget * (saturatedFatPercent / 100.0)) / 9.0
     
     // Derived total carbs and total fat goals
+    @get:com.google.firebase.firestore.Exclude
     val totalCarbsGoalGrams: Double get() = complexCarbsGoalGrams + sugarGoalGrams
+    
+    @get:com.google.firebase.firestore.Exclude
     val totalFatGoalGrams: Double get() = unsaturatedFatGoalGrams + saturatedFatGoalGrams
 }

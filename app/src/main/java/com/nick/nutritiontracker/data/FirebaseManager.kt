@@ -29,8 +29,10 @@ class FirebaseManager {
         auth.addAuthStateListener {
             _currentUser.value = it.currentUser
             if (it.currentUser != null) {
+                Log.d("FirebaseManager", "AUTH STATE: Logged in as ${it.currentUser!!.uid}")
                 observeUserProfile(it.currentUser!!.uid)
             } else {
+                Log.d("FirebaseManager", "AUTH STATE: Logged out")
                 cleanupListeners()
                 _userProfile.value = null
                 _household.value = null
@@ -40,36 +42,45 @@ class FirebaseManager {
 
     private fun observeUserProfile(uid: String) {
         profileListener?.remove()
+        Log.d("FirebaseManager", "Starting observer for path: users/$uid")
         profileListener = db.collection("users").document(uid)
             .addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e("FirebaseManager", "Error observing profile", error)
+                    Log.e("FirebaseManager", "Error observing profile (Permission Denied?)", error)
                     return@addSnapshotListener
                 }
                 if (snapshot != null && snapshot.exists()) {
                     try {
                         val data = snapshot.data
                         if (data != null) {
-                            // Extract isPremium manually to be safe
-                            val cloudPremium = snapshot.getBoolean("isPremium") ?: 
-                                             snapshot.getBoolean("premium") ?: 
-                                             (data["isPremium"] as? Boolean) ?: false
+                            // Extract isPremium manually with maximum robustness
+                            val cloudPremium = when {
+                                data["isPremium"] is Boolean -> data["isPremium"] as Boolean
+                                data["premium"] is Boolean -> data["premium"] as Boolean
+                                data["isPremium"]?.toString()?.lowercase() == "true" -> true
+                                data["premium"]?.toString()?.lowercase() == "true" -> true
+                                else -> false
+                            }
+                            
+                            Log.d("FirebaseManager", "Cloud check for $uid: isPremium=${data["isPremium"]} (Result: $cloudPremium)")
                             
                             // Map manually if toObject fails
-                            val profile = snapshot.toObject(UserProfile::class.java) ?: UserProfile(
+                            val profile = try {
+                                snapshot.toObject(UserProfile::class.java)
+                            } catch (e: Exception) {
+                                Log.e("FirebaseManager", "toObject failed, using manual mapping", e)
+                                null
+                            } ?: UserProfile(
                                 firstName = data["firstName"] as? String ?: "",
                                 age = (data["age"] as? Long)?.toInt() ?: 30,
                                 weightKg = (data["weightKg"] as? Double) ?: 70.0,
                                 heightCm = (data["heightCm"] as? Long)?.toInt() ?: 175,
-                                gender = Gender.valueOf(data["gender"] as? String ?: "MALE"),
-                                goal = UserGoal.valueOf(data["goal"] as? String ?: "MAINTAIN"),
                                 setupCompleted = data["setupCompleted"] as? Boolean ?: false,
                                 fcmToken = data["fcmToken"] as? String
                             )
                             
                             profile.premium = cloudPremium
                             _userProfile.value = profile
-                            Log.d("FirebaseManager", "Profile fixed sync for $uid: isPremium=$cloudPremium")
                             
                             // Reactively start or stop household observation
                             if (cloudPremium) {
@@ -85,6 +96,8 @@ class FirebaseManager {
                     } catch (e: Exception) {
                         Log.e("FirebaseManager", "CRITICAL Error mapping profile", e)
                     }
+                } else {
+                    Log.d("FirebaseManager", "Profile snapshot does not exist for $uid")
                 }
             }
     }
@@ -106,7 +119,7 @@ class FirebaseManager {
             }
     }
 
-    private fun cleanupListeners() {
+    fun cleanupListeners() {
         profileListener?.remove()
         profileListener = null
         householdListener?.remove()

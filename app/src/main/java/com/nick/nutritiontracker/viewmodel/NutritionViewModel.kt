@@ -12,6 +12,7 @@ import com.nick.nutritiontracker.NotificationHelper
 import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -43,6 +44,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     val firebaseManager = FirebaseManager()
     private val firestoreRepository = FirestoreRepository()
     private val profileRepository = ProfileRepository(application)
+    val configManager = ConfigManager()
+    private val geminiService = GeminiService(configManager)
     private var syncJob: Job? = null
 
     // --- State Properties ---
@@ -234,58 +237,70 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                     registerFcmToken(user.uid)
                     coroutineScope {
                         launch {
-                            firestoreRepository.getPersonalFoods(user.uid).collect { cloudFoods ->
-                                syncList(foods, cloudFoods) { it.id }
-                                updateNextIds()
-                                saveFoods()
-                            }
+                            firestoreRepository.getPersonalFoods(user.uid)
+                                .catch { Log.e("NutritionViewModel", "Error sync PersonalFoods", it) }
+                                .collect { cloudFoods ->
+                                    syncList(foods, cloudFoods) { it.id }
+                                    updateNextIds()
+                                    saveFoods()
+                                }
                         }
                         launch {
-                            firestoreRepository.getPersonalMeals(user.uid).collect { cloudMeals ->
-                                syncList(meals, cloudMeals) { it.id }
-                                updateNextIds()
-                                saveMeals()
-                            }
+                            firestoreRepository.getPersonalMeals(user.uid)
+                                .catch { Log.e("NutritionViewModel", "Error sync PersonalMeals", it) }
+                                .collect { cloudMeals ->
+                                    syncList(meals, cloudMeals) { it.id }
+                                    updateNextIds()
+                                    saveMeals()
+                                }
                         }
                         launch {
-                            firestoreRepository.getPersonalEntries(user.uid).collect { cloudEntries ->
-                                syncList(allEntries, cloudEntries) { it.id }
-                                updateNextIds()
-                                saveEntries()
-                            }
+                            firestoreRepository.getPersonalEntries(user.uid)
+                                .catch { Log.e("NutritionViewModel", "Error sync PersonalEntries", it) }
+                                .collect { cloudEntries ->
+                                    syncList(allEntries, cloudEntries) { it.id }
+                                    updateNextIds()
+                                    saveEntries()
+                                }
                         }
                         launch {
-                            firestoreRepository.getWeightHistory(user.uid).collect { cloudWeight ->
-                                weightHistory.clear()
-                                weightHistory.addAll(cloudWeight.sortedByDescending { it.dateIso })
-                                saveWeightHistory()
-                            }
+                            firestoreRepository.getWeightHistory(user.uid)
+                                .catch { Log.e("NutritionViewModel", "Error sync WeightHistory", it) }
+                                .collect { cloudWeight ->
+                                    weightHistory.clear()
+                                    weightHistory.addAll(cloudWeight.sortedByDescending { it.dateIso })
+                                    saveWeightHistory()
+                                }
                         }
                         launch {
                             var lastMessageCount = -1
-                            firestoreRepository.getInboxMessages(user.uid).collect { cloudMessages ->
-                                // Show notification only if count increased and it's not the first load
-                                if (lastMessageCount != -1 && cloudMessages.size > lastMessageCount) {
-                                    val newestMessage = cloudMessages.firstOrNull()
-                                    if (newestMessage != null && !newestMessage.isRead) {
-                                        NotificationHelper.showInboxNotification(
-                                            getApplication(),
-                                            newestMessage.fromName,
-                                            newestMessage.type.name
-                                        )
+                            firestoreRepository.getInboxMessages(user.uid)
+                                .catch { Log.e("NutritionViewModel", "Error sync InboxMessages", it) }
+                                .collect { cloudMessages ->
+                                    // Show notification only if count increased and it's not the first load
+                                    if (lastMessageCount != -1 && cloudMessages.size > lastMessageCount) {
+                                        val newestMessage = cloudMessages.firstOrNull()
+                                        if (newestMessage != null && !newestMessage.isRead) {
+                                            NotificationHelper.showInboxNotification(
+                                                getApplication(),
+                                                newestMessage.fromName,
+                                                newestMessage.type.name
+                                            )
+                                        }
                                     }
+                                    lastMessageCount = cloudMessages.size
+                                    inboxMessages.clear()
+                                    inboxMessages.addAll(cloudMessages)
                                 }
-                                lastMessageCount = cloudMessages.size
-                                inboxMessages.clear()
-                                inboxMessages.addAll(cloudMessages)
-                            }
                         }
                         launch {
-                            firestoreRepository.getPersonalPlannedEntries(user.uid).collect { cloudPlanned ->
-                                syncList(plannedEntries, cloudPlanned) { it.id }
-                                updateNextIds()
-                                savePlannedEntries()
-                            }
+                            firestoreRepository.getPersonalPlannedEntries(user.uid)
+                                .catch { Log.e("NutritionViewModel", "Error sync PersonalPlannedEntries", it) }
+                                .collect { cloudPlanned ->
+                                    syncList(plannedEntries, cloudPlanned) { it.id }
+                                    updateNextIds()
+                                    savePlannedEntries()
+                                }
                         }
                     }
                 }
@@ -297,16 +312,20 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 if (household != null) {
                     coroutineScope {
                         launch {
-                            firestoreRepository.getPlannedMealPool(household.id).collect { cloudPool ->
-                                syncList(plannedMealPool, cloudPool) { it.id }
-                                savePlannedMealPool()
-                            }
+                            firestoreRepository.getPlannedMealPool(household.id)
+                                .catch { Log.e("NutritionViewModel", "Error sync PlannedMealPool", it) }
+                                .collect { cloudPool ->
+                                    syncList(plannedMealPool, cloudPool) { it.id }
+                                    savePlannedMealPool()
+                                }
                         }
                         launch {
-                            firestoreRepository.getShoppingList(household.id).collect { cloudShopping ->
-                                syncList(shoppingList, cloudShopping) { it.id }
-                                saveShoppingList()
-                            }
+                            firestoreRepository.getShoppingList(household.id)
+                                .catch { Log.e("NutritionViewModel", "Error sync ShoppingList", it) }
+                                .collect { cloudShopping ->
+                                    syncList(shoppingList, cloudShopping) { it.id }
+                                    saveShoppingList()
+                                }
                         }
                         launch {
                             val members = firestoreRepository.getHouseholdMembers(household.members)
@@ -805,9 +824,21 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         aiEstimationResult = null
         viewModelScope.launch {
             try {
-                val service = GeminiService()
-                val result = service.estimateNutrition(bitmap, selectedAiModel)
-                aiEstimationResult = result
+                val result = geminiService.estimateNutrition(bitmap, selectedAiModel)
+                aiEstimationResult = result.data
+                
+                // Log usage
+                val user = firebaseManager.currentUser.value
+                if (user != null && result.usage != null) {
+                    val usageMap = mapOf(
+                        "feature" to "image_analysis",
+                        "model" to (selectedAiModel),
+                        "promptTokens" to (result.usage?.promptTokenCount ?: 0),
+                        "candidatesTokens" to (result.usage?.candidatesTokenCount ?: 0),
+                        "totalTokens" to (result.usage?.totalTokenCount ?: 0)
+                    )
+                    firestoreRepository.logAiUsage(user.uid, usageMap)
+                }
             } catch (e: Exception) {
                 Log.e("NutritionViewModel", "AI analysis failed", e)
                 aiErrorMessage = "Fehler: ${e.localizedMessage}"
@@ -824,12 +855,25 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         isAnalyzingGenericFood = true
         aiGenericFoodError = null
         return try {
-            val service = GeminiService()
-            val result = service.estimateGenericFood(name, categories.toList(), isBrandSearch, selectedAiModel)
-            if (result == null) {
+            val result = geminiService.estimateGenericFood(name, categories.toList(), isBrandSearch, selectedAiModel)
+            
+            // Log usage
+            val user = firebaseManager.currentUser.value
+            if (user != null && result.usage != null) {
+                val usageMap = mapOf(
+                    "feature" to "generic_macros",
+                    "model" to (selectedAiModel),
+                    "promptTokens" to (result.usage?.promptTokenCount ?: 0),
+                    "candidatesTokens" to (result.usage?.candidatesTokenCount ?: 0),
+                    "totalTokens" to (result.usage?.totalTokenCount ?: 0)
+                )
+                firestoreRepository.logAiUsage(user.uid, usageMap)
+            }
+            
+            if (result.data == null) {
                 aiGenericFoodError = "Keine Daten gefunden."
             }
-            result
+            result.data
         } catch (e: Exception) {
             Log.e("NutritionViewModel", "AI generic macros failed", e)
             aiGenericFoodError = "Fehler: ${e.localizedMessage}"
@@ -842,10 +886,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun probeAiModels() {
         viewModelScope.launch {
             availableAiModels.clear()
-            val service = GeminiService()
             val models = listOf("gemini-1.5-flash", "gemini-1.5-pro", "gemini-3.6-flash")
             models.forEach { model ->
-            availableAiModels.add(service.testModelAvailability(model))
+            availableAiModels.add(geminiService.testModelAvailability(model))
         }
     }
     }
@@ -1920,7 +1963,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     suspend fun suggestCategory(name: String, isPremium: Boolean): String? {
         if (!isPremium) return foods.find { it.name.equals(name, ignoreCase = true) }?.category
         return try {
-            GeminiService().categorizeItem(name, categories)
+            geminiService.categorizeItem(name, categories)
         } catch (e: Exception) {
             null
         }
@@ -1935,7 +1978,10 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         weightHistory.sortByDescending { it.dateIso }
         saveWeightHistory()
         if (user != null) {
+            Log.d("NutritionViewModel", "Syncing weight to Firestore for user ${user.uid}: $weight kg at $dateIso")
             viewModelScope.launch { firestoreRepository.saveWeightEntry(user.uid, newEntry) }
+        } else {
+            Log.w("NutritionViewModel", "No user logged in, weight not synced to Firestore")
         }
     }
 
@@ -2346,5 +2392,11 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private fun createDefaultCategories() {
         categories.addAll(listOf("Obst", "Gemüse", "Fleisch", "Milchprodukte", "Getreide", "Sonstiges"))
         saveCategories()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        firebaseManager.cleanupListeners()
+        syncJob?.cancel()
     }
 }

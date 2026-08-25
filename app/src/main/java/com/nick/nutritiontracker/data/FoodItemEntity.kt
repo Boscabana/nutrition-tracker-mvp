@@ -1,6 +1,7 @@
 package com.nick.nutritiontracker.data
 
 import androidx.annotation.Keep
+import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.PropertyName
 import kotlinx.serialization.Serializable
 
@@ -8,6 +9,7 @@ import kotlin.math.abs
 
 @Keep
 @Serializable
+@IgnoreExtraProperties
 data class FoodItemEntity(
     var id: Long = 0,
     var name: String = "",
@@ -32,6 +34,8 @@ data class FoodItemEntity(
     var isPantryItem: Boolean = false,
     var lastModified: Long = System.currentTimeMillis()
 ) {
+    constructor() : this(0)
+
     fun isSimilarTo(other: FoodEntryEntity): Boolean {
         val otherBarcode = other.barcode?.trim() ?: ""
         val thisBarcode = barcode?.trim() ?: ""
@@ -78,12 +82,15 @@ data class FoodItemEntity(
         return matchesDataOf(other)
     }
 
+    @get:com.google.firebase.firestore.Exclude
     val complexCarbsPer100g: Double
         get() = (carbsPer100g - sugarPer100g).coerceAtLeast(0.0)
 
+    @get:com.google.firebase.firestore.Exclude
     val unsaturatedFatPer100g: Double
         get() = (fatPer100g - saturatedFatPer100g).coerceAtLeast(0.0)
 
+    @get:com.google.firebase.firestore.Exclude
     val defaultPortion: FoodPortionEntity?
         get() = portions.firstOrNull()
 

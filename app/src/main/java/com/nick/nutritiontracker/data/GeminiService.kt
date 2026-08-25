@@ -5,23 +5,46 @@ import android.util.Log
 import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.GenerativeBackend
+import com.google.firebase.ai.type.UsageMetadata
 import com.google.firebase.ai.type.content
+import com.google.firebase.ai.type.generationConfig
 import kotlinx.serialization.json.Json
+import com.google.firebase.ai.GenerativeModel
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
-class GeminiService() {
+data class GeminiResult<T>(
+    val data: T?,
+    val usage: UsageMetadata?
+)
+
+class GeminiService(private val config: ConfigManager) {
     private val json = Json { ignoreUnknownKeys = true }
     // Using Frankfurt region for EU compliance
     private val region = "europe-west3"
 
-    private fun getModel(modelName: String) = Firebase.ai(
-        backend = GenerativeBackend.googleAI()
-    ).generativeModel(
-        modelName = modelName
-    )
+    private val ai = Firebase.ai(backend = GenerativeBackend.googleAI())
+    private val modelCache = mutableMapOf<String, GenerativeModel>()
+    private val cacheMutex = Mutex()
 
-    suspend fun estimateNutrition(bitmap: Bitmap, preferredModel: String? = null): AiEstimationResult? {
+    private suspend fun getModel(modelName: String): GenerativeModel {
+        val cacheKey = "$modelName-${config.maxOutputTokens}-${config.temperature}"
+        return cacheMutex.withLock {
+            modelCache.getOrPut(cacheKey) {
+                ai.generativeModel(
+                    modelName = modelName,
+                    generationConfig = generationConfig {
+                        maxOutputTokens = config.maxOutputTokens
+                        temperature = config.temperature.toFloat()
+                    }
+                )
+            }
+        }
+    }
+
+    suspend fun estimateNutrition(bitmap: Bitmap, preferredModel: String? = null): GeminiResult<AiEstimationResult> {
         val scaledBitmap = scaleBitmap(bitmap)
-        val modelToUse = preferredModel ?: "gemini-3.6-flash"
+        val modelToUse = preferredModel ?: config.geminiModelName
         
         Log.d("GeminiService", "Analyzing with Firebase AI Logic ($region) model: $modelToUse")
         return try {
@@ -44,7 +67,7 @@ class GeminiService() {
         }
     }
 
-    private suspend fun callGemini(bitmap: Bitmap, modelName: String): AiEstimationResult? {
+    private suspend fun callGemini(bitmap: Bitmap, modelName: String): GeminiResult<AiEstimationResult> {
         val model = getModel(modelName)
         
         val prompt = """
@@ -78,13 +101,13 @@ class GeminiService() {
         Log.d("GeminiService", "Raw AI Logic Response ($modelName): ${responseText.take(100)}...")
         
         val cleanJson = extractJson(responseText)
-        if (cleanJson.isBlank()) return null
+        if (cleanJson.isBlank()) return GeminiResult(null, response.usageMetadata)
         
-        return json.decodeFromString<AiEstimationResult>(cleanJson)
+        return GeminiResult(json.decodeFromString<AiEstimationResult>(cleanJson), response.usageMetadata)
     }
 
     private fun scaleBitmap(bitmap: Bitmap): Bitmap {
-        val maxSize = 1024
+        val maxSize = config.imageResizePx
         var width = bitmap.width
         var height = bitmap.height
 
@@ -109,8 +132,8 @@ class GeminiService() {
         }
     }
 
-    suspend fun estimateGenericFood(foodName: String, categories: List<String>, isBrandSearch: Boolean = false, preferredModel: String? = null): AiGenericFoodResult? {
-        val modelToUse = preferredModel ?: "gemini-3.6-flash"
+    suspend fun estimateGenericFood(foodName: String, categories: List<String>, isBrandSearch: Boolean = false, preferredModel: String? = null): GeminiResult<AiGenericFoodResult> {
+        val modelToUse = preferredModel ?: config.geminiModelName
         val model = getModel(modelToUse)
         
         val brandPromptPart = if (isBrandSearch) {
@@ -156,11 +179,11 @@ class GeminiService() {
             val response = model.generateContent(prompt)
             val responseText = response.text ?: ""
             val cleanJson = extractJson(responseText)
-            if (cleanJson.isBlank()) null
-            else json.decodeFromString<AiGenericFoodResult>(cleanJson)
+            if (cleanJson.isBlank()) GeminiResult(null, response.usageMetadata)
+            else GeminiResult(json.decodeFromString<AiGenericFoodResult>(cleanJson), response.usageMetadata)
         } catch (e: Exception) {
             Log.e("GeminiService", "Generic food estimation failed", e)
-            null
+            GeminiResult(null, null)
         }
     }
 
@@ -176,7 +199,7 @@ class GeminiService() {
         """.trimIndent()
 
         return try {
-            val model = getModel("gemini-3.6-flash")
+            val model = getModel(config.geminiModelName)
             val response = model.generateContent(prompt)
             val cleanJson = extractJson(response.text ?: "")
             val result = json.parseToJsonElement(cleanJson).asJsonObject()

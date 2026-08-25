@@ -1,5 +1,6 @@
 package com.nick.nutritiontracker.ui
 
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -85,9 +86,11 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel, adManager:
     LaunchedEffect(cloudProfile) {
         cloudProfile?.let { cloud ->
             if (!userProfile.setupCompleted && cloud.setupCompleted) {
+                Log.d("NutritionApp", "Syncing setup completion from cloud")
                 profileVm.updateProfile(cloud)
             } else if (userProfile.premium != cloud.premium) {
-                // Sync only premium status if it changed in the cloud
+                Log.d("NutritionApp", "Syncing premium status from cloud: ${cloud.premium}")
+                // Sync only premium status if it changed in the cloud and differs from local
                 profileVm.updateProfile(userProfile.copy(premium = cloud.premium))
             }
         }
@@ -729,6 +732,38 @@ private fun TodayScreen(
     var showStepDialog by remember { mutableStateOf(false) }
 
     val localContext = LocalContext.current
+
+    val scannerPermissionLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+        onResult = { isGranted ->
+            if (isGranted) {
+                scope.launch {
+                    val barcode = scannerService.startScan()
+                    if (barcode != null) {
+                        val existing = vm.findFoodByBarcode(barcode)
+                        if (existing != null) {
+                            vm.pendingDuplicateFood = existing
+                        } else {
+                            val fetched = scannerService.fetchProduct(barcode)
+                            if (fetched != null) {
+                                vm.pendingAskToCapture = fetched
+                            } else {
+                                snackbarHostState.showSnackbar("Produkt nicht gefunden. Bitte manuell erfassen.")
+                                vm.pendingFoodToCapture = FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
+                            }
+                        }
+                    } else if (vm.isQuickScanRunning) {
+                        vm.shouldCloseApp = true
+                    }
+                }
+            } else {
+                scope.launch { snackbarHostState.showSnackbar("Kamera-Berechtigung für Barcode-Scanner erforderlich") }
+                if (vm.isQuickScanRunning) {
+                    vm.shouldCloseApp = true
+                }
+            }
+        }
+    )
     
     // Widget/Quick-Scan Trigger: Wir lauschen auf den Trigger aus dem ViewModel
     LaunchedEffect(Unit) {
@@ -736,23 +771,32 @@ private fun TodayScreen(
             // Sofort konsumieren, damit es nicht bei Rotation erneut feuert
             vm.consumeScanTrigger()
             
-            // Dies führt exakt denselben Code aus wie der Scan-Button unten
-            val barcode = scannerService.startScan()
-            if (barcode != null) {
-                val existing = vm.findFoodByBarcode(barcode)
-                if (existing != null) {
-                    vm.pendingDuplicateFood = existing
-                } else {
-                    val fetched = scannerService.fetchProduct(barcode)
-                    if (fetched != null) {
-                        vm.pendingAskToCapture = fetched
+            val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                localContext,
+                android.Manifest.permission.CAMERA
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            
+            if (hasPermission) {
+                // Dies führt exakt denselben Code aus wie der Scan-Button unten
+                val barcode = scannerService.startScan()
+                if (barcode != null) {
+                    val existing = vm.findFoodByBarcode(barcode)
+                    if (existing != null) {
+                        vm.pendingDuplicateFood = existing
                     } else {
-                        snackbarHostState.showSnackbar("Produkt nicht gefunden. Bitte manuell erfassen.")
-                        vm.pendingFoodToCapture = FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
+                        val fetched = scannerService.fetchProduct(barcode)
+                        if (fetched != null) {
+                            vm.pendingAskToCapture = fetched
+                        } else {
+                            snackbarHostState.showSnackbar("Produkt nicht gefunden. Bitte manuell erfassen.")
+                            vm.pendingFoodToCapture = FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
+                        }
                     }
+                } else if (vm.isQuickScanRunning) {
+                    vm.shouldCloseApp = true
                 }
-            } else if (vm.isQuickScanRunning) {
-                vm.shouldCloseApp = true
+            } else {
+                scannerPermissionLauncher.launch(android.Manifest.permission.CAMERA)
             }
         }
     }
@@ -960,22 +1004,31 @@ private fun TodayScreen(
                     }
                 },
                 onScanRequest = {
-                    scope.launch {
-                        val barcode = scannerService.startScan()
-                        if (barcode != null) {
-                            val existing = vm.findFoodByBarcode(barcode)
-                            if (existing != null) {
-                                vm.pendingDuplicateFood = existing
-                            } else {
-                                val fetched = scannerService.fetchProduct(barcode)
-                                if (fetched != null) {
-                                    vm.pendingAskToCapture = fetched
+                    val hasPermission = androidx.core.content.ContextCompat.checkSelfPermission(
+                        localContext,
+                        android.Manifest.permission.CAMERA
+                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                    
+                    if (hasPermission) {
+                        scope.launch {
+                            val barcode = scannerService.startScan()
+                            if (barcode != null) {
+                                val existing = vm.findFoodByBarcode(barcode)
+                                if (existing != null) {
+                                    vm.pendingDuplicateFood = existing
                                 } else {
-                                    snackbarHostState.showSnackbar("Produkt nicht gefunden. Bitte manuell erfassen.")
-                                    vm.pendingFoodToCapture = FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
+                                    val fetched = scannerService.fetchProduct(barcode)
+                                    if (fetched != null) {
+                                        vm.pendingAskToCapture = fetched
+                                    } else {
+                                        snackbarHostState.showSnackbar("Produkt nicht gefunden. Bitte manuell erfassen.")
+                                        vm.pendingFoodToCapture = FoodItemEntity(name = "", kcalPer100g = 0.0, proteinPer100g = 0.0, carbsPer100g = 0.0, sugarPer100g = 0.0, fatPer100g = 0.0, saturatedFatPer100g = 0.0, barcode = barcode)
+                                    }
                                 }
                             }
                         }
+                    } else {
+                        scannerPermissionLauncher.launch(android.Manifest.permission.CAMERA)
                     }
                 },
                 onSearchRequest = { query -> scannerService.searchProducts(query) },

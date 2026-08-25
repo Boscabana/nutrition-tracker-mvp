@@ -10,4 +10,6 @@ data class FoodPackageEntity(
     var name: String = "",
     var quantity: Double = 0.0,
     var unit: String = "g"
-)
+) {
+    constructor() : this(0, "", 0.0, "g")
+}

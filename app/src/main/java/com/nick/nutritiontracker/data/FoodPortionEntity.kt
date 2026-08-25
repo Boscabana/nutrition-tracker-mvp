@@ -9,4 +9,6 @@ data class FoodPortionEntity(
     var id: Long = 0,
     var name: String = "",
     var grams: Double = 0.0
-)
+) {
+    constructor() : this(0, "", 0.0)
+}
