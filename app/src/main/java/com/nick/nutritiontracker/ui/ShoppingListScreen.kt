@@ -1,32 +1,155 @@
 package com.nick.nutritiontracker.ui
 
+import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Label
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Inventory2
 import androidx.compose.material.icons.filled.Kitchen
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import com.nick.nutritiontracker.data.FoodItemEntity
 import com.nick.nutritiontracker.data.ShoppingItem
 import com.nick.nutritiontracker.data.UserProfile
 import com.nick.nutritiontracker.viewmodel.NutritionViewModel
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.time.LocalDate
+
+data class ParsedShoppingInput(
+    val rawText: String,
+    val amount: Double,
+    val unit: String,
+    val name: String,
+    val hasParsedQuantity: Boolean
+)
+
+private val KNOWN_UNITS = setOf(
+    "g", "gramm", "kg", "kilo", "kilogramm",
+    "ml", "milliliter", "l", "liter",
+    "x", "stk", "stk.", "stück", "stueck",
+    "pck", "pck.", "packung", "pkg", "pkg.", "pckg",
+    "el", "tl", "dose", "dosen", "flasche", "flaschen",
+    "becher", "glas", "gläser", "prise", "prisen",
+    "zehe", "zehen", "portion", "portionen", "beutel"
+)
+
+fun parseShoppingInput(input: String): ParsedShoppingInput {
+    val trimmed = input.trim()
+    if (trimmed.isEmpty()) {
+        return ParsedShoppingInput(input, 0.0, "g", "", false)
+    }
+
+    // Pattern 1: Number + unit prefix + optional remainder (e.g. "100g Haferflocken", "250ml Milch", "3x Äpfel", "4Pck Nudeln")
+    val prefixRegex = Regex("""^(\d+(?:[.,]\d+)?)\s*([a-zA-ZäöüÄÖÜ.]+)\b\s*(.*)$""", RegexOption.IGNORE_CASE)
+    val match1 = prefixRegex.matchEntire(trimmed)
+    if (match1 != null) {
+        val rawNum = match1.groupValues[1].replace(',', '.')
+        val num = rawNum.toDoubleOrNull() ?: 0.0
+        val rawUnit = match1.groupValues[2]
+        val remainder = match1.groupValues[3].trim()
+
+        if (rawUnit.lowercase() in KNOWN_UNITS) {
+            val normalizedUnit = normalizeUnit(rawUnit)
+            return ParsedShoppingInput(
+                rawText = input,
+                amount = num,
+                unit = normalizedUnit,
+                name = remainder,
+                hasParsedQuantity = true
+            )
+        } else if (remainder.isNotBlank()) {
+            return ParsedShoppingInput(
+                rawText = input,
+                amount = num,
+                unit = "Stück",
+                name = "$rawUnit $remainder".trim(),
+                hasParsedQuantity = true
+            )
+        } else {
+            return ParsedShoppingInput(
+                rawText = input,
+                amount = num,
+                unit = "Stück",
+                name = rawUnit.trim(),
+                hasParsedQuantity = true
+            )
+        }
+    }
+
+    // Pattern 2: Number + space + name (e.g. "3 Bananen")
+    val numOnlyRegex = Regex("""^(\d+(?:[.,]\d+)?)\s+(.+)$""")
+    val match2 = numOnlyRegex.matchEntire(trimmed)
+    if (match2 != null) {
+        val rawNum = match2.groupValues[1].replace(',', '.')
+        val num = rawNum.toDoubleOrNull() ?: 0.0
+        val name = match2.groupValues[2].trim()
+
+        return ParsedShoppingInput(
+            rawText = input,
+            amount = num,
+            unit = "Stück",
+            name = name,
+            hasParsedQuantity = true
+        )
+    }
+
+    // Fallback: Name only
+    return ParsedShoppingInput(
+        rawText = input,
+        amount = 0.0,
+        unit = "g",
+        name = trimmed,
+        hasParsedQuantity = false
+    )
+}
+
+private fun normalizeUnit(raw: String): String {
+    return when (raw.lowercase().removeSuffix(".")) {
+        "g", "gramm" -> "g"
+        "kg", "kilo", "kilogramm" -> "kg"
+        "ml", "milliliter" -> "ml"
+        "l", "liter" -> "l"
+        "x", "stk", "stück", "stueck" -> "Stück"
+        "pck", "packung", "pkg", "pckg" -> "Stück"
+        "el" -> "EL"
+        "tl" -> "TL"
+        "dose", "dosen" -> "Dose"
+        "flasche", "flaschen" -> "Flasche"
+        "becher" -> "Becher"
+        "glas", "gläser" -> "Glas"
+        "beutel" -> "Beutel"
+        "prise", "prisen" -> "Prise"
+        "zehe", "zehen" -> "Zehe"
+        "portion", "portionen" -> "Portion"
+        else -> raw
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -34,7 +157,7 @@ fun ShoppingListScreen(vm: NutritionViewModel, userProfile: UserProfile) {
     val rawShoppingList = vm.shoppingList
     val household by vm.firebaseManager.household.collectAsState()
     
-    var showAddItemDialog by remember { mutableStateOf(false) }
+    var showQuickInputBar by remember { mutableStateOf(false) }
     var itemToEdit by remember { mutableStateOf<ShoppingItem?>(null) }
     var isArchiveExpanded by remember { mutableStateOf(false) }
 
@@ -119,7 +242,6 @@ fun ShoppingListScreen(vm: NutritionViewModel, userProfile: UserProfile) {
     val groupedActiveItems by remember(aggregatedActiveList, vm.isShoppingListAggregated, vm.shoppingListSortByCategory) {
         derivedStateOf {
             val result = when {
-                // 1. Wenn nach Kategorie sortiert werden soll, hat dies Vorrang
                 vm.shoppingListSortByCategory -> {
                     aggregatedActiveList.groupBy { 
                         val cat = it.category
@@ -131,13 +253,11 @@ fun ShoppingListScreen(vm: NutritionViewModel, userProfile: UserProfile) {
                         if (idx == -1) categoryOrder.size else idx
                     }.toMap()
                 }
-                // 2. Ansonsten nach Mahlzeit/Quelle gruppieren (entspricht "Nicht zusammengefasst" -> nach Mahlzeit)
                 else -> {
                     aggregatedActiveList.groupBy { it.sourceName ?: "Manuell hinzugefügt" }
                 }
             }
             
-            // Header für die Anzeige formatieren (z.B. von "Mahlzeit @ 2026-08-15" zu "Mahlzeit (Heute, 15.08.)")
             result.mapKeys { (key, _) -> formatSourceName(key) }
         }
     }
@@ -151,116 +271,116 @@ fun ShoppingListScreen(vm: NutritionViewModel, userProfile: UserProfile) {
 
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(onClick = { showAddItemDialog = true }) {
-                Icon(Icons.Default.Add, "Artikel hinzufügen")
+            if (!showQuickInputBar) {
+                FloatingActionButton(onClick = { showQuickInputBar = true }) {
+                    Icon(Icons.Default.Add, "Artikel hinzufügen")
+                }
             }
         }
     ) { padding ->
-        Column(Modifier.padding(padding).padding(horizontal = 12.dp)) {
-            if (!household?.name.isNullOrBlank()) {
-                Text(
-                    text = "Haushalt: ${household!!.name}", 
-                    style = MaterialTheme.typography.labelSmall, 
-                    color = MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
-            }
-
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(top = 4.dp, bottom = 80.dp)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp)
             ) {
-                groupedActiveItems.forEach { (header, items) ->
-                    item(key = "header_$header", span = { GridItemSpan(2) }) {
-                        Text(
-                            text = header,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
-                        )
-                    }
-                    items(items, key = { it.id }) { item ->
-                        ShoppingItemTile(
-                            item = item,
-                            onToggle = { vm.toggleShoppingItem(item) },
-                            onEdit = { itemToEdit = item },
-                            onDelete = { 
-                                if (vm.isShoppingListAggregated) {
-                                    val isWeightItem = item.weightGrams > 0
-                                    val related = activeItems.filter { 
-                                        val nameMatch = it.name.equals(item.name, ignoreCase = true)
-                                        if (isWeightItem) {
-                                            nameMatch && it.weightGrams > 0 && it.baseUnit.equals(item.baseUnit, ignoreCase = true)
-                                        } else {
-                                            nameMatch && it.unit.equals(item.unit, ignoreCase = true)
-                                        }
-                                    }
-                                    related.forEach { vm.deleteShoppingItem(it.id) }
-                                } else {
-                                    vm.deleteShoppingItem(item.id)
-                                }
-                            }
-                        )
-                    }
+                if (!household?.name.isNullOrBlank()) {
+                    Text(
+                        text = "Haushalt: ${household!!.name}", 
+                        style = MaterialTheme.typography.labelSmall, 
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
                 }
 
-                if (checkedItems.isNotEmpty()) {
-                    item(key = "archive_header", span = { GridItemSpan(2) }) {
-                        Column {
-                            HorizontalDivider(Modifier.padding(vertical = 16.dp))
-                            Surface(
-                                onClick = { isArchiveExpanded = !isArchiveExpanded },
-                                modifier = Modifier.fillMaxWidth(),
-                                color = Color.Transparent
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier.padding(vertical = 8.dp)
-                                ) {
-                                    Text(
-                                        "Zuletzt verwendet (${checkedItems.size})",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = MaterialTheme.colorScheme.outline
-                                    )
-                                    Icon(
-                                        imageVector = if (isArchiveExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.outline
-                                    )
-                                }
-                            }
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(top = 4.dp, bottom = if (showQuickInputBar) 120.dp else 80.dp)
+                ) {
+                    groupedActiveItems.forEach { (header, items) ->
+                        item(key = "header_$header", span = { GridItemSpan(2) }) {
+                            Text(
+                                text = header,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                            )
                         }
-                    }
-
-                    if (isArchiveExpanded) {
-                        items(checkedItems, key = { "checked_${it.id}" }, span = { GridItemSpan(2) }) { item ->
-                            ShoppingItemRow(
+                        items(items, key = { it.id }) { item ->
+                            ShoppingItemTile(
                                 item = item,
                                 onToggle = { vm.toggleShoppingItem(item) },
-                                onEdit = { itemToEdit = item },
-                                onDelete = { vm.deleteShoppingItem(item.id) }
+                                onEdit = { itemToEdit = item }
                             )
                         }
                     }
+
+                    if (checkedItems.isNotEmpty()) {
+                        item(key = "archive_header", span = { GridItemSpan(2) }) {
+                            Column {
+                                HorizontalDivider(Modifier.padding(vertical = 16.dp))
+                                Surface(
+                                    onClick = { isArchiveExpanded = !isArchiveExpanded },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = Color.Transparent
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.padding(vertical = 8.dp)
+                                    ) {
+                                        Text(
+                                            "Zuletzt verwendet (${checkedItems.size})",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = MaterialTheme.colorScheme.outline
+                                        )
+                                        Icon(
+                                            imageVector = if (isArchiveExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.outline
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (isArchiveExpanded) {
+                            items(checkedItems, key = { "checked_${it.id}" }, span = { GridItemSpan(2) }) { item ->
+                                ShoppingItemRow(
+                                    item = item,
+                                    onToggle = { vm.toggleShoppingItem(item) },
+                                    onEdit = { itemToEdit = item },
+                                    onDelete = { vm.deleteShoppingItem(item.id) }
+                                )
+                            }
+                        }
+                    }
                 }
             }
-        }
-    }
 
-    if (showAddItemDialog) {
-        AddShoppingItemDialog(
-            vm = vm,
-            isPremium = userProfile.isPremium,
-            onDismiss = { showAddItemDialog = false },
-            onAdd = { name, amount, unit, category ->
-                vm.addShoppingItem(name, amount, unit, category, userProfile.isPremium)
-                showAddItemDialog = false
+            AnimatedVisibility(
+                visible = showQuickInputBar,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+                QuickAddShoppingItemBar(
+                    vm = vm,
+                    isPremium = userProfile.isPremium,
+                    onClose = { showQuickInputBar = false },
+                    onAddItem = { name, amount, unit, category ->
+                        vm.addShoppingItem(name, amount, unit, category, userProfile.isPremium)
+                    }
+                )
             }
-        )
+        }
     }
 
     itemToEdit?.let { item ->
@@ -276,13 +396,196 @@ fun ShoppingListScreen(vm: NutritionViewModel, userProfile: UserProfile) {
     }
 }
 
+@Composable
+fun QuickAddShoppingItemBar(
+    vm: NutritionViewModel,
+    isPremium: Boolean,
+    onClose: () -> Unit,
+    onAddItem: (String, Double, String, String?) -> Unit
+) {
+    var inputText by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+    val coroutineScope = rememberCoroutineScope()
+
+    val parsedInput = remember(inputText) { parseShoppingInput(inputText) }
+
+    val suggestions by remember(parsedInput.name, vm.foods) {
+        derivedStateOf {
+            val query = parsedInput.name.trim().lowercase()
+            if (query.isEmpty()) emptyList()
+            else {
+                vm.foods
+                    .filter { food -> food.name.lowercase().contains(query) }
+                    .sortedWith(compareByDescending<FoodItemEntity> { it.isGeneric }.thenBy { it.name.length })
+                    .take(6)
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    fun submitCurrentInput(foodMatch: FoodItemEntity? = null) {
+        val itemName = foodMatch?.name ?: parsedInput.name.ifBlank { inputText.trim() }
+        if (itemName.isNotBlank()) {
+            val matchedFood = foodMatch ?: vm.foods.find { it.name.equals(itemName, ignoreCase = true) }
+            val amount = parsedInput.amount
+            val unit = if (parsedInput.hasParsedQuantity) parsedInput.unit else (matchedFood?.baseUnit ?: "g")
+            val initialCategory = matchedFood?.category
+
+            if (initialCategory != null) {
+                onAddItem(itemName, amount, unit, initialCategory)
+                inputText = ""
+            } else {
+                coroutineScope.launch {
+                    val suggestedCat = if (isPremium && itemName.length > 2) {
+                        vm.suggestCategory(itemName, isPremium)
+                    } else null
+                    onAddItem(itemName, amount, unit, suggestedCat)
+                }
+                inputText = ""
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        // Dropup suggestions list from Artikelliste (vm.foods)
+        if (suggestions.isNotEmpty() && parsedInput.name.isNotBlank()) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+                shape = RoundedCornerShape(16.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+            ) {
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 200.dp)
+                ) {
+                    items(suggestions) { food ->
+                        ListItem(
+                            leadingContent = {
+                                Icon(
+                                    imageVector = if (food.isGeneric) Icons.Default.Inventory2 else Icons.AutoMirrored.Filled.Label,
+                                    contentDescription = if (food.isGeneric) "Basisartikel" else "Spezifischer Artikel",
+                                    tint = if (food.isGeneric) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            headlineContent = {
+                                Text(food.name, fontWeight = FontWeight.SemiBold)
+                            },
+                            supportingContent = {
+                                val cat = food.category ?: "Sonstiges"
+                                val label = if (food.isGeneric) {
+                                    "Basisartikel • $cat"
+                                } else {
+                                    if (!food.brand.isNullOrBlank()) "$cat • ${food.brand}" else cat
+                                }
+                                Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                            },
+                            modifier = Modifier.clickable {
+                                submitCurrentInput(foodMatch = food)
+                            }
+                        )
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                        )
+                    }
+                }
+            }
+        }
+
+        // Quick Input Bar
+        Surface(
+            shape = RoundedCornerShape(28.dp),
+            tonalElevation = 6.dp,
+            shadowElevation = 8.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = inputText,
+                    onValueChange = { inputText = it },
+                    placeholder = { 
+                        Text(
+                            "z.B. 100g Haferflocken, 250ml Milch, 3x Äpfel",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.outline
+                        ) 
+                    },
+                    singleLine = true,
+                    leadingIcon = if (parsedInput.hasParsedQuantity && parsedInput.amount > 0) {
+                        {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier.padding(start = 6.dp)
+                            ) {
+                                Text(
+                                    text = "${parsedInput.amount.roundString()} ${parsedInput.unit}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    } else null,
+                    trailingIcon = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (inputText.isNotBlank()) {
+                                IconButton(onClick = { submitCurrentInput() }) {
+                                    Icon(
+                                        Icons.Default.Add,
+                                        contentDescription = "Hinzufügen",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                            IconButton(onClick = onClose) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Schließen",
+                                    tint = MaterialTheme.colorScheme.outline
+                                )
+                            }
+                        }
+                    },
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { submitCurrentInput() }),
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(focusRequester),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
+                    )
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun ShoppingItemTile(item: ShoppingItem, onToggle: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
+fun ShoppingItemTile(item: ShoppingItem, onToggle: () -> Unit, onEdit: () -> Unit) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .height(84.dp) // Fixed height for a uniform grid
+            .height(80.dp)
             .combinedClickable(
                 onClick = onToggle,
                 onLongClick = onEdit
@@ -294,31 +597,26 @@ fun ShoppingItemTile(item: ShoppingItem, onToggle: () -> Unit, onEdit: () -> Uni
             modifier = Modifier.padding(10.dp).fillMaxHeight(),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.Top) {
-                Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = item.name, 
-                        fontWeight = FontWeight.Bold, 
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f, fill = false),
-                        maxLines = 2,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = item.name, 
+                    fontWeight = FontWeight.Bold, 
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                    maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+                if (item.isPantryItem) {
+                    Spacer(Modifier.width(4.dp))
+                    Icon(
+                        imageVector = Icons.Default.Kitchen, 
+                        contentDescription = "Vorrat", 
+                        tint = Color(0xFF2E7D32),
+                        modifier = Modifier.size(16.dp)
                     )
-                    if (item.isPantryItem) {
-                        Spacer(Modifier.width(4.dp))
-                        Icon(
-                            imageVector = Icons.Default.Kitchen, 
-                            contentDescription = "Vorrat", 
-                            tint = Color(0xFF2E7D32),
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                }
-                IconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(24.dp).offset(x = 4.dp, y = (-4).dp)
-                ) {
-                    Icon(Icons.Default.Close, null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(16.dp))
                 }
             }
             
@@ -383,87 +681,6 @@ fun ShoppingItemRow(item: ShoppingItem, onToggle: () -> Unit, onEdit: () -> Unit
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun AddShoppingItemDialog(
-    vm: NutritionViewModel,
-    isPremium: Boolean,
-    onDismiss: () -> Unit,
-    onAdd: (String, Double, String, String?) -> Unit
-) {
-    var name by remember { mutableStateOf("") }
-    var amount by remember { mutableStateOf("") }
-    var unit by remember { mutableStateOf("g") }
-    var category by remember { mutableStateOf<String?>(null) }
-    var isSuggesting by remember { mutableStateOf(false) }
-
-    val matchedFood = remember(name) {
-        vm.foods.find { it.name.equals(name.trim(), ignoreCase = true) }
-    }
-
-    LaunchedEffect(name) {
-        if (name.length > 2 && isPremium) {
-            isSuggesting = true
-            delay(500)
-            category = vm.suggestCategory(name, isPremium)
-            isSuggesting = false
-        } else if (name.length > 2 && !isPremium) {
-            // Local check only for non-premium (no loading indicator)
-            val match = vm.foods.find { it.name.equals(name, ignoreCase = true) }
-            if (match?.category != null) {
-                category = match.category
-            }
-        }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Artikel hinzufügen") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(value = amount, onValueChange = { amount = it }, label = { Text("Menge") }, modifier = Modifier.fillMaxWidth())
-                
-                Text("Einheit", style = MaterialTheme.typography.labelMedium)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val defaultUnits = listOf("g", "ml", "Stück", "Packung")
-                    val portions = matchedFood?.portions?.map { it.name } ?: emptyList()
-                    val packages = matchedFood?.packages?.map { it.name } ?: emptyList()
-                    val allUnits = (defaultUnits + portions + packages).distinct()
-                    
-                    allUnits.forEach { u ->
-                        FilterChip(
-                            selected = unit == u,
-                            onClick = { 
-                                unit = u
-                                if ((amount.isEmpty() || amount == "0") && u != "g" && u != "ml") {
-                                    amount = "1"
-                                }
-                            },
-                            label = { Text(u) }
-                        )
-                    }
-                }
-
-                CategoryDropdown(
-                    selectedCategory = category,
-                    categories = vm.categories,
-                    onCategorySelected = { category = it },
-                    isSuggesting = isSuggesting
-                )
-            }
-        },
-        confirmButton = {
-            Button(onClick = { onAdd(name, amount.toDoubleOrNull() ?: 0.0, unit, category) }) {
-                Text("Hinzufügen")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Abbrechen") }
-        }
-    )
-}
-
-@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
-@Composable
 fun EditShoppingItemDialog(
     item: ShoppingItem,
     vm: NutritionViewModel,
@@ -471,7 +688,7 @@ fun EditShoppingItemDialog(
     onConfirm: (ShoppingItem) -> Unit
 ) {
     var name by remember { mutableStateOf(item.name) }
-    var amount by remember { mutableStateOf(item.amount.toString()) }
+    var amount by remember { mutableStateOf(if (item.amount > 0) item.amount.roundString() else "") }
     var unit by remember { mutableStateOf(item.unit) }
     var category by remember { mutableStateOf(item.category) }
 
@@ -489,7 +706,7 @@ fun EditShoppingItemDialog(
 
                 Text("Einheit", style = MaterialTheme.typography.labelMedium)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val defaultUnits = listOf("g", "ml", "Stück", "Packung")
+                    val defaultUnits = listOf("g", "ml", "Stück")
                     val portions = matchedFood?.portions?.map { it.name } ?: emptyList()
                     val packages = matchedFood?.packages?.map { it.name } ?: emptyList()
                     val allUnits = (defaultUnits + portions + packages).distinct()
