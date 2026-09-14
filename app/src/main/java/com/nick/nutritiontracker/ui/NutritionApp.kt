@@ -3454,8 +3454,8 @@ private fun DiarySelectionActions(
                 showCreateMealDialog = false
                 mealFromSelection = null
             },
-            onSave = { name, ingredients, servings, category, imageUrl ->
-                vm.addMealTemplate(name, ingredients, servings, category, imageUrl)
+            onSave = { name, ingredients, servings, category, imageUrl, recipeSteps ->
+                vm.addMealTemplate(name, ingredients, servings, category, imageUrl, recipeSteps)
                 selectedEntryIds.value = emptySet()
                 showCreateMealDialog = false
                 mealFromSelection = null

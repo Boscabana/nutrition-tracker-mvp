@@ -198,7 +198,7 @@ fun PlannerScreen(vm: NutritionViewModel, @Suppress("UNUSED_PARAMETER") userProf
             meal = mappedMeal,
             vm = vm,
             onDismiss = { poolItemToEdit = null },
-            onSave = { name, ingredients, servings, tags, imageUrl ->
+            onSave = { name, ingredients, servings, tags, imageUrl, _ ->
                 vm.updatePoolItem(poolItemToEdit!!.copy(
                     mealName = name,
                     mealIngredients = ingredients,

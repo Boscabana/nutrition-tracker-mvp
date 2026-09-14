@@ -1149,12 +1149,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         updateFood(food.copy(isGeneric = true))
     }
 
-    fun addMealTemplate(name: String, ingredients: List<MealIngredientEntity>, servings: Double, tags: List<String>, imageUrl: String?) {
+    fun addMealTemplate(name: String, ingredients: List<MealIngredientEntity>, servings: Double, tags: List<String>, imageUrl: String?, recipeSteps: List<RecipeStepEntity> = emptyList()) {
         val user = firebaseManager.currentUser.value
         val newMeal = MealEntity(
             id = nextMealId++,
             name = name,
             ingredients = ingredients,
+            recipeSteps = recipeSteps,
             servings = servings,
             tags = tags,
             imageUrl = imageUrl,

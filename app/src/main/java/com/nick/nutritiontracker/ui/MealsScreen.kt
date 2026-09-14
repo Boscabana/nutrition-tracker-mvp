@@ -14,7 +14,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -77,6 +79,7 @@ fun MealsScreen(
 
     var mealToDelete by remember { mutableStateOf<Long?>(null) }
     var mealToEdit by remember { mutableStateOf<MealEntity?>(null) }
+    var cookingModeMeal by remember { mutableStateOf<MealEntity?>(null) }
     var showAddDialog by remember { mutableStateOf(false) }
     
     var selectedFilterTags by remember { mutableStateOf(setOf<String>()) }
@@ -91,6 +94,13 @@ fun MealsScreen(
 
     val expandedStates = remember { mutableStateMapOf<Long, Boolean>() }
     val isSelectionMode = selectedMealIds.value.isNotEmpty()
+
+    if (cookingModeMeal != null) {
+        CookingModeDialog(
+            meal = cookingModeMeal!!,
+            onDismiss = { cookingModeMeal = null }
+        )
+    }
 
     if (mealToDelete != null) {
         AlertDialog(
@@ -117,11 +127,11 @@ fun MealsScreen(
                 showAddDialog = false
                 mealToEdit = null
             },
-            onSave = { name, ingredients, servings, tags, imageUrl ->
+            onSave = { name, ingredients, servings, tags, imageUrl, recipeSteps ->
                 if (mealToEdit == null) {
-                    vm.addMealTemplate(name, ingredients, servings, tags, imageUrl)
+                    vm.addMealTemplate(name, ingredients, servings, tags, imageUrl, recipeSteps)
                 } else {
-                    vm.updateMealTemplate(mealToEdit!!.copy(name = name, ingredients = ingredients, servings = servings, tags = tags, imageUrl = imageUrl))
+                    vm.updateMealTemplate(mealToEdit!!.copy(name = name, ingredients = ingredients, servings = servings, tags = tags, imageUrl = imageUrl, recipeSteps = recipeSteps))
                 }
                 showAddDialog = false
                 mealToEdit = null
@@ -269,6 +279,18 @@ fun MealsScreen(
                                 unsaturatedFat = meal.totalUnsaturatedFat / meal.servings,
                                 saturatedFat = meal.totalSaturatedFat / meal.servings
                             )
+                            if (meal.recipeSteps.isNotEmpty()) {
+                                IconButton(
+                                    onClick = { cookingModeMeal = meal },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.SoupKitchen,
+                                        contentDescription = "Kochmodus",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
                             Spacer(Modifier.width(4.dp))
                             Icon(
                                 if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
@@ -352,6 +374,22 @@ fun MealsScreen(
                                         color = MaterialTheme.colorScheme.outline
                                     )
                                 }
+
+                                Button(
+                                    onClick = { cookingModeMeal = meal },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                ) {
+                                    Icon(Icons.Default.SoupKitchen, contentDescription = null)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        if (meal.recipeSteps.isEmpty()) "Kochmodus (Rezept leer)"
+                                        else "Kochmodus (${meal.recipeSteps.size} Schritt${if (meal.recipeSteps.size == 1) "" else "e"})"
+                                    )
+                                }
                             }
                         }
                     }
@@ -367,7 +405,7 @@ fun MealEditDialog(
     meal: MealEntity?,
     vm: NutritionViewModel,
     onDismiss: () -> Unit,
-    onSave: (String, List<MealIngredientEntity>, Double, List<String>, String?) -> Unit
+    onSave: (String, List<MealIngredientEntity>, Double, List<String>, String?, List<RecipeStepEntity>) -> Unit
 ) {
     val foods = vm.foods
     var name by remember(meal?.id) { mutableStateOf(meal?.name ?: "") }
@@ -375,6 +413,12 @@ fun MealEditDialog(
     val tags = remember(meal?.id) { mutableStateListOf<String>().apply { meal?.tags?.let { addAll(it) } } }
     var newTagText by remember { mutableStateOf("") }
     var imageUrl by remember(meal?.id) { mutableStateOf(meal?.imageUrl) }
+    val recipeSteps = remember(meal?.id) { 
+        mutableStateListOf<RecipeStepEntity>().apply { 
+            meal?.recipeSteps?.let { addAll(it) } 
+        } 
+    }
+    var showRecipeStepsEditor by remember { mutableStateOf(false) }
     
     val standardTags = listOf("Frühstück", "Mittagessen", "Abendessen", "Snack", "Vegan", "Vegetarisch", "Rind", "Geflügel", "Fisch", "Pasta", "Salat", "Dessert", "Hauptgericht", "Schnell")
 
@@ -804,6 +848,32 @@ fun MealEditDialog(
                 }
 
                 item {
+                    if (showRecipeStepsEditor) {
+                        RecipeStepsEditorDialog(
+                            initialSteps = recipeSteps,
+                            mealIngredients = ingredients,
+                            onDismiss = { showRecipeStepsEditor = false },
+                            onSaveSteps = { updatedSteps ->
+                                recipeSteps.clear()
+                                recipeSteps.addAll(updatedSteps)
+                            }
+                        )
+                    }
+
+                    OutlinedButton(
+                        onClick = { showRecipeStepsEditor = true },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    ) {
+                        Icon(Icons.Default.MenuBook, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            if (recipeSteps.isEmpty()) "Kochrezept anlegen"
+                            else "Kochrezept bearbeiten (${recipeSteps.size} Schritt${if (recipeSteps.size == 1) "" else "e"})"
+                        )
+                    }
+                }
+
+                item {
                     Text("Zutaten", fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp))
                 }
 
@@ -868,7 +938,7 @@ fun MealEditDialog(
                         TextButton(onClick = onDismiss) { Text("Abbrechen") }
                         Button(
                             enabled = name.isNotBlank() && ingredients.isNotEmpty(),
-                            onClick = { onSave(name, ingredients.toList(), servings.replace(',', '.').toDoubleOrNull() ?: 1.0, tags.toList(), imageUrl) }
+                            onClick = { onSave(name, ingredients.toList(), servings.replace(',', '.').toDoubleOrNull() ?: 1.0, tags.toList(), imageUrl, recipeSteps.toList()) }
                         ) { Text("Speichern") }
                     }
                 }
@@ -1192,6 +1262,607 @@ fun IngredientRow(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RecipeStepsEditorDialog(
+    initialSteps: List<RecipeStepEntity>,
+    mealIngredients: List<MealIngredientEntity>,
+    onDismiss: () -> Unit,
+    onSaveSteps: (List<RecipeStepEntity>) -> Unit
+) {
+    val steps = remember { mutableStateListOf<RecipeStepEntity>().apply { addAll(initialSteps) } }
+    var stepToEdit by remember { mutableStateOf<RecipeStepEntity?>(null) }
+    var isCreatingNew by remember { mutableStateOf(false) }
+
+    if (isCreatingNew || stepToEdit != null) {
+        val editingStep = stepToEdit ?: RecipeStepEntity(
+            id = System.currentTimeMillis(),
+            stepNumber = steps.size + 1,
+            title = "",
+            description = "",
+            ingredients = emptyList()
+        )
+        SingleStepEditDialog(
+            step = editingStep,
+            mealIngredients = mealIngredients,
+            onDismiss = {
+                stepToEdit = null
+                isCreatingNew = false
+            },
+            onSave = { savedStep ->
+                if (stepToEdit != null) {
+                    val idx = steps.indexOfFirst { it.id == savedStep.id }
+                    if (idx != -1) steps[idx] = savedStep
+                } else {
+                    steps.add(savedStep)
+                }
+                steps.forEachIndexed { index, s -> s.stepNumber = index + 1 }
+                stepToEdit = null
+                isCreatingNew = false
+            }
+        )
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth().fillMaxHeight(0.85f)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Kochrezept Schritte", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Schließen")
+                    }
+                }
+
+                Text(
+                    "Hier kannst du einzelne Zubereitungsschritte anlegen und Zutaten verlinken.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                if (steps.isEmpty()) {
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.AutoMirrored.Filled.MenuBook, null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.outline)
+                            Spacer(Modifier.height(8.dp))
+                            Text("Noch keine Schritte vorhanden.", color = MaterialTheme.colorScheme.outline)
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        itemsIndexed(steps, key = { _, s -> s.id }) { index, step ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text(
+                                            "Schritt ${index + 1}: ${step.title.ifBlank { "Ohne Titel" }}",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Row {
+                                            if (index > 0) {
+                                                IconButton(onClick = {
+                                                    val item = steps.removeAt(index)
+                                                    steps.add(index - 1, item)
+                                                    steps.forEachIndexed { i, s -> s.stepNumber = i + 1 }
+                                                }, modifier = Modifier.size(32.dp)) {
+                                                    Icon(Icons.Default.ArrowUpward, "Nach oben", modifier = Modifier.size(18.dp))
+                                                }
+                                            }
+                                            if (index < steps.size - 1) {
+                                                IconButton(onClick = {
+                                                    val item = steps.removeAt(index)
+                                                    steps.add(index + 1, item)
+                                                    steps.forEachIndexed { i, s -> s.stepNumber = i + 1 }
+                                                }, modifier = Modifier.size(32.dp)) {
+                                                    Icon(Icons.Default.ArrowDownward, "Nach unten", modifier = Modifier.size(18.dp))
+                                                }
+                                            }
+                                            IconButton(onClick = { stepToEdit = step }, modifier = Modifier.size(32.dp)) {
+                                                Icon(Icons.Default.Edit, "Bearbeiten", modifier = Modifier.size(18.dp))
+                                            }
+                                            IconButton(onClick = {
+                                                steps.removeAt(index)
+                                                steps.forEachIndexed { i, s -> s.stepNumber = i + 1 }
+                                            }, modifier = Modifier.size(32.dp)) {
+                                                Icon(Icons.Default.Delete, "Löschen", tint = Color.Red, modifier = Modifier.size(18.dp))
+                                            }
+                                        }
+                                    }
+                                    if (step.description.isNotBlank()) {
+                                        Text(step.description, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
+                                    }
+                                    if (step.ingredients.isNotEmpty()) {
+                                        Spacer(Modifier.height(4.dp))
+                                        Text("Verlinkte Zutaten:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                        step.ingredients.forEach { stepIng ->
+                                            val mealIng = mealIngredients.find { it.id == stepIng.ingredientId }
+                                            if (mealIng != null) {
+                                                Text(
+                                                    "• ${mealIng.name}: ${mealIng.displayAmountFor(stepIng.amount, stepIng.grams)}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.secondary
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(onClick = { isCreatingNew = true }) {
+                        Icon(Icons.Default.Add, null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Schritt hinzufügen")
+                    }
+                    Button(onClick = {
+                        steps.forEachIndexed { i, s -> s.stepNumber = i + 1 }
+                        onSaveSteps(steps.toList())
+                        onDismiss()
+                    }) {
+                        Text("Übernehmen")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun SingleStepEditDialog(
+    step: RecipeStepEntity,
+    mealIngredients: List<MealIngredientEntity>,
+    onDismiss: () -> Unit,
+    onSave: (RecipeStepEntity) -> Unit
+) {
+    var title by remember { mutableStateOf(step.title) }
+    var description by remember { mutableStateOf(step.description) }
+    val stepIngredients = remember {
+        mutableStateMapOf<Long, RecipeStepIngredient>().apply {
+            step.ingredients.forEach { put(it.ingredientId, it.copy()) }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (step.title.isBlank()) "Schritt ${step.stepNumber}" else "Schritt ${step.stepNumber} bearbeiten") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Bezeichnung / Titel") },
+                    placeholder = { Text("z.B. Eier und Butter verrühren") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Beschreibung / Anleitung") },
+                    placeholder = { Text("z.B. 2x Eier und 10g Butter in eine Schüssel geben...") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 3
+                )
+
+                if (mealIngredients.isNotEmpty()) {
+                    Text("Zutaten in diesem Schritt:", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    
+                    mealIngredients.forEach { ing ->
+                        val isSelected = stepIngredients.containsKey(ing.id)
+                        val stepIng = stepIngredients[ing.id]
+                        
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = if (isSelected) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f))
+                                     else CardDefaults.cardColors()
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Checkbox(
+                                        checked = isSelected,
+                                        onCheckedChange = { checked ->
+                                            if (checked) {
+                                                stepIngredients[ing.id] = RecipeStepIngredient(
+                                                    ingredientId = ing.id,
+                                                    amount = ing.amount,
+                                                    grams = ing.grams
+                                                )
+                                            } else {
+                                                stepIngredients.remove(ing.id)
+                                            }
+                                        }
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(ing.name, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                        Text("Gesamt in Mahlzeit: ${ing.displayAmount()}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                                    }
+                                }
+
+                                if (isSelected && stepIng != null) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.padding(start = 32.dp, top = 4.dp, end = 8.dp)
+                                    ) {
+                                        var amountText by remember { mutableStateOf(stepIng.amount.roundString()) }
+                                        OutlinedTextField(
+                                            value = amountText,
+                                            onValueChange = { text ->
+                                                amountText = text
+                                                val amt = text.replace(',', '.').toDoubleOrNull() ?: 0.0
+                                                val ratio = if (ing.amount > 0) amt / ing.amount else 1.0
+                                                val calculatedGrams = ing.grams * ratio
+                                                stepIngredients[ing.id] = stepIng.copy(amount = amt, grams = calculatedGrams)
+                                            },
+                                            label = { Text("Teilmenge (${ing.unitLabel})") },
+                                            modifier = Modifier.weight(1f),
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)
+                                        )
+                                        Text(
+                                            "= ${stepIng.grams.round0()}g",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val updatedStep = step.copy(
+                        title = title.trim(),
+                        description = description.trim(),
+                        ingredients = stepIngredients.values.toList()
+                    )
+                    onSave(updatedStep)
+                }
+            ) {
+                Text("Speichern")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Abbrechen")
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CookingModeDialog(
+    meal: MealEntity,
+    onDismiss: () -> Unit
+) {
+    var portionCount by remember { mutableStateOf(if (meal.servings > 0) meal.servings else 1.0) }
+    var portionInput by remember { mutableStateOf(portionCount.roundString()) }
+    var selectedTab by remember { mutableIntStateOf(0) }
+    var currentStepIndex by remember { mutableIntStateOf(0) }
+    
+    val baseServings = if (meal.servings > 0) meal.servings else 1.0
+    val scaleFactor = portionCount / baseServings
+    val steps = meal.recipeSteps.sortedBy { it.stepNumber }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            modifier = Modifier.fillMaxWidth().fillMaxHeight(0.9f)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.SoupKitchen, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Kochmodus", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Schließen")
+                    }
+                }
+
+                Text(
+                    meal.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Portionen:", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(
+                                onClick = {
+                                    val newCount = (portionCount - 0.5).coerceAtLeast(0.5)
+                                    portionCount = newCount
+                                    portionInput = newCount.roundString()
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Default.Remove, "Portion verringern")
+                            }
+                            AutoSelectTextField(
+                                value = portionInput,
+                                onValueChange = { text ->
+                                    portionInput = text
+                                    val parsed = text.replace(',', '.').toDoubleOrNull()
+                                    if (parsed != null && parsed > 0) {
+                                        portionCount = parsed
+                                    }
+                                },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                modifier = Modifier.width(90.dp),
+                                singleLine = true
+                            )
+                            IconButton(
+                                onClick = {
+                                    val newCount = portionCount + 0.5
+                                    portionCount = newCount
+                                    portionInput = newCount.roundString()
+                                },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(Icons.Default.Add, "Portion erhöhen")
+                            }
+                        }
+                    }
+                }
+
+                if (steps.isEmpty()) {
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.AutoMirrored.Filled.MenuBook, null, modifier = Modifier.size(56.dp), tint = MaterialTheme.colorScheme.outline)
+                            Spacer(Modifier.height(12.dp))
+                            Text("Kein Kochrezept vorhanden", style = MaterialTheme.typography.titleMedium)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "Für diese Mahlzeit wurde noch kein Kochrezept angelegt.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                    }
+                } else {
+                    PrimaryTabRow(selectedTabIndex = selectedTab) {
+                        Tab(
+                            selected = selectedTab == 0,
+                            onClick = { selectedTab = 0 },
+                            text = { Text("Gesamtes Rezept") }
+                        )
+                        Tab(
+                            selected = selectedTab == 1,
+                            onClick = { selectedTab = 1 },
+                            text = { Text("Schritt für Schritt") }
+                        )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+
+                    if (selectedTab == 0) {
+                        LazyColumn(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            items(steps, key = { it.id }) { step ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text(
+                                            "Schritt ${step.stepNumber}: ${step.title.ifBlank { "Zubereitung" }}",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        if (step.description.isNotBlank()) {
+                                            Text(
+                                                step.description,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                modifier = Modifier.padding(vertical = 4.dp)
+                                            )
+                                        }
+                                        if (step.ingredients.isNotEmpty()) {
+                                            HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                                            Text(
+                                                "Zutaten für diesen Schritt (${portionCount.roundString()} Portionen):",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            step.ingredients.forEach { stepIng ->
+                                                val mealIng = meal.ingredients.find { it.id == stepIng.ingredientId }
+                                                if (mealIng != null) {
+                                                    val scaledAmount = stepIng.amount * scaleFactor
+                                                    val scaledGrams = stepIng.grams * scaleFactor
+                                                    Text(
+                                                        "• ${mealIng.displayAmountFor(scaledAmount, scaledGrams)} ${mealIng.name}",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        val safeIndex = currentStepIndex.coerceIn(0, steps.size - 1)
+                        val step = steps[safeIndex]
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    "Schritt ${safeIndex + 1} von ${steps.size}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    "${((safeIndex + 1).toFloat() / steps.size * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline
+                                )
+                            }
+                            LinearProgressIndicator(
+                                progress = { (safeIndex + 1).toFloat() / steps.size },
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            )
+
+                            Card(
+                                modifier = Modifier.fillMaxWidth().weight(1f).padding(vertical = 8.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f))
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .padding(16.dp)
+                                        .verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Text(
+                                        step.title.ifBlank { "Schritt ${step.stepNumber}" },
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+
+                                    if (step.description.isNotBlank()) {
+                                        Text(
+                                            step.description,
+                                            style = MaterialTheme.typography.bodyLarge
+                                        )
+                                    }
+
+                                    if (step.ingredients.isNotEmpty()) {
+                                        Card(
+                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                                        ) {
+                                            Column(modifier = Modifier.padding(12.dp)) {
+                                                Text(
+                                                    "Zutaten für diesen Schritt (${portionCount.roundString()} Portionen):",
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = MaterialTheme.colorScheme.primary
+                                                )
+                                                Spacer(Modifier.height(4.dp))
+                                                step.ingredients.forEach { stepIng ->
+                                                    val mealIng = meal.ingredients.find { it.id == stepIng.ingredientId }
+                                                    if (mealIng != null) {
+                                                        val scaledAmount = stepIng.amount * scaleFactor
+                                                        val scaledGrams = stepIng.grams * scaleFactor
+                                                        Text(
+                                                            "• ${mealIng.displayAmountFor(scaledAmount, scaledGrams)} ${mealIng.name}",
+                                                            style = MaterialTheme.typography.bodyMedium
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                OutlinedButton(
+                                    onClick = { if (currentStepIndex > 0) currentStepIndex-- },
+                                    enabled = safeIndex > 0
+                                ) {
+                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null)
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Zurück")
+                                }
+                                Button(
+                                    onClick = {
+                                        if (safeIndex < steps.size - 1) {
+                                            currentStepIndex++
+                                        } else {
+                                            onDismiss()
+                                        }
+                                    }
+                                ) {
+                                    Text(if (safeIndex < steps.size - 1) "Weiter" else "Fertig")
+                                    if (safeIndex < steps.size - 1) {
+                                        Spacer(Modifier.width(4.dp))
+                                        Icon(Icons.AutoMirrored.Filled.ArrowForward, null)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 private fun String.num(): Double = replace(',', '.').toDoubleOrNull() ?: 0.0
 private fun Double.round0(): String = "%.0f".format(this)
 private fun Double.roundString(): String = toString().replace(".0", "")
+

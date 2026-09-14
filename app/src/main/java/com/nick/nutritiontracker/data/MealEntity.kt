@@ -63,10 +63,35 @@ data class MealIngredientEntity(
 @Keep
 @Serializable
 @IgnoreExtraProperties
+data class RecipeStepIngredient(
+    var ingredientId: Long = 0,
+    var amount: Double = 0.0,
+    var grams: Double = 0.0
+) {
+    constructor() : this(0, 0.0, 0.0)
+}
+
+@Keep
+@Serializable
+@IgnoreExtraProperties
+data class RecipeStepEntity(
+    var id: Long = System.currentTimeMillis(),
+    var stepNumber: Int = 1,
+    var title: String = "",
+    var description: String = "",
+    var ingredients: List<RecipeStepIngredient> = emptyList()
+) {
+    constructor() : this(System.currentTimeMillis(), 1, "", "", emptyList())
+}
+
+@Keep
+@Serializable
+@IgnoreExtraProperties
 data class MealEntity(
     var id: Long = 0,
     var name: String = "",
     var ingredients: List<MealIngredientEntity> = emptyList(),
+    var recipeSteps: List<RecipeStepEntity> = emptyList(),
     var servings: Double = 1.0,
     var tags: List<String> = emptyList(),
     var imageUrl: String? = null,
