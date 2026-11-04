@@ -96,6 +96,13 @@ fun NutritionApp(vm: NutritionViewModel, profileVm: ProfileViewModel, adManager:
         }
     }
 
+    // Automatische Cloud-Profil-Synchronisation (stellt sicher, dass der Vornamen in Firestore unter users/$uid vorhanden ist)
+    LaunchedEffect(currentUser?.uid, userProfile.firstName) {
+        if (currentUser != null && userProfile.firstName.isNotBlank()) {
+            profileVm.updateProfile(userProfile)
+        }
+    }
+
     var showSetup by remember { mutableStateOf(false) }
     var initialCheckPerformed by remember { mutableStateOf(false) }
     
@@ -3543,6 +3550,7 @@ private fun FoodSelectionActions(
             SendToUserDialog(
                 members = vm.householdMembers,
                 onDismiss = { showSendDialog = false },
+                onRefreshMembers = { vm.refreshHouseholdMembers() },
                 onSend = { targetUid ->
                     vm.sendFoodToUser(targetUid, food)
                     showSendDialog = false
@@ -3621,6 +3629,7 @@ private fun MealSelectionActions(
             SendToUserDialog(
                 members = vm.householdMembers,
                 onDismiss = { showSendDialog = false },
+                onRefreshMembers = { vm.refreshHouseholdMembers() },
                 onSend = { targetUid ->
                     vm.sendRecipeToUser(targetUid, meal)
                     showSendDialog = false
@@ -3682,8 +3691,13 @@ private fun MealSelectionActions(
 fun SendToUserDialog(
     members: List<Map<String, String>>,
     onDismiss: () -> Unit,
-    onSend: (String) -> Unit
+    onSend: (String) -> Unit,
+    onRefreshMembers: (() -> Unit)? = null
 ) {
+    LaunchedEffect(Unit) {
+        onRefreshMembers?.invoke()
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Empfänger wählen") },

@@ -288,7 +288,7 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
         }
 
         CategoryManagementCard(nutritionViewModel)
-        HouseholdManagementSection(nutritionViewModel, isPremium)
+        HouseholdManagementSection(nutritionViewModel, isPremium, userProfile)
         
         Card {
             Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -687,15 +687,23 @@ private fun CategoryManagementCard(vm: NutritionViewModel) {
 }
 
 @Composable
-private fun HouseholdManagementSection(vm: NutritionViewModel, isPremium: Boolean) {
+private fun HouseholdManagementSection(vm: NutritionViewModel, isPremium: Boolean, userProfile: UserProfile) {
     val firebaseManager = vm.firebaseManager
     val user by firebaseManager.currentUser.collectAsState()
     val household by firebaseManager.household.collectAsState()
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        vm.refreshHouseholdMembers()
+    }
     
     var householdName by remember { mutableStateOf("") }
     var inviteCode by remember { mutableStateOf("") }
     var showJoinDialog by remember { mutableStateOf(false) }
+
+    var myNickname by remember(household, userProfile.firstName) {
+        mutableStateOf(household?.memberNames?.get(user?.uid) ?: userProfile.firstName)
+    }
 
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -722,7 +730,7 @@ private fun HouseholdManagementSection(vm: NutritionViewModel, isPremium: Boolea
                     Button(onClick = {
                         scope.launch {
                             try {
-                                firebaseManager.createHousehold(householdName)
+                                firebaseManager.createHousehold(householdName, userProfile.firstName)
                             } catch (e: Exception) {
                                 // Error handling
                             }
@@ -738,9 +746,39 @@ private fun HouseholdManagementSection(vm: NutritionViewModel, isPremium: Boolea
                     }
                 } else {
                     Text("Einladungscode: ${household?.inviteCode}", color = MaterialTheme.colorScheme.primary)
-                    Text("Mitglieder: ${household?.members?.size}")
+                    Text("Mitglieder (${household?.members?.size ?: 0}):")
                     
-                    Button(onClick = { firebaseManager.signOut() }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) {
+                    household?.members?.forEach { memberUid ->
+                        val name = household?.memberNames?.get(memberUid) ?: "Unbekannt"
+                        val isMe = memberUid == user?.uid
+                        Text(if (isMe) "• $name (Du)" else "• $name", style = MaterialTheme.typography.bodySmall)
+                    }
+
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = myNickname,
+                        onValueChange = { myNickname = it },
+                        label = { Text("Mein Spitzname in diesem Haushalt") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        trailingIcon = {
+                            IconButton(onClick = {
+                                scope.launch {
+                                    if (household != null && myNickname.isNotBlank()) {
+                                        firebaseManager.updateHouseholdMemberNickname(household!!.id, myNickname)
+                                        vm.refreshHouseholdMembers()
+                                    }
+                                }
+                            }) {
+                                Icon(Icons.Default.Check, "Name im Haushalt speichern")
+                            }
+                        }
+                    )
+
+                    Button(
+                        onClick = { firebaseManager.signOut() },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                    ) {
                         Text("Abmelden / Haushalt verlassen")
                     }
                 }
@@ -764,7 +802,7 @@ private fun HouseholdManagementSection(vm: NutritionViewModel, isPremium: Boolea
                 Button(onClick = {
                     scope.launch {
                         try {
-                            firebaseManager.joinHousehold(inviteCode)
+                            firebaseManager.joinHousehold(inviteCode, userProfile.firstName)
                             showJoinDialog = false
                         } catch (e: Exception) {
                             // Error handling

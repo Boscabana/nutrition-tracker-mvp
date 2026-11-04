@@ -8,5 +8,6 @@ data class Household(
     val name: String = "",
     val adminUid: String = "",
     val members: List<String> = emptyList(), // List of UIDs
+    val memberNames: Map<String, String> = emptyMap(), // Map of UID -> Nickname
     val inviteCode: String = ""
 )

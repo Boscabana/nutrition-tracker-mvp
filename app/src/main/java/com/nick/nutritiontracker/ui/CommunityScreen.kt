@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -25,6 +26,10 @@ fun CommunityScreen(vm: NutritionViewModel) {
     val household by vm.firebaseManager.household.collectAsState()
     val members = vm.householdMembers
     val currentUser by vm.firebaseManager.currentUser.collectAsState()
+
+    LaunchedEffect(Unit) {
+        vm.refreshHouseholdMembers()
+    }
 
     Column(
         modifier = Modifier

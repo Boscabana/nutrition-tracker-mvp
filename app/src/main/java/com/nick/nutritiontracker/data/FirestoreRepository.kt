@@ -376,13 +376,30 @@ class FirestoreRepository {
 
     suspend fun getHouseholdMembers(uids: List<String>): List<Map<String, String>> {
         val results = mutableListOf<Map<String, String>>()
-        for (uid in uids) {
+        for (uid in uids.filter { it.isNotBlank() }) {
             try {
                 val doc = db.collection("users").document(uid).get().await()
-                val name = doc.getString("firstName") ?: "Unbekannt"
-                results.add(mapOf("uid" to uid, "name" to name))
+                if (doc.exists()) {
+                    val firstName = doc.getString("firstName")
+                    val name = doc.getString("name")
+                    val displayName = doc.getString("displayName")
+                    val email = doc.getString("email")
+                    
+                    val resolvedName = when {
+                        !firstName.isNullOrBlank() -> firstName
+                        !name.isNullOrBlank() -> name
+                        !displayName.isNullOrBlank() -> displayName
+                        !email.isNullOrBlank() -> email.substringBefore("@")
+                        else -> "Unbekannt"
+                    }
+                    Log.d("FirestoreRepository", "Fetched member $uid: $resolvedName")
+                    results.add(mapOf("uid" to uid, "name" to resolvedName))
+                } else {
+                    Log.w("FirestoreRepository", "User doc $uid does not exist in Firestore!")
+                    results.add(mapOf("uid" to uid, "name" to "Unbekannt"))
+                }
             } catch (e: Exception) {
-                Log.e("Firestore", "Failed to fetch user $uid", e)
+                Log.e("FirestoreRepository", "Failed to fetch user $uid", e)
                 results.add(mapOf("uid" to uid, "name" to "Unbekannt"))
             }
         }

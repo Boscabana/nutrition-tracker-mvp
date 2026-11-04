@@ -328,12 +328,38 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                                 }
                         }
                         launch {
-                            val members = firestoreRepository.getHouseholdMembers(household.members)
-                            householdMembers.clear()
-                            householdMembers.addAll(members)
+                            refreshHouseholdMembers()
                         }
                     }
                 }
+            }
+        }
+    }
+
+    fun refreshHouseholdMembers() {
+        val household = firebaseManager.household.value ?: return
+        viewModelScope.launch {
+            try {
+                val myUid = firebaseManager.currentUser.value?.uid
+                val myName = userProfile.firstName.ifBlank { "Mitglied" }
+                if (myUid != null) {
+                    val existingNick = household.memberNames[myUid]
+                    if (existingNick.isNullOrBlank() || (existingNick == "Mitglied" && myName != "Mitglied")) {
+                        firebaseManager.updateHouseholdMemberNickname(household.id, myName)
+                    }
+                }
+
+                householdMembers.clear()
+                val list = household.members.map { uid ->
+                    val nick = household.memberNames[uid]
+                    val finalName = if (!nick.isNullOrBlank()) nick else {
+                        firestoreRepository.getHouseholdMembers(listOf(uid)).firstOrNull()?.get("name") ?: "Unbekannt"
+                    }
+                    mapOf("uid" to uid, "name" to finalName)
+                }
+                householdMembers.addAll(list)
+            } catch (e: Exception) {
+                Log.e("NutritionViewModel", "Error refreshing household members", e)
             }
         }
     }
@@ -2081,44 +2107,55 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun sendFoodToUser(targetUid: String, food: FoodItemEntity) {
+        if (targetUid.isBlank()) return
         val user = firebaseManager.currentUser.value ?: return
-        val message = InboxMessage(
-            fromUid = user.uid,
-            fromName = userProfile.firstName,
-            type = MessageType.FOOD,
-            payloadJson = json.encodeToString(food),
-            timestamp = System.currentTimeMillis()
-        )
-        viewModelScope.launch { firestoreRepository.sendInboxMessage(targetUid, message) }
+        viewModelScope.launch {
+            try {
+                val message = InboxMessage(
+                    fromUid = user.uid,
+                    fromName = userProfile.firstName.ifBlank { "Unbekannter Nutzer" },
+                    type = MessageType.FOOD,
+                    payloadJson = json.encodeToString(food),
+                    timestamp = System.currentTimeMillis()
+                )
+                firestoreRepository.sendInboxMessage(targetUid, message)
+            } catch (e: Exception) {
+                Log.e("NutritionViewModel", "Fehler beim Senden des Nahrungsmittels", e)
+            }
+        }
     }
 
     fun sendRecipeToUser(targetUid: String, meal: MealEntity) {
+        if (targetUid.isBlank()) return
         val user = firebaseManager.currentUser.value ?: return
         viewModelScope.launch {
-            var finalMeal = meal
-            val imageUrl = meal.imageUrl
-            if (imageUrl != null && imageUrl.startsWith("/")) { // Local path
-                val cloudUrl = firestoreRepository.uploadMealImage(user.uid, imageUrl)
-                if (cloudUrl != null) {
-                    finalMeal = meal.copy(imageUrl = cloudUrl)
+            try {
+                var finalMeal = meal
+                val imageUrl = meal.imageUrl
+                if (imageUrl != null && (imageUrl.startsWith("/") || imageUrl.startsWith("file://") || imageUrl.startsWith("content://"))) {
+                    val cloudUrl = firestoreRepository.uploadMealImage(user.uid, imageUrl)
+                    if (cloudUrl != null) {
+                        finalMeal = meal.copy(imageUrl = cloudUrl)
+                    }
                 }
+                
+                val relatedFoods = finalMeal.ingredients.mapNotNull { ing ->
+                    foods.find { it.id == ing.foodItemId }
+                }.distinctBy { it.id }
+
+                val recipeData = RecipeData(meal = finalMeal, relatedFoods = relatedFoods)
+
+                val message = InboxMessage(
+                    fromUid = user.uid,
+                    fromName = userProfile.firstName.ifBlank { "Unbekannter Nutzer" },
+                    type = MessageType.RECIPE,
+                    payloadJson = json.encodeToString(recipeData),
+                    timestamp = System.currentTimeMillis()
+                )
+                firestoreRepository.sendInboxMessage(targetUid, message)
+            } catch (e: Exception) {
+                Log.e("NutritionViewModel", "Fehler beim Senden des Rezeptes", e)
             }
-            
-            // Get all related foods for this meal
-            val relatedFoods = finalMeal.ingredients.mapNotNull { ing ->
-                foods.find { it.id == ing.foodItemId }
-            }.distinctBy { it.id }
-
-            val recipeData = RecipeData(meal = finalMeal, relatedFoods = relatedFoods)
-
-            val message = InboxMessage(
-                fromUid = user.uid,
-                fromName = userProfile.firstName,
-                type = MessageType.RECIPE,
-                payloadJson = json.encodeToString(recipeData),
-                timestamp = System.currentTimeMillis()
-            )
-            firestoreRepository.sendInboxMessage(targetUid, message)
         }
     }
 

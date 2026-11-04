@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.UUID
 
+import com.google.firebase.firestore.SetOptions
+
 class FirebaseManager {
     private val auth = FirebaseAuth.getInstance()
     private val db = FirebaseFirestore.getInstance()
@@ -138,20 +140,22 @@ class FirebaseManager {
         auth.signInWithEmailAndPassword(email, password).await()
     }
 
-    suspend fun createHousehold(name: String): String {
+    suspend fun createHousehold(name: String, memberNickname: String = ""): String {
         val user = auth.currentUser ?: throw Exception("Not logged in")
         val inviteCode = UUID.randomUUID().toString().take(6).uppercase()
+        val nickname = memberNickname.ifBlank { "Mitglied" }
         val newHousehold = Household(
             name = name,
             adminUid = user.uid,
             members = listOf(user.uid),
+            memberNames = mapOf(user.uid to nickname),
             inviteCode = inviteCode
         )
-        val docRef = db.collection("households").add(newHousehold).await()
+        db.collection("households").add(newHousehold).await()
         return inviteCode
     }
 
-    suspend fun joinHousehold(inviteCode: String) {
+    suspend fun joinHousehold(inviteCode: String, memberNickname: String = "") {
         val user = auth.currentUser ?: throw Exception("Not logged in")
         val snapshot = db.collection("households")
             .whereEqualTo("inviteCode", inviteCode.uppercase())
@@ -161,11 +165,34 @@ class FirebaseManager {
         if (!snapshot.isEmpty) {
             val doc = snapshot.documents.first()
             val members = doc.get("members") as? List<String> ?: emptyList()
+            val memberNames = (doc.get("memberNames") as? Map<String, String>)?.toMutableMap() ?: mutableMapOf()
+            
+            val nickname = memberNickname.ifBlank { "Mitglied" }
+            memberNames[user.uid] = nickname
+
+            val updates = mutableMapOf<String, Any>(
+                "memberNames" to memberNames
+            )
             if (!members.contains(user.uid)) {
-                doc.reference.update("members", members + user.uid).await()
+                updates["members"] = members + user.uid
             }
+
+            doc.reference.update(updates).await()
         } else {
-            throw Exception("Invalid invite code")
+            throw Exception("Ungültiger Einladungscode")
+        }
+    }
+
+    suspend fun updateHouseholdMemberNickname(householdId: String, nickname: String) {
+        val user = auth.currentUser ?: return
+        try {
+            db.collection("households")
+                .document(householdId)
+                .update("memberNames.${user.uid}", nickname)
+                .await()
+            Log.d("FirebaseManager", "Updated household nickname for ${user.uid} to '$nickname'")
+        } catch (e: Exception) {
+            Log.e("FirebaseManager", "Failed to update household nickname", e)
         }
     }
 
@@ -175,7 +202,28 @@ class FirebaseManager {
 
     suspend fun syncProfileToFirestore(profile: UserProfile) {
         val user = auth.currentUser ?: return
-        db.collection("users").document(user.uid).set(profile).await()
+        try {
+            val nameToUse = profile.firstName.ifBlank {
+                user.displayName?.ifBlank { null } ?: user.email?.substringBefore("@") ?: "Mitglied"
+            }
+            val profileToSave = profile.copy(firstName = nameToUse)
+            
+            val dataMap = hashMapOf<String, Any?>(
+                "firstName" to profileToSave.firstName,
+                "age" to profileToSave.age,
+                "weightKg" to profileToSave.weightKg,
+                "heightCm" to profileToSave.heightCm,
+                "setupCompleted" to profileToSave.setupCompleted,
+                "isPremium" to profileToSave.premium,
+                "premium" to profileToSave.premium,
+                "fcmToken" to profileToSave.fcmToken,
+                "email" to user.email
+            )
+            db.collection("users").document(user.uid).set(dataMap, SetOptions.merge()).await()
+            Log.d("FirebaseManager", "Profile successfully synced to Firestore for ${user.uid}: firstName='$nameToUse'")
+        } catch (e: Exception) {
+            Log.e("FirebaseManager", "FAILED to sync profile to Firestore for ${user.uid}", e)
+        }
     }
 
     suspend fun getUserName(uid: String): String {
