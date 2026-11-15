@@ -19,7 +19,7 @@ class ConfigManager {
         // Set default values
         val defaults = mapOf(
             "gemini_model_name" to "gemini-2.0-flash",
-            "gemini_max_output_tokens" to 1000L,
+            "gemini_max_output_tokens" to 2048L,
             "gemini_temperature" to 0.7,
             "ai_image_resize_px" to 768L,
             "free_ai_limit_per_day" to 3L
@@ -41,7 +41,7 @@ class ConfigManager {
 
     // Cockpit Values
     val geminiModelName: String get() = remoteConfig.getString("gemini_model_name")
-    val maxOutputTokens: Int get() = remoteConfig.getLong("gemini_max_output_tokens").toInt()
+    val maxOutputTokens: Int get() = remoteConfig.getLong("gemini_max_output_tokens").toInt().coerceAtLeast(1024)
     val temperature: Double get() = remoteConfig.getDouble("gemini_temperature")
     val imageResizePx: Int get() = remoteConfig.getLong("ai_image_resize_px").toInt()
     val freeAiLimitPerDay: Int get() = remoteConfig.getLong("free_ai_limit_per_day").toInt()

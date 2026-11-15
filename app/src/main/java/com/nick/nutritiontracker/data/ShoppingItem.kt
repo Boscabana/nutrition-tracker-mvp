@@ -1,10 +1,12 @@
 package com.nick.nutritiontracker.data
 
 import androidx.annotation.Keep
+import com.google.firebase.firestore.IgnoreExtraProperties
 import com.google.firebase.firestore.PropertyName
 import kotlinx.serialization.Serializable
 
 @Keep
+@IgnoreExtraProperties
 @Serializable
 data class ShoppingItem(
     var id: String = "",

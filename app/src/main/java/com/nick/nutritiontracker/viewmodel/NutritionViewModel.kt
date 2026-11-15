@@ -38,6 +38,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     private val json = Json {
         ignoreUnknownKeys = true
         prettyPrint = true
+        coerceInputValues = true
+        encodeDefaults = true
     }
 
     val healthConnectManager = HealthConnectManager(application)
@@ -867,6 +869,40 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 }
             } catch (e: Exception) {
                 Log.e("NutritionViewModel", "AI analysis failed", e)
+                aiErrorMessage = "Fehler: ${e.localizedMessage}"
+            } finally {
+                isAnalyzingImage = false
+            }
+        }
+    }
+
+    fun analyzeMealText(text: String, weightGrams: Double?, isUserPremium: Boolean) {
+        if (!isUserPremium) {
+            aiErrorMessage = "Premium erforderlich."
+            return
+        }
+        isAnalyzingImage = true
+        aiErrorMessage = null
+        aiEstimationResult = null
+        viewModelScope.launch {
+            try {
+                val result = geminiService.estimateNutritionFromText(text, weightGrams, selectedAiModel)
+                aiEstimationResult = result.data
+                
+                // Log usage
+                val user = firebaseManager.currentUser.value
+                if (user != null && result.usage != null) {
+                    val usageMap = mapOf(
+                        "feature" to "text_analysis",
+                        "model" to (selectedAiModel),
+                        "promptTokens" to (result.usage?.promptTokenCount ?: 0),
+                        "candidatesTokens" to (result.usage?.candidatesTokenCount ?: 0),
+                        "totalTokens" to (result.usage?.totalTokenCount ?: 0)
+                    )
+                    firestoreRepository.logAiUsage(user.uid, usageMap)
+                }
+            } catch (e: Exception) {
+                Log.e("NutritionViewModel", "AI text analysis failed", e)
                 aiErrorMessage = "Fehler: ${e.localizedMessage}"
             } finally {
                 isAnalyzingImage = false
@@ -2329,80 +2365,116 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun saveFoods() = viewModelScope.launch(Dispatchers.IO) {
-        val data = foods.toList()
-        prefs.edit().putString("foods", json.encodeToString(data)).apply()
+        try {
+            val data = foods.toList()
+            prefs.edit().putString("foods", json.encodeToString(data)).apply()
+        } catch (e: Exception) {
+            Log.e("NutritionViewModel", "Error saving foods", e)
+        }
     }
 
     private fun saveMeals() = viewModelScope.launch(Dispatchers.IO) {
-        val data = meals.toList()
-        prefs.edit().putString("meals", json.encodeToString(data)).apply()
+        try {
+            val data = meals.toList()
+            prefs.edit().putString("meals", json.encodeToString(data)).apply()
+        } catch (e: Exception) {
+            Log.e("NutritionViewModel", "Error saving meals", e)
+        }
     }
 
     private fun saveEntries() = viewModelScope.launch(Dispatchers.IO) {
-        val data = allEntries.toList()
-        prefs.edit().putString("entries", json.encodeToString(data)).apply()
+        try {
+            val data = allEntries.toList()
+            prefs.edit().putString("entries", json.encodeToString(data)).apply()
+        } catch (e: Exception) {
+            Log.e("NutritionViewModel", "Error saving entries", e)
+        }
     }
 
     private fun saveCategories() = viewModelScope.launch(Dispatchers.IO) {
-        val data = categories.toList()
-        prefs.edit().putString("categories", json.encodeToString(data)).apply()
+        try {
+            val data = categories.toList()
+            prefs.edit().putString("categories", json.encodeToString(data)).apply()
+        } catch (e: Exception) {
+            Log.e("NutritionViewModel", "Error saving categories", e)
+        }
     }
 
     private fun savePlannedMealPool() = viewModelScope.launch(Dispatchers.IO) {
-        val data = plannedMealPool.toList()
-        prefs.edit().putString("planned_meal_pool", json.encodeToString(data)).apply()
+        try {
+            val data = plannedMealPool.toList()
+            prefs.edit().putString("planned_meal_pool", json.encodeToString(data)).apply()
+        } catch (e: Exception) {
+            Log.e("NutritionViewModel", "Error saving planned meal pool", e)
+        }
     }
 
     private fun savePlannedEntries() = viewModelScope.launch(Dispatchers.IO) {
-        val data = plannedEntries.toList()
-        prefs.edit().putString("planned_entries", json.encodeToString(data)).apply()
+        try {
+            val data = plannedEntries.toList()
+            prefs.edit().putString("planned_entries", json.encodeToString(data)).apply()
+        } catch (e: Exception) {
+            Log.e("NutritionViewModel", "Error saving planned entries", e)
+        }
     }
 
     private fun saveShoppingList() = viewModelScope.launch(Dispatchers.IO) {
-        val data = shoppingList.toList()
-        prefs.edit().putString("shopping_list", json.encodeToString(data)).apply()
+        try {
+            val data = shoppingList.toList()
+            prefs.edit().putString("shopping_list", json.encodeToString(data)).apply()
+        } catch (e: Exception) {
+            Log.e("NutritionViewModel", "Error saving shopping list", e)
+        }
     }
 
     private fun saveWeightHistory() = viewModelScope.launch(Dispatchers.IO) {
-        val data = weightHistory.toList()
-        prefs.edit().putString("weight_history", json.encodeToString(data)).apply()
+        try {
+            val data = weightHistory.toList()
+            prefs.edit().putString("weight_history", json.encodeToString(data)).apply()
+        } catch (e: Exception) {
+            Log.e("NutritionViewModel", "Error saving weight history", e)
+        }
     }
 
     private fun saveVerifications() = viewModelScope.launch(Dispatchers.IO) {
-        val data = dayVerifications.toMap()
-        prefs.edit().putString("verifications", json.encodeToString(data)).apply()
+        try {
+            val data = dayVerifications.toMap()
+            prefs.edit().putString("verifications", json.encodeToString(data)).apply()
+        } catch (e: Exception) {
+            Log.e("NutritionViewModel", "Error saving verifications", e)
+        }
     }
 
     private fun saveActivity() = viewModelScope.launch(Dispatchers.IO) {
-        val steps = dailySteps.toMap()
-        val cals = dailyTotalCalories.toMap()
-        val sessions = dailyExerciseSessions.toMap()
-        prefs.edit().let {
-            it.putString("daily_steps", json.encodeToString(steps))
-            it.putString("daily_total_kcal", json.encodeToString(cals))
-            it.putString("daily_sessions", json.encodeToString(sessions))
-            it.apply()
+        try {
+            val steps = dailySteps.toMap()
+            val cals = dailyTotalCalories.toMap()
+            val sessions = dailyExerciseSessions.toMap()
+            prefs.edit().let {
+                it.putString("daily_steps", json.encodeToString(steps))
+                it.putString("daily_total_kcal", json.encodeToString(cals))
+                it.putString("daily_sessions", json.encodeToString(sessions))
+                it.apply()
+            }
+        } catch (e: Exception) {
+            Log.e("NutritionViewModel", "Error saving activity", e)
         }
     }
 
     private fun loadLocalState() {
-        try {
-            prefs.getString("foods", null)?.let { foods.addAll(json.decodeFromString<List<FoodItemEntity>>(it)) }
-            prefs.getString("meals", null)?.let { meals.addAll(json.decodeFromString<List<MealEntity>>(it)) }
-            prefs.getString("entries", null)?.let { allEntries.addAll(json.decodeFromString<List<FoodEntryEntity>>(it)) }
-            prefs.getString("categories", null)?.let { categories.addAll(json.decodeFromString<List<String>>(it)) }
-            prefs.getString("planned_entries", null)?.let { plannedEntries.addAll(json.decodeFromString<List<FoodEntryEntity>>(it)) }
-            prefs.getString("planned_meal_pool", null)?.let { plannedMealPool.addAll(json.decodeFromString<List<PlannedMealPoolEntity>>(it)) }
-            prefs.getString("shopping_list", null)?.let { shoppingList.addAll(json.decodeFromString<List<ShoppingItem>>(it)) }
-            prefs.getString("weight_history", null)?.let { weightHistory.addAll(json.decodeFromString<List<WeightEntry>>(it)) }
-            prefs.getString("verifications", null)?.let { dayVerifications.putAll(json.decodeFromString<Map<String, Boolean>>(it)) }
-            prefs.getString("daily_steps", null)?.let { dailySteps.putAll(json.decodeFromString<Map<String, Int>>(it)) }
-            prefs.getString("daily_total_kcal", null)?.let { dailyTotalCalories.putAll(json.decodeFromString<Map<String, Double>>(it)) }
-            prefs.getString("daily_sessions", null)?.let { dailyExerciseSessions.putAll(json.decodeFromString<Map<String, List<ExerciseSessionInfo>>>(it)) }
-            updateNextIds()
-        } catch (e: Exception) {
-            Log.e("NutritionViewModel", "Error loading local state", e)
-        }
+        try { prefs.getString("foods", null)?.let { foods.addAll(json.decodeFromString<List<FoodItemEntity>>(it)) } } catch (e: Exception) { Log.e("NutritionViewModel", "Error loading foods", e) }
+        try { prefs.getString("meals", null)?.let { meals.addAll(json.decodeFromString<List<MealEntity>>(it)) } } catch (e: Exception) { Log.e("NutritionViewModel", "Error loading meals", e) }
+        try { prefs.getString("entries", null)?.let { allEntries.addAll(json.decodeFromString<List<FoodEntryEntity>>(it)) } } catch (e: Exception) { Log.e("NutritionViewModel", "Error loading entries", e) }
+        try { prefs.getString("categories", null)?.let { categories.addAll(json.decodeFromString<List<String>>(it)) } } catch (e: Exception) { Log.e("NutritionViewModel", "Error loading categories", e) }
+        try { prefs.getString("planned_entries", null)?.let { plannedEntries.addAll(json.decodeFromString<List<FoodEntryEntity>>(it)) } } catch (e: Exception) { Log.e("NutritionViewModel", "Error loading planned_entries", e) }
+        try { prefs.getString("planned_meal_pool", null)?.let { plannedMealPool.addAll(json.decodeFromString<List<PlannedMealPoolEntity>>(it)) } } catch (e: Exception) { Log.e("NutritionViewModel", "Error loading planned_meal_pool", e) }
+        try { prefs.getString("shopping_list", null)?.let { shoppingList.addAll(json.decodeFromString<List<ShoppingItem>>(it)) } } catch (e: Exception) { Log.e("NutritionViewModel", "Error loading shopping_list", e); prefs.edit().remove("shopping_list").apply() }
+        try { prefs.getString("weight_history", null)?.let { weightHistory.addAll(json.decodeFromString<List<WeightEntry>>(it)) } } catch (e: Exception) { Log.e("NutritionViewModel", "Error loading weight_history", e) }
+        try { prefs.getString("verifications", null)?.let { dayVerifications.putAll(json.decodeFromString<Map<String, Boolean>>(it)) } } catch (e: Exception) { Log.e("NutritionViewModel", "Error loading verifications", e) }
+        try { prefs.getString("daily_steps", null)?.let { dailySteps.putAll(json.decodeFromString<Map<String, Int>>(it)) } } catch (e: Exception) { Log.e("NutritionViewModel", "Error loading daily_steps", e) }
+        try { prefs.getString("daily_total_kcal", null)?.let { dailyTotalCalories.putAll(json.decodeFromString<Map<String, Double>>(it)) } } catch (e: Exception) { Log.e("NutritionViewModel", "Error loading daily_total_kcal", e) }
+        try { prefs.getString("daily_sessions", null)?.let { dailyExerciseSessions.putAll(json.decodeFromString<Map<String, List<ExerciseSessionInfo>>>(it)) } } catch (e: Exception) { Log.e("NutritionViewModel", "Error loading daily_sessions", e) }
+        updateNextIds()
     }
 
     private fun updateNextIds() {

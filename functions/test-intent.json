@@ -1,0 +1,46 @@
+{
+  "version": "1.0",
+  "session": {
+    "new": true,
+    "sessionId": "test-session",
+    "application": {
+      "applicationId": "amzn1.ask.skill.66033708-353a-4464-86c4-fe589072c965"
+    },
+    "user": {
+      "userId": "amzn1.ask.account.AMATCFTALIYNAEQ6BDJN7Y25TORGIEXMN2DNULWCANZIHKSUDNSGEPXLVTV3B7RMID43P26BUQBHTZMDYGLZBRFZRFP6TOXCA6BSDLHZJF5F4B3242K4STXKJNVJDVWIVPRTGN6BJP2GTQ5R5P23R6LSSCOTBKGZCLQF62TLFPT4LAOHCDOIM3Q5RE2HZCPYHC7FKHG2HHG2K6RX4H54I4RCOTSM6LANONVLJCLXTE",
+      "accessToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjgxODA1ZTc2ZmQ1ZmEyZmQ5MWMyYmIzOWU0YjdlZjA1NDY5YmRkY2UiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL3NlY3VyZXRva2VuLmdvb2dsZS5jb20vbnV0cml0aW9uLW12cC1hYTI5MyIsImF1ZCI6Im51dHJpdGlvbi1tdnAtYWEyOTMiLCJhdXRoX3RpbWUiOjE3OTQ2ODk1NTMsInVzZXJfaWQiOiJHUzJLalZSWTZYYm9wbkJhYUNkc2JQSEpyRHIyIiwic3ViIjoiR1MyS2pWUlk2WGJvcG5CYWFDZHNiUEhKckRyMiIsImlhdCI6MTc5NDY4OTU1MywiZXhwIjoxNzk0NjkzMTUzLCJlbWFpbCI6InN0ZWl0ei5uQGhvdG1haWwuZGUiLCJlbWFpbF92ZXJpZmllZCI6ZmFsc2UsImZpcmViYXNlIjp7ImlkZW50aXRpZXMiOnsiZW1haWwiOlsic3RlaXR6Lm5AaG90bWFpbC5kZSJdfSwic2lnbl9pbl9wcm92aWRlciI6InBhc3N3b3JkIn19.jHKuz8-a3NzKHdinn2dIINzVNkWv-DZYD2W98NntKutBHcQQxItxdllDWORd4CWhtBWcPUGhDpv705_E8BRLpQTgFT3y-Q5dA07-HORCbRh0-92skmdpCkEIZ_X8BHkNLXC7FU7YLs_eOfLldWtUUDWRpDrJQbda0ETR20409GA6iUrOehNa9EoXjPOJadIIl2TwFdZIYznep2IwKFSORWrU2YjHLUclOa31rxpU1Vd1VuDZ5sjPX_r9dGsxH35ztvEOrqxz0m0Es9NEwpi-f7fsjhEkSaxofdwGhp6HDQW0W2EiAVvdpLcrJncw6b-nMuIm9txoyPHJM63Rzx2fSw"
+    }
+  },
+  "context": {
+    "System": {
+      "application": {
+        "applicationId": "amzn1.ask.skill.66033708-353a-4464-86c4-fe589072c965"
+      },
+      "user": {
+        "userId": "amzn1.ask.account.AMATCFTALIYNAEQ6BDJN7Y25TORGIEXMN2DNULWCANZIHKSUDNSGEPXLVTV3B7RMID43P26BUQBHTZMDYGLZBRFZRFP6TOXCA6BSDLHZJF5F4B3242K4STXKJNVJDVWIVPRTGN6BJP2GTQ5R5P23R6LSSCOTBKGZCLQF62TLFPT4LAOHCDOIM3Q5RE2HZCPYHC7FKHG2HHG2K6RX4H54I4RCOTSM6LANONVLJCLXTE",
+        "accessToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6IjgxODA1ZTc2ZmQ1ZmEyZmQ5MWMyYmIzOWU0YjdlZjA1NDY5YmRkY2UiLCJ0eXAiOiJKV1QifQ.eyJpc3MiOiJodHRwczovL3NlY3VyZXRva2VuLmdvb2dsZS5jb20vbnV0cml0aW9uLW12cC1hYTI5MyIsImF1ZCI6Im51dHJpdGlvbi1tdnAtYWEyOTMiLCJhdXRoX3RpbWUiOjE3OTQ2ODk1NTMsInVzZXJfaWQiOiJHUzJLalZSWTZYYm9wbkJhYUNkc2JQSEpyRHIyIiwic3ViIjoiR1MyS2pWUlk2WGJvcG5CYWFDZHNiUEhKckRyMiIsImlhdCI6MTc5NDY4OTU1MywiZXhwIjoxNzk0NjkzMTUzLCJlbWFpbCI6InN0ZWl0ei5uQGhvdG1haWwuZGUiLCJlbWFpbF92ZXJpZmllZCI6ZmFsc2UsImZpcmViYXNlIjp7ImlkZW50aXRpZXMiOnsiZW1haWwiOlsic3RlaXR6Lm5AaG90bWFpbC5kZSJdfSwic2lnbl9pbl9wcm92aWRlciI6InBhc3N3b3JkIn19.jHKuz8-a3NzKHdinn2dIINzVNkWv-DZYD2W98NntKutBHcQQxItxdllDWORd4CWhtBWcPUGhDpv705_E8BRLpQTgFT3y-Q5dA07-HORCbRh0-92skmdpCkEIZ_X8BHkNLXC7FU7YLs_eOfLldWtUUDWRpDrJQbda0ETR20409GA6iUrOehNa9EoXjPOJadIIl2TwFdZIYznep2IwKFSORWrU2YjHLUclOa31rxpU1Vd1VuDZ5sjPX_r9dGsxH35ztvEOrqxz0m0Es9NEwpi-f7fsjhEkSaxofdwGhp6HDQW0W2EiAVvdpLcrJncw6b-nMuIm9txoyPHJM63Rzx2fSw"
+      },
+      "device": {
+        "deviceId": "test-device"
+      },
+      "apiEndpoint": "https://api.eu.amazonalexa.com"
+    }
+  },
+  "request": {
+    "type": "IntentRequest",
+    "requestId": "test-request-intent",
+    "timestamp": "2026-11-14T21:50:00Z",
+    "locale": "de-DE",
+    "intent": {
+      "name": "AddShoppingItemIntent",
+      "confirmationStatus": "NONE",
+      "slots": {
+        "Artikel": {
+          "name": "Artikel",
+          "value": "200 ml Milch",
+          "confirmationStatus": "NONE"
+        }
+      }
+    }
+  }
+}

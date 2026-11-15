@@ -819,7 +819,7 @@ private fun TodayScreen(
         AlertDialog(
             onDismissRequest = {},
             confirmButton = {},
-            title = { Text("Analysiere Bild...") },
+            title = { Text("Analysiere mit KI...") },
             text = {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
@@ -836,12 +836,12 @@ private fun TodayScreen(
                 // Create a temporary food item from the estimation
                 val food = FoodItemEntity(
                     name = result.name,
-                    kcalPer100g = (result.kcal / result.grams) * 100.0,
-                    proteinPer100g = (result.protein / result.grams) * 100.0,
-                    carbsPer100g = (result.carbs / result.grams) * 100.0,
-                    sugarPer100g = (result.sugar / result.grams) * 100.0,
-                    fatPer100g = (result.fat / result.grams) * 100.0,
-                    saturatedFatPer100g = (result.saturatedFat / result.grams) * 100.0,
+                    kcalPer100g = if (result.grams > 0) (result.kcal / result.grams) * 100.0 else result.kcal,
+                    proteinPer100g = if (result.grams > 0) (result.protein / result.grams) * 100.0 else result.protein,
+                    carbsPer100g = if (result.grams > 0) (result.carbs / result.grams) * 100.0 else result.carbs,
+                    sugarPer100g = if (result.grams > 0) (result.sugar / result.grams) * 100.0 else result.sugar,
+                    fatPer100g = if (result.grams > 0) (result.fat / result.grams) * 100.0 else result.fat,
+                    saturatedFatPer100g = if (result.grams > 0) (result.saturatedFat / result.grams) * 100.0 else result.saturatedFat,
                     baseUnit = "g"
                 )
                 // Add as entry (NutritionViewModel's addEntry will handle the rest)
@@ -1335,6 +1335,7 @@ fun AddEntryCard(
     val context = LocalContext.current
 
     var showImageSourceDialog by remember { mutableStateOf(false) }
+    var showTextPromptDialog by remember { mutableStateOf(false) }
     var tempImageUri by remember { mutableStateOf<android.net.Uri?>(null) }
 
     var showAdOfferDialog by remember { mutableStateOf(false) }
@@ -1398,8 +1399,8 @@ fun AddEntryCard(
     if (showAdOfferDialog) {
         AlertDialog(
             onDismissRequest = { showAdOfferDialog = false },
-            title = { Text("KI-Bildanalyse 🤖") },
-            text = { Text("Diese Funktion ist Teil von Premium. Du kannst ein kurzes Video ansehen, um diese Mahlzeit einmalig kostenlos per KI zu analysieren.") },
+            title = { Text("KI-Analyse 🤖") },
+            text = { Text("Diese Funktion ist Teil von Premium. Du kannst ein kurzes Video ansehen, um eine KI-Analyse einmalig kostenlos durchzuführen.") },
             confirmButton = {
                 Button(onClick = {
                     showAdOfferDialog = false
@@ -1572,7 +1573,7 @@ fun AddEntryCard(
                     if (showImageSourceDialog) {
                         AlertDialog(
                             onDismissRequest = { showImageSourceDialog = false },
-                            title = { Text("Bildquelle wählen") },
+                            title = { Text("KI-Eingabe wählen") },
                             text = {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     ListItem(
@@ -1613,9 +1614,68 @@ fun AddEntryCard(
                                             imagePicker.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
                                         }
                                     )
+                                    ListItem(
+                                        headlineContent = { Text("Texteingabe") },
+                                        leadingContent = { Icon(Icons.Default.Edit, null) },
+                                        modifier = Modifier.clickable {
+                                            showImageSourceDialog = false
+                                            showTextPromptDialog = true
+                                        }
+                                    )
                                 }
                             },
                             confirmButton = {}
+                        )
+                    }
+
+                    if (showTextPromptDialog) {
+                        var promptText by remember { mutableStateOf("") }
+                        var weightText by remember { mutableStateOf("") }
+
+                        AlertDialog(
+                            onDismissRequest = { showTextPromptDialog = false },
+                            title = { Text("KI-Texteingabe 🤖") },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Text(
+                                        "Beschreibe deine Mahlzeit (z.B. 'Crepe mit Kinderschokolade'). Die KI berechnet Nährwerte und Gewicht.",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
+                                    AutoSelectTextField(
+                                        value = promptText,
+                                        onValueChange = { promptText = it },
+                                        label = { Text("Mahlzeit / Gericht") },
+                                        placeholder = { Text("z.B. Crepe mit Kinderschokolade") },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    AutoSelectTextField(
+                                        value = weightText,
+                                        onValueChange = { weightText = it },
+                                        label = { Text("Gewicht in g (optional)") },
+                                        placeholder = { Text("z.B. 150") },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                    )
+                                }
+                            },
+                            confirmButton = {
+                                Button(
+                                    enabled = promptText.isNotBlank(),
+                                    onClick = {
+                                        showTextPromptDialog = false
+                                        val weightGrams = weightText.num().takeIf { it > 0 }
+                                        vm.analyzeMealText(promptText.trim(), weightGrams, isPremium || adRewardActive)
+                                        adRewardActive = false
+                                    }
+                                ) {
+                                    Text("Analysieren")
+                                }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showTextPromptDialog = false }) {
+                                    Text("Abbrechen")
+                                }
+                            }
                         )
                     }
 
@@ -1630,7 +1690,7 @@ fun AddEntryCard(
                         shape = RoundedCornerShape(12.dp),
                         colors = IconButtonDefaults.filledIconButtonColors(containerColor = MaterialTheme.colorScheme.tertiary)
                     ) {
-                        Icon(Icons.Default.AutoAwesome, "AI Bilderkennung")
+                        Icon(Icons.Default.AutoAwesome, "KI-Mahlzeitenanalyse")
                     }
                 }
 
@@ -3734,6 +3794,15 @@ fun AiEstimationDialog(
     onDismiss: () -> Unit,
     onConfirm: (AiEstimationResult) -> Unit
 ) {
+    val initialGrams = if (result.grams > 0) result.grams else 100.0
+
+    var kcalPer100 by remember { mutableDoubleStateOf(if (initialGrams > 0) (result.kcal / initialGrams) * 100.0 else result.kcal) }
+    var proteinPer100 by remember { mutableDoubleStateOf(if (initialGrams > 0) (result.protein / initialGrams) * 100.0 else result.protein) }
+    var carbsPer100 by remember { mutableDoubleStateOf(if (initialGrams > 0) (result.carbs / initialGrams) * 100.0 else result.carbs) }
+    var sugarPer100 by remember { mutableDoubleStateOf(if (initialGrams > 0) (result.sugar / initialGrams) * 100.0 else result.sugar) }
+    var fatPer100 by remember { mutableDoubleStateOf(if (initialGrams > 0) (result.fat / initialGrams) * 100.0 else result.fat) }
+    var saturatedFatPer100 by remember { mutableDoubleStateOf(if (initialGrams > 0) (result.saturatedFat / initialGrams) * 100.0 else result.saturatedFat) }
+
     var name by remember { mutableStateOf(result.name) }
     var kcal by remember { mutableStateOf(result.kcal.roundString()) }
     var protein by remember { mutableStateOf(result.protein.roundString()) }
@@ -3741,7 +3810,7 @@ fun AiEstimationDialog(
     var sugar by remember { mutableStateOf(result.sugar.roundString()) }
     var fat by remember { mutableStateOf(result.fat.roundString()) }
     var saturatedFat by remember { mutableStateOf(result.saturatedFat.roundString()) }
-    var grams by remember { mutableStateOf(result.grams.roundString()) }
+    var grams by remember { mutableStateOf(initialGrams.roundString()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -3753,23 +3822,117 @@ fun AiEstimationDialog(
             ) {
                 Text("Die AI hat folgendes erkannt. Bitte prüfe die Werte:", style = MaterialTheme.typography.bodySmall)
                 
-                AutoSelectTextField(value = name, onValueChange = { name = it }, label = { Text("Gericht") }, modifier = Modifier.fillMaxWidth())
+                AutoSelectTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Gericht") },
+                    modifier = Modifier.fillMaxWidth()
+                )
                 
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AutoSelectTextField(value = kcal, onValueChange = { kcal = it }, label = { Text("Kalorien") }, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                    AutoSelectTextField(value = grams, onValueChange = { grams = it }, label = { Text("Gewicht (g)") }, modifier = Modifier.weight(1f), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                    AutoSelectTextField(
+                        value = kcal,
+                        onValueChange = { newKcalStr ->
+                            kcal = newKcalStr
+                            val g = grams.num()
+                            if (g > 0) {
+                                kcalPer100 = (newKcalStr.num() / g) * 100.0
+                            }
+                        },
+                        label = { Text("Kalorien") },
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    AutoSelectTextField(
+                        value = grams,
+                        onValueChange = { newGramsStr ->
+                            grams = newGramsStr
+                            val g = newGramsStr.num()
+                            if (g > 0) {
+                                kcal = (kcalPer100 * g / 100.0).roundString()
+                                protein = (proteinPer100 * g / 100.0).roundString()
+                                carbs = (carbsPer100 * g / 100.0).roundString()
+                                sugar = (sugarPer100 * g / 100.0).roundString()
+                                fat = (fatPer100 * g / 100.0).roundString()
+                                saturatedFat = (saturatedFatPer100 * g / 100.0).roundString()
+                            }
+                        },
+                        label = { Text("Gewicht (g)") },
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
                 }
 
                 Text("Makronährstoffe (Gesamt)", fontWeight = FontWeight.Bold)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AutoSelectTextField(value = protein, onValueChange = { protein = it }, label = { Text("Protein") }, modifier = Modifier.weight(1f))
-                    AutoSelectTextField(value = carbs, onValueChange = { carbs = it }, label = { Text("KH") }, modifier = Modifier.weight(1f))
+                    AutoSelectTextField(
+                        value = protein,
+                        onValueChange = { newProteinStr ->
+                            protein = newProteinStr
+                            val g = grams.num()
+                            if (g > 0) {
+                                proteinPer100 = (newProteinStr.num() / g) * 100.0
+                            }
+                        },
+                        label = { Text("Protein") },
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    AutoSelectTextField(
+                        value = carbs,
+                        onValueChange = { newCarbsStr ->
+                            carbs = newCarbsStr
+                            val g = grams.num()
+                            if (g > 0) {
+                                carbsPer100 = (newCarbsStr.num() / g) * 100.0
+                            }
+                        },
+                        label = { Text("KH") },
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AutoSelectTextField(value = sugar, onValueChange = { sugar = it }, label = { Text("davon Zucker") }, modifier = Modifier.weight(1f))
-                    AutoSelectTextField(value = fat, onValueChange = { fat = it }, label = { Text("Fett") }, modifier = Modifier.weight(1f))
+                    AutoSelectTextField(
+                        value = sugar,
+                        onValueChange = { newSugarStr ->
+                            sugar = newSugarStr
+                            val g = grams.num()
+                            if (g > 0) {
+                                sugarPer100 = (newSugarStr.num() / g) * 100.0
+                            }
+                        },
+                        label = { Text("davon Zucker") },
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    AutoSelectTextField(
+                        value = fat,
+                        onValueChange = { newFatStr ->
+                            fat = newFatStr
+                            val g = grams.num()
+                            if (g > 0) {
+                                fatPer100 = (newFatStr.num() / g) * 100.0
+                            }
+                        },
+                        label = { Text("Fett") },
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
                 }
-                AutoSelectTextField(value = saturatedFat, onValueChange = { saturatedFat = it }, label = { Text("davon gesättigt") }, modifier = Modifier.fillMaxWidth())
+                AutoSelectTextField(
+                    value = saturatedFat,
+                    onValueChange = { newSatFatStr ->
+                        saturatedFat = newSatFatStr
+                        val g = grams.num()
+                        if (g > 0) {
+                            saturatedFatPer100 = (newSatFatStr.num() / g) * 100.0
+                        }
+                    },
+                    label = { Text("davon gesättigt") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
                 
                 if (result.confidence > 0) {
                     Text("Vertrauen der AI: ${(result.confidence * 100).toInt()}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)

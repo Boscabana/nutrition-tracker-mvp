@@ -55,6 +55,21 @@ class GeminiService(private val config: ConfigManager) {
         }
     }
 
+    suspend fun estimateNutritionFromText(
+        promptText: String,
+        weightGrams: Double? = null,
+        preferredModel: String? = null
+    ): GeminiResult<AiEstimationResult> {
+        val modelToUse = preferredModel ?: config.geminiModelName
+        Log.d("GeminiService", "Analyzing text with Firebase AI Logic ($region) model: $modelToUse")
+        return try {
+            callGeminiText(promptText, weightGrams, modelToUse)
+        } catch (e: Exception) {
+            Log.e("GeminiService", "AI Logic text model failed: $modelToUse", e)
+            throw e
+        }
+    }
+
     suspend fun testModelAvailability(modelName: String): AiModelStatus {
         return try {
             val model = getModel(modelName)
@@ -104,6 +119,56 @@ class GeminiService(private val config: ConfigManager) {
         if (cleanJson.isBlank()) return GeminiResult(null, response.usageMetadata)
         
         return GeminiResult(json.decodeFromString<AiEstimationResult>(cleanJson), response.usageMetadata)
+    }
+
+    private suspend fun callGeminiText(
+        promptText: String,
+        weightGrams: Double?,
+        modelName: String
+    ): GeminiResult<AiEstimationResult> {
+        val model = getModel(modelName)
+        
+        val weightInstruction = if (weightGrams != null && weightGrams > 0) {
+            "The portion weight is specified by the user as EXACTLY $weightGrams grams. Calculate and scale all nutritional values specifically for this portion of $weightGrams grams."
+        } else {
+            "Estimate a realistic standard portion weight in grams for this food item and calculate total nutritional values for that portion."
+        }
+
+        val prompt = """
+            Analyse this food item / meal description: "$promptText".
+            $weightInstruction
+            
+            Return ONLY a valid JSON object in the following format:
+            {
+              "name": "Dish Name",
+              "kcal": 0.0,
+              "protein": 0.0,
+              "carbs": 0.0,
+              "sugar": 0.0,
+              "fat": 0.0,
+              "saturatedFat": 0.0,
+              "grams": 0.0,
+              "confidence": 0.0
+            }
+            All values should be for the entire portion weight ("grams").
+            Language: German (for the name field)
+        """.trimIndent()
+
+        val response = model.generateContent(prompt)
+        val responseText = response.text ?: ""
+        Log.d("GeminiService", "Raw AI Logic Text Response ($modelName): ${responseText.take(100)}...")
+        
+        val cleanJson = extractJson(responseText)
+        if (cleanJson.isBlank()) return GeminiResult(null, response.usageMetadata)
+        
+        val estimation = json.decodeFromString<AiEstimationResult>(cleanJson)
+        val finalEstimation = if (weightGrams != null && weightGrams > 0 && (estimation.grams <= 0 || estimation.grams != weightGrams)) {
+            estimation.copy(grams = weightGrams)
+        } else {
+            estimation
+        }
+
+        return GeminiResult(finalEstimation, response.usageMetadata)
     }
 
     private fun scaleBitmap(bitmap: Bitmap): Bitmap {
