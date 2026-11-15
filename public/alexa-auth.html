@@ -82,6 +82,7 @@
   </style>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="/__/firebase/init.js"></script>
 </head>
 <body>
   <div class="card">
@@ -99,17 +100,9 @@
   </div>
 
   <script>
-    const firebaseConfig = {
-      apiKey: "AIzaSyAT7S-ToNe7eE4t_4xyW5qcxCHvZbPxIJQ",
-      authDomain: "nutrition-mvp-aa293.firebaseapp.com",
-      projectId: "nutrition-mvp-aa293"
-    };
-
     const urlParams = new URLSearchParams(window.location.search);
     const redirectUri = urlParams.get('redirect_uri');
     const state = urlParams.get('state');
-
-    firebase.initializeApp(firebaseConfig);
 
     async function handleSuccess(user) {
       const statusEl = document.getElementById('status');
