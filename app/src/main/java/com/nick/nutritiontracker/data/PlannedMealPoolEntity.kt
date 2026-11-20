@@ -12,6 +12,7 @@ data class PlannedMealPoolEntity(
     var id: String = "",
     var mealName: String = "",
     var mealIngredients: List<MealIngredientEntity> = emptyList(),
+    var recipeSteps: List<RecipeStepEntity> = emptyList(),
     var plannedPortions: Double = 0.0,
     var remainingPortions: Double = 0.0,
     var imageUrl: String? = null,

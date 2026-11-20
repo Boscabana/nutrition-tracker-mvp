@@ -66,6 +66,13 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     val inboxMessages = mutableStateListOf<InboxMessage>()
     val unreadInboxCount by derivedStateOf { inboxMessages.count { !it.isRead } }
     val householdMembers = mutableStateListOf<Map<String, String>>()
+    val householdFeed = mutableStateListOf<HouseholdChatMessage>()
+    private val seenHouseholdMessageIds = mutableSetOf<String>()
+    private var isInitialHouseholdFeedLoaded = false
+    val communityPosts = mutableStateListOf<CommunityPost>()
+    var selectedCommunityTopic by mutableStateOf<String?>(null)
+    val followedTopics = mutableStateListOf<String>()
+    val followedUsers = mutableStateListOf<String>()
 
     val dailySteps = mutableStateMapOf<String, Int>()
     val dailyTotalCalories = mutableStateMapOf<String, Double>()
@@ -115,7 +122,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     var shoppingListSortByCategory by mutableStateOf(prefs.getBoolean("shopping_sort_category", true))
 
     var forceOnboardingOnStart by mutableStateOf(prefs.getBoolean("force_onboarding", false))
-    var geminiApiKey by mutableStateOf(prefs.getString("gemini_api_key", null) ?: "")
     var biometricEnabled by mutableStateOf(prefs.getBoolean("biometric_enabled", false))
     var isAppUnlocked by mutableStateOf(false)
     var shouldTriggerQuickScan by mutableStateOf(false)
@@ -145,8 +151,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     var pendingFoodToCapture by mutableStateOf<FoodItemEntity?>(null)
     var pendingDuplicateFood by mutableStateOf<FoodItemEntity?>(null)
 
-    val availableAiModels = mutableStateListOf<AiModelStatus>()
-
     private var nextFoodId = 1L
     private var nextEntryId = 1L
     private var nextMealId = 1L
@@ -154,7 +158,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     var isAnalyzingImage by mutableStateOf(false)
     var aiEstimationResult by mutableStateOf<AiEstimationResult?>(null)
     var aiErrorMessage by mutableStateOf<String?>(null)
-    var selectedAiModel by mutableStateOf(prefs.getString("selected_ai_model", "gemini-3.6-flash") ?: "gemini-3.6-flash")
 
     init {
         loadLocalState()
@@ -167,6 +170,15 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             profileRepository.userProfileFlow.collect { profile ->
                 userProfile = profile
             }
+        }
+
+        viewModelScope.launch {
+            firestoreRepository.getCommunityPosts()
+                .catch { Log.e("NutritionViewModel", "Error sync CommunityPosts", it) }
+                .collect { cloudPosts ->
+                    communityPosts.clear()
+                    communityPosts.addAll(cloudPosts)
+                }
         }
     }
 
@@ -182,16 +194,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun updateBiometricEnabled(enabled: Boolean) {
         biometricEnabled = enabled
         prefs.edit().putBoolean("biometric_enabled", enabled).apply()
-    }
-
-    fun updateSelectedAiModel(model: String) {
-        selectedAiModel = model
-        prefs.edit().putString("selected_ai_model", model).apply()
-    }
-
-    fun updateGeminiApiKey(key: String) {
-        geminiApiKey = key
-        prefs.edit().putString("gemini_api_key", key).apply()
     }
 
     fun setForceOnboarding(force: Boolean) {
@@ -331,6 +333,39 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                         }
                         launch {
                             refreshHouseholdMembers()
+                        }
+                        launch {
+                            firestoreRepository.getHouseholdFeed(household.id)
+                                .catch { Log.e("NutritionViewModel", "Error sync HouseholdFeed", it) }
+                                .collect { cloudFeed ->
+                                    val myUid = firebaseManager.currentUser.value?.uid
+
+                                    if (!isInitialHouseholdFeedLoaded) {
+                                        cloudFeed.forEach { seenHouseholdMessageIds.add(it.id) }
+                                        isInitialHouseholdFeedLoaded = true
+                                    } else {
+                                        cloudFeed.forEach { msg ->
+                                            if (!seenHouseholdMessageIds.contains(msg.id)) {
+                                                seenHouseholdMessageIds.add(msg.id)
+                                                if (msg.senderUid != myUid && msg.text.isNotBlank()) {
+                                                    val notifTitle = when {
+                                                        msg.text.contains("Einkaufsliste") -> "🛒 Einkaufsliste (${household.name})"
+                                                        msg.text.contains("geplant") -> "📅 Mahlzeitenplanung (${household.name})"
+                                                        else -> "💬 Haushalt ${household.name}"
+                                                    }
+                                                    NotificationHelper.showHouseholdPushNotification(
+                                                        context = getApplication(),
+                                                        title = notifTitle,
+                                                        text = msg.text
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    householdFeed.clear()
+                                    householdFeed.addAll(cloudFeed)
+                                }
                         }
                     }
                 }
@@ -590,6 +625,231 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         val kcalCompatible = kcalDiff < 5.0 || kcalDiff / incoming.kcalPer100g.coerceAtLeast(1.0) < 0.05
         val proteinCompatible = proteinDiff < 1.0 || proteinDiff / incoming.proteinPer100g.coerceAtLeast(1.0) < 0.05
         return kcalCompatible && proteinCompatible
+    }
+
+    // --- Holistic Recipe Comparison & Selective Adoption ---
+    fun comparePoolItemWithLocal(poolItem: PlannedMealPoolEntity): RecipeComparisonResult {
+        val localMeal = meals.find { it.name.trim().equals(poolItem.mealName.trim(), ignoreCase = true) }
+        val remoteServings = poolItem.plannedPortions.coerceAtLeast(1.0)
+        
+        if (localMeal == null) {
+            val ingDiffs = poolItem.mealIngredients.map { ing ->
+                val perServingGrams = ing.grams / remoteServings
+                val perServingAmount = ing.amount / remoteServings
+                IngredientDiff(
+                    name = ing.name,
+                    status = IngredientDiffStatus.ADDED_IN_REMOTE,
+                    remoteAmountDisplay = ing.displayAmountFor(perServingAmount, perServingGrams)
+                )
+            }
+            return RecipeComparisonResult(
+                status = RecipeDiffStatus.MISSING_LOCALLY,
+                hasIngredientNameDiff = true,
+                hasAmountDiff = true,
+                hasInstructionDiff = poolItem.recipeSteps.isNotEmpty(),
+                localMeal = null,
+                remoteMealName = poolItem.mealName,
+                remoteAuthor = poolItem.createdByName,
+                ingredientDiffs = ingDiffs,
+                remoteRecipeSteps = poolItem.recipeSteps,
+                localRecipeSteps = emptyList()
+            )
+        }
+
+        val localServings = localMeal.servings.coerceAtLeast(1.0)
+        
+        val localIngsByName = localMeal.ingredients.associateBy { it.name.trim().lowercase() }
+        val remoteIngsByName = poolItem.mealIngredients.associateBy { it.name.trim().lowercase() }
+
+        val allNames = (localIngsByName.keys + remoteIngsByName.keys).distinct()
+        
+        var hasNameDiff = false
+        var hasAmountDiff = false
+        val ingDiffs = mutableListOf<IngredientDiff>()
+
+        for (nameKey in allNames) {
+            val lIng = localIngsByName[nameKey]
+            val rIng = remoteIngsByName[nameKey]
+
+            if (lIng != null && rIng != null) {
+                val lGramsPerServing = lIng.grams / localServings
+                val rGramsPerServing = rIng.grams / remoteServings
+                val lAmtPerServing = lIng.amount / localServings
+                val rAmtPerServing = rIng.amount / remoteServings
+
+                val amountDiffers = kotlin.math.abs(lGramsPerServing - rGramsPerServing) > 0.5
+                if (amountDiffers) {
+                    hasAmountDiff = true
+                    ingDiffs.add(
+                        IngredientDiff(
+                            name = lIng.name,
+                            status = IngredientDiffStatus.AMOUNT_DIFF,
+                            localAmountDisplay = lIng.displayAmountFor(lAmtPerServing, lGramsPerServing),
+                            remoteAmountDisplay = rIng.displayAmountFor(rAmtPerServing, rGramsPerServing)
+                        )
+                    )
+                } else {
+                    ingDiffs.add(
+                        IngredientDiff(
+                            name = lIng.name,
+                            status = IngredientDiffStatus.MATCH,
+                            localAmountDisplay = lIng.displayAmountFor(lAmtPerServing, lGramsPerServing),
+                            remoteAmountDisplay = rIng.displayAmountFor(rAmtPerServing, rGramsPerServing)
+                        )
+                    )
+                }
+            } else if (lIng == null && rIng != null) {
+                hasNameDiff = true
+                val rGramsPerServing = rIng.grams / remoteServings
+                val rAmtPerServing = rIng.amount / remoteServings
+                ingDiffs.add(
+                    IngredientDiff(
+                        name = rIng.name,
+                        status = IngredientDiffStatus.ADDED_IN_REMOTE,
+                        remoteAmountDisplay = rIng.displayAmountFor(rAmtPerServing, rGramsPerServing)
+                    )
+                )
+            } else if (lIng != null && rIng == null) {
+                hasNameDiff = true
+                val lGramsPerServing = lIng.grams / localServings
+                val lAmtPerServing = lIng.amount / localServings
+                ingDiffs.add(
+                    IngredientDiff(
+                        name = lIng.name,
+                        status = IngredientDiffStatus.MISSING_IN_REMOTE,
+                        localAmountDisplay = lIng.displayAmountFor(lAmtPerServing, lGramsPerServing)
+                    )
+                )
+            }
+        }
+
+        val hasInstructionDiff = areRecipeStepsDifferent(localMeal.recipeSteps, poolItem.recipeSteps)
+
+        val overallStatus = when {
+            hasNameDiff || hasAmountDiff || hasInstructionDiff -> RecipeDiffStatus.HAS_DISCREPANCIES
+            else -> RecipeDiffStatus.MATCH
+        }
+
+        return RecipeComparisonResult(
+            status = overallStatus,
+            hasIngredientNameDiff = hasNameDiff,
+            hasAmountDiff = hasAmountDiff,
+            hasInstructionDiff = hasInstructionDiff,
+            localMeal = localMeal,
+            remoteMealName = poolItem.mealName,
+            remoteAuthor = poolItem.createdByName,
+            ingredientDiffs = ingDiffs,
+            remoteRecipeSteps = poolItem.recipeSteps,
+            localRecipeSteps = localMeal.recipeSteps
+        )
+    }
+
+    fun compareMealWithPool(meal: MealEntity): RecipeComparisonResult? {
+        val poolItem = plannedMealPool.find { it.mealName.trim().equals(meal.name.trim(), ignoreCase = true) } ?: return null
+        return comparePoolItemWithLocal(poolItem)
+    }
+
+    private fun areRecipeStepsDifferent(local: List<RecipeStepEntity>, remote: List<RecipeStepEntity>): Boolean {
+        if (local.size != remote.size) return true
+        for (i in local.indices) {
+            val l = local[i]
+            val r = remote[i]
+            if (l.title.trim() != r.title.trim() || l.description.trim() != r.description.trim()) {
+                return true
+            }
+        }
+        return false
+    }
+
+    fun adoptRecipeFromPool(
+        poolItem: PlannedMealPoolEntity,
+        adoptIngredients: Boolean,
+        adoptInstructions: Boolean
+    ) {
+        val existingLocal = meals.find { it.name.trim().equals(poolItem.mealName.trim(), ignoreCase = true) }
+        val poolServings = poolItem.plannedPortions.coerceAtLeast(1.0)
+        val targetServings = existingLocal?.servings ?: 1.0
+
+        val newIngredients = if (adoptIngredients) {
+            poolItem.mealIngredients.map { ing ->
+                val perServingGrams = ing.grams / poolServings
+                val perServingAmount = ing.amount / poolServings
+                val targetGrams = perServingGrams * targetServings
+                val targetAmount = perServingAmount * targetServings
+
+                val localFood = foods.find { food ->
+                    (!food.barcode.isNullOrBlank() && food.barcode == ing.barcode) ||
+                    (food.name.trim().equals(ing.name.trim(), ignoreCase = true) &&
+                     (food.brand?.trim() ?: "").equals(ing.brand?.trim() ?: "", ignoreCase = true))
+                } ?: addFood(
+                    name = ing.name,
+                    kcal = ing.kcalPer100g,
+                    protein = ing.proteinPer100g,
+                    carbs = ing.carbsPer100g,
+                    sugar = ing.sugarPer100g,
+                    fat = ing.fatPer100g,
+                    saturatedFat = ing.saturatedFatPer100g,
+                    alcoholPercent = ing.alcoholPercent,
+                    baseUnit = ing.baseUnit,
+                    portions = emptyList(),
+                    packages = emptyList(),
+                    barcode = ing.barcode,
+                    brand = ing.brand,
+                    category = ing.category,
+                    isGeneric = ing.isGeneric
+                )
+
+                MealIngredientEntity(
+                    id = System.currentTimeMillis() + Random.nextLong(10000),
+                    foodItemId = localFood.id,
+                    name = localFood.name,
+                    amount = targetAmount,
+                    unitLabel = ing.unitLabel,
+                    grams = targetGrams,
+                    kcalPer100g = localFood.kcalPer100g,
+                    proteinPer100g = localFood.proteinPer100g,
+                    carbsPer100g = localFood.carbsPer100g,
+                    sugarPer100g = localFood.sugarPer100g,
+                    fatPer100g = localFood.fatPer100g,
+                    saturatedFatPer100g = localFood.saturatedFatPer100g,
+                    alcoholPercent = localFood.alcoholPercent,
+                    baseUnit = localFood.baseUnit,
+                    store = localFood.store,
+                    brand = localFood.brand,
+                    category = localFood.category,
+                    barcode = localFood.barcode,
+                    isGeneric = localFood.isGeneric
+                )
+            }
+        } else {
+            existingLocal?.ingredients ?: emptyList()
+        }
+
+        val newSteps = if (adoptInstructions) {
+            poolItem.recipeSteps
+        } else {
+            existingLocal?.recipeSteps ?: emptyList()
+        }
+
+        if (existingLocal != null) {
+            val updatedMeal = existingLocal.copy(
+                ingredients = newIngredients,
+                recipeSteps = newSteps,
+                tags = if (adoptInstructions) poolItem.tags else existingLocal.tags,
+                imageUrl = poolItem.imageUrl ?: existingLocal.imageUrl,
+                lastModified = System.currentTimeMillis()
+            )
+            updateMealTemplate(updatedMeal)
+        } else {
+            addMealTemplate(
+                name = poolItem.mealName,
+                ingredients = newIngredients,
+                servings = targetServings,
+                tags = poolItem.tags,
+                imageUrl = poolItem.imageUrl,
+                recipeSteps = newSteps
+            )
+        }
     }
 
     private fun isDataCompatible(existing: FoodItemEntity, incoming: MealIngredientEntity): Boolean {
@@ -852,7 +1112,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         aiEstimationResult = null
         viewModelScope.launch {
             try {
-                val result = geminiService.estimateNutrition(bitmap, selectedAiModel)
+                val result = geminiService.estimateNutrition(bitmap)
                 aiEstimationResult = result.data
                 
                 // Log usage
@@ -860,7 +1120,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 if (user != null && result.usage != null) {
                     val usageMap = mapOf(
                         "feature" to "image_analysis",
-                        "model" to (selectedAiModel),
+                        "model" to configManager.geminiModelName,
                         "promptTokens" to (result.usage?.promptTokenCount ?: 0),
                         "candidatesTokens" to (result.usage?.candidatesTokenCount ?: 0),
                         "totalTokens" to (result.usage?.totalTokenCount ?: 0)
@@ -886,7 +1146,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         aiEstimationResult = null
         viewModelScope.launch {
             try {
-                val result = geminiService.estimateNutritionFromText(text, weightGrams, selectedAiModel)
+                val result = geminiService.estimateNutritionFromText(text, weightGrams)
                 aiEstimationResult = result.data
                 
                 // Log usage
@@ -894,7 +1154,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 if (user != null && result.usage != null) {
                     val usageMap = mapOf(
                         "feature" to "text_analysis",
-                        "model" to (selectedAiModel),
+                        "model" to configManager.geminiModelName,
                         "promptTokens" to (result.usage?.promptTokenCount ?: 0),
                         "candidatesTokens" to (result.usage?.candidatesTokenCount ?: 0),
                         "totalTokens" to (result.usage?.totalTokenCount ?: 0)
@@ -917,14 +1177,14 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         isAnalyzingGenericFood = true
         aiGenericFoodError = null
         return try {
-            val result = geminiService.estimateGenericFood(name, categories.toList(), isBrandSearch, selectedAiModel)
+            val result = geminiService.estimateGenericFood(name, categories.toList(), isBrandSearch)
             
             // Log usage
             val user = firebaseManager.currentUser.value
             if (user != null && result.usage != null) {
                 val usageMap = mapOf(
                     "feature" to "generic_macros",
-                    "model" to (selectedAiModel),
+                    "model" to configManager.geminiModelName,
                     "promptTokens" to (result.usage?.promptTokenCount ?: 0),
                     "candidatesTokens" to (result.usage?.candidatesTokenCount ?: 0),
                     "totalTokens" to (result.usage?.totalTokenCount ?: 0)
@@ -943,16 +1203,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         } finally {
             isAnalyzingGenericFood = false
         }
-    }
-
-    fun probeAiModels() {
-        viewModelScope.launch {
-            availableAiModels.clear()
-            val models = listOf("gemini-1.5-flash", "gemini-1.5-pro", "gemini-3.6-flash")
-            models.forEach { model ->
-            availableAiModels.add(geminiService.testModelAvailability(model))
-        }
-    }
     }
 
     // --- Data Management ---
@@ -1414,6 +1664,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             id = poolId,
             mealName = meal.name,
             mealIngredients = poolIngredients,
+            recipeSteps = meal.recipeSteps,
             plannedPortions = portions,
             remainingPortions = portions,
             imageUrl = meal.imageUrl,
@@ -1426,6 +1677,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             firestoreRepository.addPlannedMealToPool(householdId, poolEntry)
             // Centralized shopping list logic in updatePoolItem
             updatePoolItem(poolEntry)
+            notifyHouseholdShoppingActivity(isMealPlanning = true, name = poolEntry.mealName)
         }
     }
 
@@ -1991,6 +2243,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
             viewModelScope.launch { firestoreRepository.addShoppingItem(householdId, newItem) }
         }
         saveShoppingList()
+
+        val isMeal = plannedEntryId != null || (sourceName != null && !sourceName.startsWith("Einzelartikel") && !sourceName.contains("Manuell"))
+        notifyHouseholdShoppingActivity(isMealPlanning = isMeal, name = if (isMeal) sourceName else name)
     }
 
     fun addShoppingItem(name: String, amount: Double, unit: String, category: String?, isPremium: Boolean) {
@@ -2008,6 +2263,7 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         saveShoppingList()
         if (householdId.isNotEmpty()) {
             viewModelScope.launch { firestoreRepository.addShoppingItem(householdId, newItem) }
+            notifyHouseholdShoppingActivity(isMealPlanning = false, name = name)
         }
     }
 
@@ -2140,6 +2396,238 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     fun deleteInboxMessage(messageId: String) {
         val user = firebaseManager.currentUser.value ?: return
         viewModelScope.launch { firestoreRepository.deleteInboxMessage(user.uid, messageId) }
+    }
+
+    // --- Household Feed & Chat ---
+    private var lastShoppingNotificationTimestamp = 0L
+    private var lastPlannedMealNotificationTimestamp = 0L
+    private val SHOPPING_NOTIFY_COOLDOWN_MS = 60 * 60 * 1000L // 1 Stunde Cooldown
+
+    fun notifyHouseholdShoppingActivity(
+        isMealPlanning: Boolean,
+        name: String? = null
+    ) {
+        val householdId = firebaseManager.household.value?.id
+        if (householdId.isNullOrBlank()) return
+
+        val user = firebaseManager.currentUser.value ?: return
+        val myName = householdMembers.find { it["uid"] == user.uid }?.get("name") ?: userProfile.firstName.ifBlank { "Mitglied" }
+
+        val now = System.currentTimeMillis()
+
+        if (isMealPlanning) {
+            if (now - lastPlannedMealNotificationTimestamp < SHOPPING_NOTIFY_COOLDOWN_MS) {
+                Log.d("NutritionViewModel", "Skipping planned meal household notification (1h cooldown)")
+                return
+            }
+            lastPlannedMealNotificationTimestamp = now
+
+            val mealText = if (!name.isNullOrBlank()) "'$name'" else "eine Mahlzeit"
+            val messageText = "📅 $myName hat $mealText geplant und Zutaten auf die Einkaufsliste gesetzt."
+
+            val chatMsg = HouseholdChatMessage(
+                senderUid = user.uid,
+                senderName = myName,
+                text = messageText,
+                timestamp = now,
+                type = ChatMessageType.TEXT
+            )
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    firestoreRepository.sendHouseholdChatMessage(householdId, chatMsg)
+                } catch (e: Exception) {
+                    Log.e("NutritionViewModel", "Failed to send household meal planning notification", e)
+                }
+            }
+        } else {
+            if (now - lastShoppingNotificationTimestamp < SHOPPING_NOTIFY_COOLDOWN_MS) {
+                Log.d("NutritionViewModel", "Skipping shopping item household notification (1h cooldown)")
+                return
+            }
+            lastShoppingNotificationTimestamp = now
+
+            val itemText = if (!name.isNullOrBlank()) "'$name'" else "Artikel"
+            val messageText = "🛒 $myName hat $itemText auf die Einkaufsliste gesetzt."
+
+            val chatMsg = HouseholdChatMessage(
+                senderUid = user.uid,
+                senderName = myName,
+                text = messageText,
+                timestamp = now,
+                type = ChatMessageType.TEXT
+            )
+            viewModelScope.launch(Dispatchers.IO) {
+                try {
+                    firestoreRepository.sendHouseholdChatMessage(householdId, chatMsg)
+                } catch (e: Exception) {
+                    Log.e("NutritionViewModel", "Failed to send household shopping notification", e)
+                }
+            }
+        }
+    }
+
+    fun sendHouseholdTextMessage(text: String) {
+        if (text.isBlank()) return
+        val householdId = firebaseManager.household.value?.id ?: return
+        val user = firebaseManager.currentUser.value ?: return
+        viewModelScope.launch {
+            val myName = householdMembers.find { it["uid"] == user.uid }?.get("name") ?: userProfile.firstName.ifBlank { "Mitglied" }
+            val msg = HouseholdChatMessage(
+                senderUid = user.uid,
+                senderName = myName,
+                text = text.trim(),
+                timestamp = System.currentTimeMillis(),
+                type = ChatMessageType.TEXT
+            )
+            firestoreRepository.sendHouseholdChatMessage(householdId, msg)
+        }
+    }
+
+    fun shareRecipeToHouseholdFeed(meal: MealEntity, comment: String? = null) {
+        val householdId = firebaseManager.household.value?.id ?: return
+        val user = firebaseManager.currentUser.value ?: return
+        viewModelScope.launch {
+            val myName = householdMembers.find { it["uid"] == user.uid }?.get("name") ?: userProfile.firstName.ifBlank { "Mitglied" }
+            val msg = HouseholdChatMessage(
+                senderUid = user.uid,
+                senderName = myName,
+                text = comment?.trim().takeUnless { it.isNullOrBlank() } ?: "Rezept geteilt: ${meal.name}",
+                timestamp = System.currentTimeMillis(),
+                type = ChatMessageType.RECIPE,
+                payloadJson = getRecipeJson(meal)
+            )
+            firestoreRepository.sendHouseholdChatMessage(householdId, msg)
+        }
+    }
+
+    fun shareFoodToHouseholdFeed(food: FoodItemEntity, comment: String? = null) {
+        val householdId = firebaseManager.household.value?.id ?: return
+        val user = firebaseManager.currentUser.value ?: return
+        viewModelScope.launch {
+            val myName = householdMembers.find { it["uid"] == user.uid }?.get("name") ?: userProfile.firstName.ifBlank { "Mitglied" }
+            val msg = HouseholdChatMessage(
+                senderUid = user.uid,
+                senderName = myName,
+                text = comment?.trim().takeUnless { it.isNullOrBlank() } ?: "Artikel geteilt: ${food.name}",
+                timestamp = System.currentTimeMillis(),
+                type = ChatMessageType.FOOD,
+                payloadJson = json.encodeToString(food)
+            )
+            firestoreRepository.sendHouseholdChatMessage(householdId, msg)
+        }
+    }
+
+    fun deleteHouseholdMessage(messageId: String) {
+        val householdId = firebaseManager.household.value?.id ?: return
+        viewModelScope.launch {
+            firestoreRepository.deleteHouseholdChatMessage(householdId, messageId)
+        }
+    }
+
+    // --- Global Community Feed & Social Media ---
+    fun publishOfficialCommunityPost(
+        topic: String,
+        text: String,
+        meal: MealEntity,
+        authorTitle: String = "NutritionTracker Redaktion",
+        onResult: (Boolean, String?) -> Unit = { _, _ -> }
+    ) {
+        val user = firebaseManager.currentUser.value
+        if (user == null) {
+            onResult(false, "Melde dich zuerst an (oder erstelle einen Account), um in Firestore zu veröffentlichen.")
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val post = CommunityPost(
+                    authorUid = user.uid,
+                    authorName = authorTitle,
+                    topic = topic,
+                    text = text.trim(),
+                    timestamp = System.currentTimeMillis(),
+                    payloadType = "RECIPE",
+                    payloadJson = getRecipeJson(meal),
+                    isOfficial = true
+                )
+                firestoreRepository.publishCommunityPost(post)
+                onResult(true, null)
+            } catch (e: Exception) {
+                Log.e("NutritionViewModel", "Error publishing official community post", e)
+                onResult(false, e.localizedMessage ?: e.toString())
+            }
+        }
+    }
+
+    fun publishCommunityPost(
+        topic: String,
+        text: String,
+        meal: MealEntity? = null,
+        food: FoodItemEntity? = null
+    ) {
+        val user = firebaseManager.currentUser.value ?: return
+        val authorName = userProfile.firstName.ifBlank { "Community-Mitglied" }
+        viewModelScope.launch {
+            try {
+                val payloadType = when {
+                    meal != null -> "RECIPE"
+                    food != null -> "FOOD"
+                    else -> "TEXT"
+                }
+                val payloadJson = when {
+                    meal != null -> getRecipeJson(meal)
+                    food != null -> json.encodeToString(food)
+                    else -> null
+                }
+                val post = CommunityPost(
+                    authorUid = user.uid,
+                    authorName = authorName,
+                    topic = topic,
+                    text = text.trim(),
+                    timestamp = System.currentTimeMillis(),
+                    payloadType = payloadType,
+                    payloadJson = payloadJson
+                )
+                firestoreRepository.publishCommunityPost(post)
+            } catch (e: Exception) {
+                Log.e("NutritionViewModel", "Error publishing community post", e)
+            }
+        }
+    }
+
+    fun toggleLikeCommunityPost(post: CommunityPost) {
+        val user = firebaseManager.currentUser.value ?: return
+        viewModelScope.launch {
+            try {
+                firestoreRepository.toggleLikeCommunityPost(post.id, user.uid)
+            } catch (e: Exception) {
+                Log.e("NutritionViewModel", "Error liking community post", e)
+            }
+        }
+    }
+
+    fun toggleFollowTopic(topic: String) {
+        if (followedTopics.contains(topic)) {
+            followedTopics.remove(topic)
+        } else {
+            followedTopics.add(topic)
+        }
+        prefs.edit().putStringSet("followed_topics", followedTopics.toSet()).apply()
+    }
+
+    fun toggleFollowUser(authorUid: String) {
+        if (authorUid.isBlank()) return
+        if (followedUsers.contains(authorUid)) {
+            followedUsers.remove(authorUid)
+        } else {
+            followedUsers.add(authorUid)
+        }
+        prefs.edit().putStringSet("followed_users", followedUsers.toSet()).apply()
+    }
+
+    fun deleteCommunityPost(postId: String) {
+        viewModelScope.launch {
+            firestoreRepository.deleteCommunityPost(postId)
+        }
     }
 
     fun sendFoodToUser(targetUid: String, food: FoodItemEntity) {
@@ -2292,21 +2780,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 ))
             }
             pendingRecipeImport = null
-        }
-    }
-
-    fun forceMigrationToCloud() {
-        val user = firebaseManager.currentUser.value ?: return
-        val householdId = firebaseManager.household.value?.id
-        viewModelScope.launch {
-            foods.forEach { firestoreRepository.savePersonalFood(user.uid, it) }
-            meals.forEach { firestoreRepository.savePersonalMeal(user.uid, it) }
-            allEntries.forEach { firestoreRepository.savePersonalEntry(user.uid, it) }
-            weightHistory.forEach { firestoreRepository.saveWeightEntry(user.uid, it) }
-            plannedEntries.forEach { firestoreRepository.savePersonalPlannedEntry(user.uid, it) }
-            if (householdId != null) {
-                shoppingList.forEach { firestoreRepository.addShoppingItem(householdId, it) }
-            }
         }
     }
 
@@ -2474,6 +2947,8 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         try { prefs.getString("daily_steps", null)?.let { dailySteps.putAll(json.decodeFromString<Map<String, Int>>(it)) } } catch (e: Exception) { Log.e("NutritionViewModel", "Error loading daily_steps", e) }
         try { prefs.getString("daily_total_kcal", null)?.let { dailyTotalCalories.putAll(json.decodeFromString<Map<String, Double>>(it)) } } catch (e: Exception) { Log.e("NutritionViewModel", "Error loading daily_total_kcal", e) }
         try { prefs.getString("daily_sessions", null)?.let { dailyExerciseSessions.putAll(json.decodeFromString<Map<String, List<ExerciseSessionInfo>>>(it)) } } catch (e: Exception) { Log.e("NutritionViewModel", "Error loading daily_sessions", e) }
+        try { prefs.getStringSet("followed_topics", null)?.let { followedTopics.addAll(it) } } catch (e: Exception) {}
+        try { prefs.getStringSet("followed_users", null)?.let { followedUsers.addAll(it) } } catch (e: Exception) {}
         updateNextIds()
     }
 
@@ -2481,18 +2956,6 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
         if (foods.isNotEmpty()) nextFoodId = (foods.maxOf { it.id }) + 1
         if (meals.isNotEmpty()) nextMealId = (meals.maxOf { it.id }) + 1
         if (allEntries.isNotEmpty()) nextEntryId = (allEntries.maxOf { it.id }) + 1
-    }
-
-    fun repairAndWipeLocalCache() {
-        if (isRepairing) return
-        foods.clear(); meals.clear(); allEntries.clear(); plannedEntries.clear(); shoppingList.clear()
-        saveFoods(); saveMeals(); saveEntries(); savePlannedEntries(); saveShoppingList()
-        setupFirebaseSync()
-        triggerAutoRepair()
-    }
-
-    fun forceDeepRepair() {
-        triggerAutoRepair()
     }
 
     private fun createDefaultFoods() {

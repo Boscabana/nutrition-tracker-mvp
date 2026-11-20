@@ -18,7 +18,7 @@ class ConfigManager {
         
         // Set default values
         val defaults = mapOf(
-            "gemini_model_name" to "gemini-2.0-flash",
+            "gemini_model_name" to "gemini-2.5-flash",
             "gemini_max_output_tokens" to 2048L,
             "gemini_temperature" to 0.7,
             "ai_image_resize_px" to 768L,

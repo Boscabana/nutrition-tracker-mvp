@@ -24,6 +24,7 @@ class GeminiService(private val config: ConfigManager) {
     private val region = "europe-west3"
 
     private val ai = Firebase.ai(backend = GenerativeBackend.googleAI())
+
     private val modelCache = mutableMapOf<String, GenerativeModel>()
     private val cacheMutex = Mutex()
 
@@ -42,16 +43,34 @@ class GeminiService(private val config: ConfigManager) {
         }
     }
 
+    private suspend fun <T> executeWithFallback(
+        preferredModel: String?,
+        block: suspend (modelName: String) -> T
+    ): T {
+        val primary = preferredModel ?: config.geminiModelName.ifBlank { "gemini-2.5-flash" }
+        return try {
+            block(primary)
+        } catch (e: Exception) {
+            val msg = e.message ?: ""
+            Log.w("GeminiService", "Primary model $primary failed: $msg. Trying fallback gemini-2.5-flash...", e)
+            if (primary != "gemini-2.5-flash") {
+                try {
+                    block("gemini-2.5-flash")
+                } catch (e2: Exception) {
+                    Log.w("GeminiService", "Fallback gemini-2.5-flash failed, trying gemini-3.8-flash...", e2)
+                    block("gemini-3.8-flash")
+                }
+            } else {
+                block("gemini-3.8-flash")
+            }
+        }
+    }
+
     suspend fun estimateNutrition(bitmap: Bitmap, preferredModel: String? = null): GeminiResult<AiEstimationResult> {
         val scaledBitmap = scaleBitmap(bitmap)
-        val modelToUse = preferredModel ?: config.geminiModelName
-        
-        Log.d("GeminiService", "Analyzing with Firebase AI Logic ($region) model: $modelToUse")
-        return try {
+        return executeWithFallback(preferredModel) { modelToUse ->
+            Log.d("GeminiService", "Analyzing with Firebase AI Logic ($region) model: $modelToUse")
             callGemini(scaledBitmap, modelToUse)
-        } catch (e: Exception) {
-            Log.e("GeminiService", "AI Logic model failed: $modelToUse", e)
-            throw e
         }
     }
 
@@ -60,25 +79,9 @@ class GeminiService(private val config: ConfigManager) {
         weightGrams: Double? = null,
         preferredModel: String? = null
     ): GeminiResult<AiEstimationResult> {
-        val modelToUse = preferredModel ?: config.geminiModelName
-        Log.d("GeminiService", "Analyzing text with Firebase AI Logic ($region) model: $modelToUse")
-        return try {
+        return executeWithFallback(preferredModel) { modelToUse ->
+            Log.d("GeminiService", "Analyzing text with Firebase AI Logic ($region) model: $modelToUse")
             callGeminiText(promptText, weightGrams, modelToUse)
-        } catch (e: Exception) {
-            Log.e("GeminiService", "AI Logic text model failed: $modelToUse", e)
-            throw e
-        }
-    }
-
-    suspend fun testModelAvailability(modelName: String): AiModelStatus {
-        return try {
-            val model = getModel(modelName)
-            model.generateContent("Respond with OK").text?.isNotBlank()
-            AiModelStatus(modelName, true)
-        } catch (e: Exception) {
-            val msg = e.localizedMessage ?: e.toString()
-            Log.w("GeminiService", "Model $modelName check failed: $msg")
-            AiModelStatus(modelName, false, msg)
         }
     }
 
@@ -198,57 +201,52 @@ class GeminiService(private val config: ConfigManager) {
     }
 
     suspend fun estimateGenericFood(foodName: String, categories: List<String>, isBrandSearch: Boolean = false, preferredModel: String? = null): GeminiResult<AiGenericFoodResult> {
-        val modelToUse = preferredModel ?: config.geminiModelName
-        val model = getModel(modelToUse)
-        
-        val brandPromptPart = if (isBrandSearch) {
-            "This is a search for a specific branded product. If you identify the brand, include it in the 'brand' field and provide real-world commercial portion sizes (e.g., '1 Riegel', '1 Dose', '1 Becher') in the 'portions' array."
-        } else {
-            "This is a general food item. Use 'portions' ONLY for very standard sizes (e.g., '1 Stück')."
-        }
-
-        val prompt = """
-            You are a nutrition expert. Analyze the food item: '$foodName'.
-            $brandPromptPart
-            
-            Provide average nutritional values per 100g (or 100ml for liquids).
-            Also select the most suitable category from this list: ${categories.joinToString(", ")}.
-            
-            IMPORTANT RULES:
-            1. All values must be ABSOLUTE numbers. 
-            2. DO NOT use ranges. Use '12.5'.
-            3. Macro values must be grams per 100 units.
-            4. If the item is a liquid, set 'baseUnit' to 'ml', otherwise 'g'.
-            5. Select EXACTLY ONE category from the provided list. If none fits, use 'Sonstiges'.
-            6. Language: German for 'name', 'brand', and portion names.
-            
-            Return ONLY a valid JSON object in the following format:
-            {
-              "name": "Lebensmittel Name",
-              "brand": "Markenname oder null",
-              "kcalPer100": 0.0,
-              "proteinPer100": 0.0,
-              "carbsPer100": 0.0,
-              "sugarPer100": 0.0,
-              "fatPer100": 0.0,
-              "saturatedFatPer100": 0.0,
-              "baseUnit": "g",
-              "category": "Chosen Category",
-              "portions": [
-                { "name": "Portionsname", "grams": 0.0 }
-              ]
+        return executeWithFallback(preferredModel) { modelToUse ->
+            val model = getModel(modelToUse)
+            val brandPromptPart = if (isBrandSearch) {
+                "This is a search for a specific branded product. If you identify the brand, include it in the 'brand' field and provide real-world commercial portion sizes (e.g., '1 Riegel', '1 Dose', '1 Becher') in the 'portions' array."
+            } else {
+                "This is a general food item. Use 'portions' ONLY for very standard sizes (e.g., '1 Stück')."
             }
-        """.trimIndent()
 
-        return try {
+            val prompt = """
+                You are a nutrition expert. Analyze the food item: '$foodName'.
+                $brandPromptPart
+                
+                Provide average nutritional values per 100g (or 100ml for liquids).
+                Also select the most suitable category from this list: ${categories.joinToString(", ")}.
+                
+                IMPORTANT RULES:
+                1. All values must be ABSOLUTE numbers. 
+                2. DO NOT use ranges. Use '12.5'.
+                3. Macro values must be grams per 100 units.
+                4. If the item is a liquid, set 'baseUnit' to 'ml', otherwise 'g'.
+                5. Select EXACTLY ONE category from the provided list. If none fits, use 'Sonstiges'.
+                6. Language: German for 'name', 'brand', and portion names.
+                
+                Return ONLY a valid JSON object in the following format:
+                {
+                  "name": "Lebensmittel Name",
+                  "brand": "Markenname oder null",
+                  "kcalPer100": 0.0,
+                  "proteinPer100": 0.0,
+                  "carbsPer100": 0.0,
+                  "sugarPer100": 0.0,
+                  "fatPer100": 0.0,
+                  "saturatedFatPer100": 0.0,
+                  "baseUnit": "g",
+                  "category": "Chosen Category",
+                  "portions": [
+                    { "name": "Portionsname", "grams": 0.0 }
+                  ]
+                }
+            """.trimIndent()
+
             val response = model.generateContent(prompt)
             val responseText = response.text ?: ""
             val cleanJson = extractJson(responseText)
             if (cleanJson.isBlank()) GeminiResult(null, response.usageMetadata)
             else GeminiResult(json.decodeFromString<AiGenericFoodResult>(cleanJson), response.usageMetadata)
-        } catch (e: Exception) {
-            Log.e("GeminiService", "Generic food estimation failed", e)
-            GeminiResult(null, null)
         }
     }
 

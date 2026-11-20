@@ -38,5 +38,11 @@ service cloud.firestore {
           request.auth.uid in get(/databases/$(database)/documents/households/$(householdId)).data.members;
       }
     }
+
+    // Rules for the 'community_posts' collection
+    match /community_posts/{postId} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
   }
 }

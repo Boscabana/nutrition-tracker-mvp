@@ -294,33 +294,22 @@ fun PlannerScreen(vm: NutritionViewModel, @Suppress("UNUSED_PARAMETER") userProf
         }
     }
 
-    Scaffold(
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = { Text("Wochenplaner", fontWeight = FontWeight.Bold) },
-                actions = {
-                    IconButton(onClick = { showFreezerDialog = true }) {
-                        Icon(Icons.Default.AcUnit, "Gefrierschrank", tint = Color(0xFF1976D2))
-                    }
-                }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
+    ) {
+        item {
+            MealPoolSection(
+                pool = vm.plannedMealPool.filter { !it.isFrozen },
+                vm = vm,
+                onAddClick = { showPoolAddDialog = true },
+                onFreezerClick = { showFreezerDialog = true },
+                onTakeClick = { poolItemToTake = it },
+                onEditClick = { poolItemToEdit = it },
+                onDeleteClick = { poolItemToDelete = it }
             )
         }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(bottom = 16.dp)
-        ) {
-            item {
-                MealPoolSection(
-                    pool = vm.plannedMealPool.filter { !it.isFrozen },
-                    vm = vm,
-                    onAddClick = { showPoolAddDialog = true },
-                    onTakeClick = { poolItemToTake = it },
-                    onEditClick = { poolItemToEdit = it },
-                    onDeleteClick = { poolItemToDelete = it }
-                )
-            }
 
             item {
                 HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outlineVariant)
@@ -378,7 +367,6 @@ fun PlannerScreen(vm: NutritionViewModel, @Suppress("UNUSED_PARAMETER") userProf
                 }
             }
         }
-    }
 
     if (showPickerForDate != null) {
         PlannedItemPickerBottomSheet(
@@ -844,6 +832,7 @@ fun MealPoolSection(
     pool: List<com.nick.nutritiontracker.data.PlannedMealPoolEntity>,
     vm: NutritionViewModel,
     onAddClick: () -> Unit,
+    onFreezerClick: () -> Unit,
     onTakeClick: (com.nick.nutritiontracker.data.PlannedMealPoolEntity) -> Unit,
     onEditClick: (com.nick.nutritiontracker.data.PlannedMealPoolEntity) -> Unit,
     onDeleteClick: (com.nick.nutritiontracker.data.PlannedMealPoolEntity) -> Unit
@@ -864,8 +853,13 @@ fun MealPoolSection(
                     Spacer(Modifier.width(8.dp))
                     Text("Mahlzeiten-Pool", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                 }
-                IconButton(onClick = onAddClick) {
-                    Icon(Icons.Default.AddCircle, null, tint = MaterialTheme.colorScheme.tertiary)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onFreezerClick) {
+                        Icon(Icons.Default.AcUnit, "Gefrierschrank", tint = Color(0xFF1976D2))
+                    }
+                    IconButton(onClick = onAddClick) {
+                        Icon(Icons.Default.AddCircle, null, tint = MaterialTheme.colorScheme.tertiary)
+                    }
                 }
             }
 
@@ -947,7 +941,7 @@ fun FreezerDialog(
         }
     }
 }
-
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PoolItemRow(
     item: com.nick.nutritiontracker.data.PlannedMealPoolEntity,
@@ -958,17 +952,19 @@ fun PoolItemRow(
     isFinished: Boolean = false,
     isFrozen: Boolean = false
 ) {
-    val tempEntry = remember(item) {
-        FoodEntryEntity(
-            name = item.mealName,
-            isMeal = true,
-            mealIngredients = item.mealIngredients,
-            amount = item.plannedPortions
+    val comparison = remember(item, vm.meals.size) { vm.comparePoolItemWithLocal(item) }
+    var showComparisonDialog by remember { mutableStateOf(false) }
+
+    if (showComparisonDialog) {
+        RecipeComparisonDialog(
+            comparison = comparison,
+            onDismiss = { showComparisonDialog = false },
+            onAdopt = { adoptIngredients, adoptInstructions ->
+                vm.adoptRecipeFromPool(item, adoptIngredients, adoptInstructions)
+                showComparisonDialog = false
+            }
         )
     }
-    val status = vm.getMatchStatus(tempEntry)
-    val isModified = vm.isPoolItemModified(item)
-    val isExact = status == PlanMatchStatus.EXACT
 
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -1004,37 +1000,69 @@ fun PoolItemRow(
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    val displayName = remember(item.mealName, isModified) {
-                        if (isModified) "${item.mealName} (abgewandelt)" else item.mealName
-                    }
                     Text(
-                        text = displayName,
+                        text = item.mealName,
                         fontWeight = FontWeight.SemiBold, 
                         style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
                         color = if (isFinished) MaterialTheme.colorScheme.outline else Color.Unspecified
                     )
-                    if (!isExact && !isFinished && !isFrozen && status != PlanMatchStatus.DELETED_INGREDIENT) {
-                        Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(6.dp))
+                    
+                    // Comparison Status Indicator Badge
+                    if (comparison.isMissingLocally) {
+                        AssistChip(
+                            onClick = { showComparisonDialog = true },
+                            label = { Text("Neu", style = MaterialTheme.typography.labelSmall) },
+                            leadingIcon = { Icon(Icons.Default.CloudDownload, null, modifier = Modifier.size(12.dp)) },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                labelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                            ),
+                            modifier = Modifier.height(22.dp)
+                        )
+                    } else if (comparison.isIdentical) {
                         Icon(
-                            imageVector = if (status == PlanMatchStatus.MISSING) Icons.Default.CloudDownload else Icons.Default.Sync,
-                            contentDescription = "Sync nötig",
-                            modifier = Modifier.size(14.dp).clickable { onEditClick(item) },
-                            tint = if (status == PlanMatchStatus.MISSING) MaterialTheme.colorScheme.error else Color(0xFFFFA000)
+                            imageVector = Icons.Default.CheckCircle,
+                            contentDescription = "Identisch",
+                            tint = Color(0xFF2E7D32),
+                            modifier = Modifier.size(16.dp).clickable { showComparisonDialog = true }
                         )
-                    }
-                    if (status == PlanMatchStatus.DELETED_INGREDIENT) {
-                        Spacer(Modifier.width(4.dp))
-                        Text(
-                            "!",
-                            color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold
-                        )
+                    } else {
+                        // Show discrepancy chips
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.clickable { showComparisonDialog = true }
+                        ) {
+                            if (comparison.hasIngredientNameDiff) {
+                                AssistChip(
+                                    onClick = { showComparisonDialog = true },
+                                    label = { Text("Artikel", style = MaterialTheme.typography.labelSmall) },
+                                    colors = AssistChipDefaults.assistChipColors(containerColor = Color(0xFFFFF3E0), labelColor = Color(0xFFE65100)),
+                                    modifier = Modifier.height(22.dp)
+                                )
+                            }
+                            if (comparison.hasAmountDiff) {
+                                AssistChip(
+                                    onClick = { showComparisonDialog = true },
+                                    label = { Text("Mengen", style = MaterialTheme.typography.labelSmall) },
+                                    colors = AssistChipDefaults.assistChipColors(containerColor = Color(0xFFFFF8E1), labelColor = Color(0xFFF57F17)),
+                                    modifier = Modifier.height(22.dp)
+                                )
+                            }
+                            if (comparison.hasInstructionDiff) {
+                                AssistChip(
+                                    onClick = { showComparisonDialog = true },
+                                    label = { Text("Anleitung", style = MaterialTheme.typography.labelSmall) },
+                                    colors = AssistChipDefaults.assistChipColors(containerColor = Color(0xFFF3E5F5), labelColor = Color(0xFF7B1FA2)),
+                                    modifier = Modifier.height(22.dp)
+                                )
+                            }
+                        }
                     }
                 }
                 Text(
-                    "Gesamt geplant: ${item.plannedPortions.roundString()} · Von: ${item.createdByName}", 
+                    "Gesamt geplant: ${item.plannedPortions.roundString()} · Von: ${item.createdByName.ifBlank { "Haushalt" }}", 
                     style = MaterialTheme.typography.labelSmall,
                     color = when {
                         isFrozen -> Color(0xFF1976D2)
@@ -1057,6 +1085,10 @@ fun PoolItemRow(
                 }
             }
             
+            IconButton(onClick = { showComparisonDialog = true }, modifier = Modifier.size(32.dp)) {
+                Icon(Icons.Default.CompareArrows, "Vergleichen", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+            }
+
             if (!isFinished) {
                 IconButton(onClick = { onTakeClick(item) }, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.CalendarToday, "Auf Tag verteilen", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)

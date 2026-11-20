@@ -94,8 +94,6 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text("Mein Profil", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        
         Card {
             Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Persönliche Daten", fontWeight = FontWeight.Bold)
@@ -362,9 +360,6 @@ fun ProfileScreen(viewModel: ProfileViewModel, nutritionViewModel: NutritionView
             Text("Profil speichern")
         }
 
-        // --- DEVELOPER OPTIONS ---
-        DeveloperOptionsSection(nutritionViewModel, viewModel, userProfile)
-
         Spacer(Modifier.height(8.dp))
         Text("Daten-Sicherung", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         
@@ -446,166 +441,6 @@ private fun GoalChip(selected: Boolean, label: String, onClick: () -> Unit) {
         label = { Text(label) },
         modifier = Modifier.padding(2.dp)
     )
-}
-
-@Composable
-private fun DeveloperOptionsSection(
-    vm: NutritionViewModel,
-    profileVm: ProfileViewModel,
-    profile: UserProfile
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val context = LocalContext.current
-
-    Column(Modifier.fillMaxWidth().padding(top = 16.dp)) {
-        TextButton(
-            onClick = { expanded = !expanded },
-            modifier = Modifier.align(Alignment.CenterHorizontally)
-        ) {
-            Text(if (expanded) "Entwickleroptionen ausblenden" else "Entwickleroptionen einblenden", style = MaterialTheme.typography.labelSmall)
-        }
-
-        if (expanded) {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.1f)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("⚙️ Debug & Kalkulation", fontWeight = FontWeight.Bold)
-                    
-                    Button(
-                        onClick = { profileVm.updateProfile(profile.copy(setupCompleted = false)) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                    ) {
-                        Text("Setup Wizard jetzt starten")
-                    }
-
-                    Button(
-                        onClick = { 
-                            scope.launch {
-                                vm.forceMigrationToCloud()
-                                Toast.makeText(context, "Cloud-Migration manuell gestartet", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Cloud-Migration erzwingen")
-                    }
-
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                vm.repairAndWipeLocalCache()
-                                Toast.makeText(context, "Daten werden repariert & aus Cloud geladen...", Toast.LENGTH_LONG).show()
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
-                    ) {
-                        Text("🧹 Daten-Reparatur (Cloud Pull)")
-                    }
-
-                    HorizontalDivider()
-                    Text("Formel-Inspektor (Mifflin-St Jeor)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    
-                    val constant = if (profile.gender == Gender.MALE) "+5" else "-161"
-                    Text(
-                        "BMR = (10 * ${profile.weightKg}) + (6.25 * ${profile.heightCm}) - (5 * ${profile.age}) $constant",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
-                    Text(
-                        "= ${profile.bmr.toInt()} kcal Grundumsatz",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold
-                    )
-                    
-                    val goalIntensity = profile.goalIntensity
-                    val goalText = when(profile.goal) {
-                        UserGoal.LOSE_WEIGHT -> "Abnehmen (-$goalIntensity)"
-                        UserGoal.MAINTAIN -> "Halten (0)"
-                        UserGoal.BUILD_MUSCLE -> "Aufbauen (+$goalIntensity)"
-                    }
-                    Text("Ziel: $goalText", style = MaterialTheme.typography.labelSmall)
-                    Text("Finales Budget: ${profile.calorieBudget} kcal", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-
-                    HorizontalDivider()
-                    Text("🤖 Gemini 3.x AI Integration", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    
-                    var keyInput by remember { mutableStateOf(vm.geminiApiKey) }
-                    OutlinedTextField(
-                        value = keyInput,
-                        onValueChange = { 
-                            keyInput = it
-                            vm.updateGeminiApiKey(it)
-                        },
-                        label = { Text("Gemini API Key") },
-                        modifier = Modifier.fillMaxWidth(),
-                        visualTransformation = if (keyInput.isEmpty()) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                        singleLine = true
-                    )
-                    Text("Wird benötigt für die Bilderkennung im Tagebuch.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-
-                    Spacer(Modifier.height(8.dp))
-                    
-                    Button(onClick = { vm.probeAiModels() }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Verfügbare AI Modelle prüfen")
-                    }
-
-                    if (vm.availableAiModels.isNotEmpty()) {
-                        Column(modifier = Modifier.padding(top = 8.dp)) {
-                            vm.availableAiModels.forEach { status ->
-                                val model = status.modelName
-                                val isAvailable = status.isAvailable
-                                
-                                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        RadioButton(
-                                            selected = vm.selectedAiModel == model, 
-                                            onClick = { if (isAvailable) vm.updateSelectedAiModel(model) },
-                                            enabled = isAvailable
-                                        )
-                                        Text(
-                                            text = model, 
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = if (isAvailable) Color.Unspecified else Color.Gray,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                        if (isAvailable) {
-                                            Icon(Icons.Default.Check, null, tint = Color(0xFF2E7D32), modifier = Modifier.size(16.dp))
-                                        } else {
-                                            Icon(Icons.Default.Close, null, tint = Color.Red, modifier = Modifier.size(16.dp))
-                                        }
-                                    }
-                                    if (!isAvailable && !status.errorMessage.isNullOrBlank()) {
-                                        Text(
-                                            text = status.errorMessage,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Color.Red,
-                                            modifier = Modifier.padding(start = 48.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    HorizontalDivider()
-                    Text("Stoffwechsel-Analyse", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    
-                    val factor = profile.metabolicFactor
-                    Text("Aktueller Faktor: ${"%.2f".format(factor)}", style = MaterialTheme.typography.labelSmall)
-                    Text(
-                        "Dieser Faktor vergleicht das theoretische Defizit mit dem realen Gewichtsverlust auf der Waage. 1.0 = exakte Übereinstimmung.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline
-                    )
-                }
-            }
-        }
-    }
 }
 
 @Composable

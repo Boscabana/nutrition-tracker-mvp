@@ -141,12 +141,8 @@ fun WeightScreen(vm: NutritionViewModel, profileVm: ProfileViewModel) {
             .fillMaxSize()
             .padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 32.dp)
+        contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp)
     ) {
-        item {
-            Text("Gewicht & Fortschritt", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        }
-
         // Weight Entry Card
         item {
             Card(modifier = Modifier.fillMaxWidth()) {

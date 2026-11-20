@@ -41,6 +41,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
@@ -307,9 +310,56 @@ fun MealsScreen(
                         }
                         
                         AnimatedVisibility(visible = expanded) {
+                            val poolComparison = remember(meal, vm.plannedMealPool.size) { vm.compareMealWithPool(meal) }
+                            var showComparisonDialog by remember { mutableStateOf(false) }
+
+                            if (showComparisonDialog && poolComparison != null) {
+                                RecipeComparisonDialog(
+                                    comparison = poolComparison,
+                                    onDismiss = { showComparisonDialog = false },
+                                    onAdopt = { adoptIngredients, adoptInstructions ->
+                                        val poolItem = vm.plannedMealPool.find { it.mealName.trim().equals(meal.name.trim(), ignoreCase = true) }
+                                        if (poolItem != null) {
+                                            vm.adoptRecipeFromPool(poolItem, adoptIngredients, adoptInstructions)
+                                        }
+                                        showComparisonDialog = false
+                                    }
+                                )
+                            }
+
                             Column(Modifier.padding(top = 8.dp)) {
                                 HorizontalDivider(Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant)
                                 
+                                if (poolComparison != null) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.2f),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(bottom = 6.dp)
+                                            .clickable { showComparisonDialog = true }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Icon(Icons.Default.CompareArrows, null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.tertiary)
+                                            Spacer(Modifier.width(6.dp))
+                                            if (poolComparison.isIdentical) {
+                                                Text("Haushalts-Rezept: Identisch", style = MaterialTheme.typography.labelSmall, color = Color(0xFF2E7D32), fontWeight = FontWeight.SemiBold)
+                                            } else {
+                                                Text("Haushalts-Rezept vorhanden (Abweichungen: ", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                                if (poolComparison.hasIngredientNameDiff) Text("Artikel ", style = MaterialTheme.typography.labelSmall, color = Color(0xFFE65100), fontWeight = FontWeight.Bold)
+                                                if (poolComparison.hasAmountDiff) Text("Mengen ", style = MaterialTheme.typography.labelSmall, color = Color(0xFFF57F17), fontWeight = FontWeight.Bold)
+                                                if (poolComparison.hasInstructionDiff) Text("Anleitung", style = MaterialTheme.typography.labelSmall, color = Color(0xFF7B1FA2), fontWeight = FontWeight.Bold)
+                                                Text(")", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                            }
+                                            Spacer(Modifier.weight(1f))
+                                            Text("Vergleichen", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                                        }
+                                    }
+                                }
+
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -1540,46 +1590,27 @@ fun getUnitOptionsForIngredient(ing: MealIngredientEntity, food: FoodItemEntity?
     val list = mutableListOf<UnitOption>()
     val baseUnit = food?.baseUnit ?: ing.baseUnit.ifBlank { "g" }
 
+    // 1. Grund-Einheit (g oder ml)
     list.add(UnitOption(label = baseUnit, unitKey = baseUnit, gramsPerUnit = 1.0))
 
+    // 2. Eigenständige Einheit dieser Zutat aus dem Rezept
     if (ing.unitLabel.isNotBlank() && !ing.unitLabel.equals(baseUnit, ignoreCase = true)) {
         val gramsPerOne = if (ing.amount > 0) ing.grams / ing.amount else null
         val gramsDisplay = if (gramsPerOne != null && gramsPerOne > 0) " (${gramsPerOne.roundString()} $baseUnit)" else ""
         list.add(UnitOption(label = "${ing.unitLabel}$gramsDisplay", unitKey = ing.unitLabel, gramsPerUnit = gramsPerOne))
     }
 
+    // 3. Portions-Einheiten dieses spezifischen Lebensmittels
     food?.getAllPortions()?.forEach { portion ->
         if (!list.any { it.unitKey.equals(portion.name, ignoreCase = true) }) {
             list.add(UnitOption(label = "${portion.name} (${portion.grams.roundString()} $baseUnit)", unitKey = portion.name, gramsPerUnit = portion.grams))
         }
     }
 
+    // 4. Verpackungseinheiten dieses spezifischen Lebensmittels
     food?.packages?.forEach { pkg ->
         if (!list.any { it.unitKey.equals(pkg.name, ignoreCase = true) }) {
             list.add(UnitOption(label = "${pkg.name} (${pkg.quantity.roundString()} $baseUnit)", unitKey = pkg.name, gramsPerUnit = pkg.quantity))
-        }
-    }
-
-    val commonUnits = listOf(
-        Pair("x", null),
-        Pair("Stück", null),
-        Pair("TL", 5.0),
-        Pair("EL", 15.0),
-        Pair("Prise", 1.0),
-        Pair("Tasse", 150.0),
-        Pair("Becher", 150.0),
-        Pair("Messerspitze", 0.5),
-        Pair("Spritzer", 2.0),
-        Pair("Schuss", 10.0),
-        Pair("Zehe", 5.0),
-        Pair("Dose", 400.0),
-        Pair("Packung", 250.0)
-    )
-
-    commonUnits.forEach { (name, defaultG) ->
-        if (!list.any { it.unitKey.equals(name, ignoreCase = true) }) {
-            val gDisplay = if (defaultG != null) " (~${defaultG.round0()} $baseUnit)" else ""
-            list.add(UnitOption(label = "$name$gDisplay", unitKey = name, gramsPerUnit = defaultG))
         }
     }
 
@@ -1619,7 +1650,7 @@ fun renderRecipeDescription(
             val gramsStr = if (scaledGrams % 1.0 == 0.0) "%.0f".format(scaledGrams) else "%.1f".format(scaledGrams)
 
             val unitLabelClean = link.unitLabel.trim()
-            val amountInBrackets = if (link.amount <= 0.0) {
+            val amountDisplay = if (link.amount <= 0.0) {
                 ""
             } else if (unitLabelClean.equals("g", ignoreCase = true) || unitLabelClean.equals("ml", ignoreCase = true)) {
                 val gDisplay = if (scaledGrams > 0) gramsStr else amtStr
@@ -1632,23 +1663,13 @@ fun renderRecipeDescription(
                 ""
             }
 
-            var cleanText = link.displayText.trim()
-            if (link.amount > 0.0) {
-                val origAmtStr = if (link.amount % 1.0 == 0.0) "%.0f".format(link.amount) else "%.1f".format(link.amount)
-                if (cleanText.startsWith(origAmtStr) && cleanText.length > origAmtStr.length) {
-                    val candidate = cleanText.substring(origAmtStr.length).trimStart(' ', 'g', 'm', 'l', 'x')
-                    if (candidate.isNotBlank()) {
-                        cleanText = candidate
-                    }
-                }
-            }
-
-            val formattedLinkText = if (amountInBrackets.isBlank()) {
-                cleanText
-            } else if (cleanText.contains("($amountInBrackets)") || cleanText.endsWith("($amountInBrackets)")) {
-                cleanText
+            val rawText = link.displayText.trim()
+            val formattedLinkText = if (amountDisplay.isBlank()) {
+                rawText
+            } else if (rawText.startsWith(amountDisplay) || rawText.contains(amountDisplay)) {
+                rawText
             } else {
-                "$cleanText ($amountInBrackets)"
+                "$amountDisplay $rawText"
             }
 
             val startSpan = length
@@ -1659,7 +1680,6 @@ fun renderRecipeDescription(
                 style = SpanStyle(
                     color = primaryColor,
                     fontWeight = FontWeight.Bold,
-                    textDecoration = TextDecoration.Underline,
                     background = primaryContainer
                 ),
                 start = startSpan,
@@ -1671,6 +1691,188 @@ fun renderRecipeDescription(
 
         if (lastIndex < description.length) {
             append(description.substring(lastIndex))
+        }
+    }
+}
+
+class RecipeTagVisualTransformation(
+    private val mealIngredients: List<MealIngredientEntity>,
+    private val primaryColor: Color,
+    private val containerColor: Color
+) : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val rawText = text.text
+        val links = RecipeTextParser.parseLinks(rawText)
+
+        if (links.isEmpty()) {
+            return TransformedText(text, OffsetMapping.Identity)
+        }
+
+        val builder = AnnotatedString.Builder()
+        val originalToTransformed = IntArray(rawText.length + 1)
+        val transformedToOriginal = mutableListOf<Int>()
+
+        var origIdx = 0
+        var transIdx = 0
+
+        links.forEach { link ->
+            while (origIdx < link.range.first) {
+                originalToTransformed[origIdx] = transIdx
+                transformedToOriginal.add(origIdx)
+                builder.append(rawText[origIdx])
+                origIdx++
+                transIdx++
+            }
+
+            val mealIng = RecipeTextParser.resolveMealIngredient(link, mealIngredients)
+            val ingName = mealIng?.name ?: link.displayText.trim()
+
+            val amtStr = if (link.amount % 1.0 == 0.0) "%.0f".format(link.amount) else "%.1f".format(link.amount)
+            val unitClean = link.unitLabel.trim()
+            val amountDisplay = if (link.amount <= 0.0) {
+                ""
+            } else if (unitClean.equals("g", ignoreCase = true) || unitClean.equals("ml", ignoreCase = true)) {
+                "$amtStr$unitClean"
+            } else if (unitClean.isNotBlank()) {
+                "$amtStr $unitClean"
+            } else {
+                ""
+            }
+
+            val rawDisp = link.displayText.trim()
+            val linkVisualText = if (amountDisplay.isBlank()) {
+                " $rawDisp "
+            } else if (rawDisp.startsWith(amountDisplay) || rawDisp.contains(amountDisplay)) {
+                " $rawDisp "
+            } else {
+                " $amountDisplay $ingName "
+            }
+
+            val tagStartTrans = transIdx
+            builder.append(linkVisualText)
+            val tagEndTrans = transIdx + linkVisualText.length
+
+            builder.addStyle(
+                style = SpanStyle(
+                    color = primaryColor,
+                    fontWeight = FontWeight.Bold,
+                    background = containerColor
+                ),
+                start = tagStartTrans,
+                end = tagEndTrans
+            )
+
+            val tagLength = link.range.last - link.range.first + 1
+            for (i in 0 until tagLength) {
+                val mappedTrans = (tagStartTrans + (i.toFloat() / tagLength * linkVisualText.length).toInt())
+                    .coerceIn(tagStartTrans, tagEndTrans)
+                originalToTransformed[origIdx + i] = mappedTrans
+            }
+            for (i in 0 until linkVisualText.length) {
+                val mappedOrig = (link.range.first + (i.toFloat() / linkVisualText.length * tagLength).toInt())
+                    .coerceIn(link.range.first, link.range.last)
+                transformedToOriginal.add(mappedOrig)
+            }
+
+            origIdx = link.range.last + 1
+            transIdx = tagEndTrans
+        }
+
+        while (origIdx < rawText.length) {
+            originalToTransformed[origIdx] = transIdx
+            transformedToOriginal.add(origIdx)
+            builder.append(rawText[origIdx])
+            origIdx++
+            transIdx++
+        }
+
+        originalToTransformed[rawText.length] = transIdx
+        transformedToOriginal.add(rawText.length)
+
+        val offsetMapping = object : OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int {
+                return originalToTransformed[offset.coerceIn(0, rawText.length)]
+            }
+
+            override fun transformedToOriginal(offset: Int): Int {
+                return transformedToOriginal[offset.coerceIn(0, transformedToOriginal.size - 1)]
+            }
+        }
+
+        return TransformedText(builder.toAnnotatedString(), offsetMapping)
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun StepIngredientChipsRow(
+    description: String,
+    mealIngredients: List<MealIngredientEntity>,
+    foods: List<FoodItemEntity> = emptyList(),
+    scaleFactor: Double = 1.0
+) {
+    val links = remember(description) { RecipeTextParser.parseLinks(description) }
+    if (links.isEmpty()) return
+
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.padding(top = 6.dp)
+    ) {
+        links.forEach { link ->
+            val mealIng = RecipeTextParser.resolveMealIngredient(link, mealIngredients)
+            val food = foods.find { it.id == mealIng?.foodItemId || (mealIng != null && it.matchesIngredient(mealIng)) }
+            val (baseGrams, _) = RecipeTextParser.calculateLinkGramsAndAmount(link, mealIng, food)
+
+            val scaledAmt = link.amount * scaleFactor
+            val scaledGrams = baseGrams * scaleFactor
+
+            val amtStr = if (scaledAmt % 1.0 == 0.0) "%.0f".format(scaledAmt) else "%.1f".format(scaledAmt)
+            val gramsStr = if (scaledGrams % 1.0 == 0.0) "%.0f".format(scaledGrams) else "%.1f".format(scaledGrams)
+
+            val unitLabelClean = link.unitLabel.trim()
+            val amountDisplay = if (link.amount <= 0.0) {
+                ""
+            } else if (unitLabelClean.equals("g", ignoreCase = true) || unitLabelClean.equals("ml", ignoreCase = true)) {
+                val gDisplay = if (scaledGrams > 0) gramsStr else amtStr
+                "$gDisplay$unitLabelClean"
+            } else if (unitLabelClean.isNotBlank()) {
+                "$amtStr $unitLabelClean"
+            } else {
+                ""
+            }
+
+            val ingName = mealIng?.name ?: link.displayText.trim()
+            val chipText = if (amountDisplay.isNotBlank()) {
+                if (ingName.startsWith(amountDisplay) || ingName.contains(amountDisplay)) ingName
+                else "$amountDisplay $ingName"
+            } else {
+                ingName
+            }
+
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.RestaurantMenu,
+                        contentDescription = null,
+                        modifier = Modifier.size(12.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = chipText,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
         }
     }
 }
@@ -1811,6 +2013,7 @@ fun RecipeStepsEditorDialog(
                                             style = MaterialTheme.typography.bodyMedium,
                                             modifier = Modifier.padding(top = 4.dp)
                                         )
+                                        StepIngredientChipsRow(step.description, mealIngredients, foods)
                                     }
                                 }
                             }
@@ -1844,6 +2047,239 @@ fun RecipeStepsEditorDialog(
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
+fun IngredientLinkDialog(
+    ingredient: MealIngredientEntity,
+    food: FoodItemEntity? = null,
+    onDismiss: () -> Unit,
+    onConfirm: (tagText: String) -> Unit
+) {
+    val totalRecipeGrams = if (ingredient.grams > 0) ingredient.grams else ingredient.amount
+    val totalRecipeAmount = if (ingredient.amount > 0) ingredient.amount else ingredient.grams
+    val baseUnit = ingredient.unitLabel.ifBlank { "g" }
+
+    val unitOptions = remember(ingredient, food) {
+        getUnitOptionsForIngredient(ingredient, food)
+    }
+
+    var selectedUnitOption by remember { mutableStateOf(unitOptions.firstOrNull() ?: UnitOption(baseUnit, baseUnit, 1.0)) }
+
+    val maxUnitAmount = remember(selectedUnitOption, totalRecipeAmount, totalRecipeGrams) {
+        val gPerUnit = selectedUnitOption.gramsPerUnit
+        if (gPerUnit != null && gPerUnit > 0) {
+            totalRecipeGrams / gPerUnit
+        } else if (selectedUnitOption.unitKey.equals(ingredient.unitLabel, ignoreCase = true)) {
+            totalRecipeAmount
+        } else {
+            totalRecipeAmount
+        }
+    }
+
+    fun formatAmt(value: Double): String {
+        return when {
+            value <= 0.0 -> "0"
+            value % 1.0 == 0.0 -> "%.0f".format(value)
+            (value * 10) % 1.0 == 0.0 -> "%.1f".format(value)
+            else -> "%.2f".format(value)
+        }
+    }
+
+    var sliderRatio by remember { mutableFloatStateOf(1.0f) }
+
+    // Synchronized amount text input
+    var selectedAmountText by remember(selectedUnitOption, maxUnitAmount) {
+        mutableStateOf(formatAmt(maxUnitAmount))
+    }
+
+    // Separate grammar / label text field (defaults to ingredient.name e.g. "Nudeln")
+    var ingredientCustomLabel by remember(ingredient.name) { mutableStateOf(ingredient.name) }
+
+    fun updateFromSlider(ratio: Float) {
+        sliderRatio = ratio.coerceIn(0.01f, 1.0f)
+        val calc = (sliderRatio * maxUnitAmount).toDouble()
+        selectedAmountText = formatAmt(calc)
+    }
+
+    fun updateFromAmountText(text: String) {
+        selectedAmountText = text
+        val parsed = text.replace(',', '.').toDoubleOrNull()
+        if (parsed != null && parsed > 0 && maxUnitAmount > 0) {
+            val clamped = parsed.coerceAtMost(maxUnitAmount)
+            sliderRatio = (clamped / maxUnitAmount).toFloat().coerceIn(0.01f, 1.0f)
+        }
+    }
+
+    val unitKeyClean = selectedUnitOption.unitKey.trim()
+    val formattedAmountDisplay = remember(selectedAmountText, unitKeyClean) {
+        if (selectedAmountText.isBlank()) ""
+        else if (unitKeyClean.equals("g", ignoreCase = true) || unitKeyClean.equals("ml", ignoreCase = true)) {
+            "$selectedAmountText$unitKeyClean"
+        } else if (unitKeyClean.equals("x", ignoreCase = true) || unitKeyClean.equals("Stück", ignoreCase = true) || unitKeyClean.equals("Stk.", ignoreCase = true)) {
+            "$selectedAmountText Stk."
+        } else if (unitKeyClean.isNotBlank()) {
+            "$selectedAmountText $unitKeyClean"
+        } else {
+            selectedAmountText
+        }
+    }
+
+    val finalPreviewText = remember(formattedAmountDisplay, ingredientCustomLabel) {
+        val labelTrimmed = ingredientCustomLabel.trim()
+        if (formattedAmountDisplay.isBlank()) labelTrimmed
+        else if (labelTrimmed.startsWith(formattedAmountDisplay) || labelTrimmed.contains(formattedAmountDisplay)) labelTrimmed
+        else "$formattedAmountDisplay $labelTrimmed"
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Zutat verlinken: ${ingredient.name}") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Gesamt in dieser Mahlzeit: ${ingredient.displayAmount()}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+
+                Text("Einheit wählen:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    unitOptions.forEach { opt ->
+                        FilterChip(
+                            selected = selectedUnitOption.unitKey == opt.unitKey,
+                            onClick = {
+                                selectedUnitOption = opt
+                                updateFromSlider(sliderRatio)
+                            },
+                            label = { Text(opt.label) }
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = selectedAmountText,
+                        onValueChange = { updateFromAmountText(it) },
+                        label = { Text("Menge") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        trailingIcon = { Text(selectedUnitOption.unitKey, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(end = 8.dp)) }
+                    )
+                }
+
+                Slider(
+                    value = sliderRatio,
+                    onValueChange = { updateFromSlider(it) },
+                    valueRange = 0.05f..1.0f,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(0.25f to "25%", 0.5f to "50%", 0.75f to "75%", 1.0f to "100%").forEach { (pct, label) ->
+                        AssistChip(
+                            onClick = { updateFromSlider(pct) },
+                            label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
+
+                OutlinedTextField(
+                    value = ingredientCustomLabel,
+                    onValueChange = { ingredientCustomLabel = it },
+                    label = { Text("Bezeichnung / Grammatik im Text") },
+                    placeholder = { Text("z.B. der Nudeln, des Mehls") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text("Vorschau im Text:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = finalPreviewText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val amt = selectedAmountText.replace(',', '.').toDoubleOrNull() ?: (sliderRatio * maxUnitAmount).toDouble()
+                val ingRef = "${ingredient.name}|${ingredient.id}"
+                val tag = "[\"$finalPreviewText\"@$ingRef#$amt${selectedUnitOption.unitKey}]"
+                onConfirm(tag)
+            }) {
+                Icon(Icons.Default.Link, null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Link einfügen")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Abbrechen") }
+        }
+    )
+}
+
+fun handleAtomicTagDeletion(
+    oldValue: TextFieldValue,
+    newValue: TextFieldValue
+): TextFieldValue {
+    val oldText = oldValue.text
+    val newText = newValue.text
+
+    if (newText.length >= oldText.length) return newValue
+
+    val oldLinks = RecipeTextParser.parseLinks(oldText)
+    if (oldLinks.isEmpty()) return newValue
+
+    val oldSelection = oldValue.selection
+    val newSelection = newValue.selection
+
+    val deletedRangeStart = newSelection.start.coerceIn(0, oldText.length)
+    val deletedRangeEnd = oldSelection.end.coerceIn(0, oldText.length)
+
+    val affectedLink = oldLinks.find { link ->
+        (deletedRangeStart <= link.range.last + 1 && deletedRangeEnd >= link.range.first)
+    }
+
+    if (affectedLink != null) {
+        val sb = StringBuilder(oldText)
+        sb.replace(affectedLink.range.first, affectedLink.range.last + 1, "")
+        val resultText = sb.toString()
+        val newCursor = affectedLink.range.first.coerceIn(0, resultText.length)
+        return TextFieldValue(
+            text = resultText,
+            selection = TextRange(newCursor)
+        )
+    }
+
+    return newValue
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
 fun SingleStepEditDialog(
     step: RecipeStepEntity,
     mealIngredients: List<MealIngredientEntity>,
@@ -1855,6 +2291,7 @@ fun SingleStepEditDialog(
     var descriptionFieldValue by remember {
         mutableStateOf(TextFieldValue(text = step.description, selection = TextRange(step.description.length)))
     }
+    var selectedIngredientForLink by remember { mutableStateOf<MealIngredientEntity?>(null) }
 
     val parsedLinks = remember(descriptionFieldValue.text) {
         RecipeTextParser.parseLinks(descriptionFieldValue.text)
@@ -1864,8 +2301,31 @@ fun SingleStepEditDialog(
         RecipeTextParser.extractStepIngredients(descriptionFieldValue.text, mealIngredients, foods)
     }
 
-    val autocompleteContext = remember(descriptionFieldValue.text, descriptionFieldValue.selection) {
-        detectAutocompleteContext(descriptionFieldValue)
+    if (selectedIngredientForLink != null) {
+        val targetFood = foods.find { it.id == selectedIngredientForLink!!.foodItemId }
+        IngredientLinkDialog(
+            ingredient = selectedIngredientForLink!!,
+            food = targetFood,
+            onDismiss = { selectedIngredientForLink = null },
+            onConfirm = { tagText ->
+                val text = descriptionFieldValue.text
+                val start = descriptionFieldValue.selection.min.coerceIn(0, text.length)
+                val end = descriptionFieldValue.selection.max.coerceIn(0, text.length)
+
+                val prefix = if (start > 0 && !text[start - 1].isWhitespace()) " " else ""
+                val suffix = if (end < text.length && !text[end].isWhitespace()) " " else " "
+                val formattedTag = "$prefix$tagText$suffix"
+
+                val newText = text.substring(0, start) + formattedTag + text.substring(end)
+                val newCursorPos = start + formattedTag.length
+
+                descriptionFieldValue = TextFieldValue(
+                    text = newText,
+                    selection = TextRange(newCursorPos)
+                )
+                selectedIngredientForLink = null
+            }
+        )
     }
 
     AlertDialog(
@@ -1882,195 +2342,74 @@ fun SingleStepEditDialog(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text("Bezeichnung / Titel") },
-                    placeholder = { Text("z.B. Zutaten vermengen") },
+                    placeholder = { Text("z.B. Gemüse anbraten") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
 
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                // Horizontal Ingredient Bar (Tippen zum Verlinken)
+                if (mealIngredients.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(
-                            "Anleitung / Beschreibung",
+                            "🥗 Zutaten aus dieser Mahlzeit (tippen zum Verlinken):",
                             style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
                         )
-                        AssistChip(
-                            onClick = {
-                                val text = descriptionFieldValue.text
-                                val start = descriptionFieldValue.selection.min.coerceIn(0, text.length)
-                                val end = descriptionFieldValue.selection.max.coerceIn(0, text.length)
-
-                                val prefix = if (start > 0 && !text[start - 1].isWhitespace()) " " else ""
-                                val suffix = if (end < text.length && !text[end - 1].isWhitespace()) " " else " "
-                                val template = "$prefix[\"\"@#]$suffix"
-
-                                val newText = text.substring(0, start) + template + text.substring(end)
-                                val newCursorPos = start + prefix.length + 2
-
-                                descriptionFieldValue = TextFieldValue(
-                                    text = newText,
-                                    selection = TextRange(newCursorPos)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            mealIngredients.forEach { ing ->
+                                AssistChip(
+                                    onClick = { selectedIngredientForLink = ing },
+                                    label = { Text("${ing.name} (${ing.displayAmount()})") },
+                                    leadingIcon = { Icon(Icons.Default.Add, null, modifier = Modifier.size(14.dp)) },
+                                    colors = AssistChipDefaults.assistChipColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f))
                                 )
-                            },
-                            label = { Text("+ Tag-Schablone [\"\"@#]", style = MaterialTheme.typography.labelSmall) },
-                            leadingIcon = { Icon(Icons.Default.Code, null, modifier = Modifier.size(14.dp)) }
-                        )
+                            }
+                        }
                     }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "Anleitung / Beschreibung",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    val primaryColor = MaterialTheme.colorScheme.primary
+                    val primaryContainer = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)
 
                     OutlinedTextField(
                         value = descriptionFieldValue,
-                        onValueChange = { descriptionFieldValue = it },
-                        placeholder = { Text("z.B. [\"300g Kartoffeln\"@Kartoffeln#300g] schälen und kochen...") },
+                        onValueChange = { newValue ->
+                            descriptionFieldValue = handleAtomicTagDeletion(descriptionFieldValue, newValue)
+                        },
+                        placeholder = { Text("z.B. Kartoffeln schälen, im Topf kochen und mit Butter verfeinern...") },
                         modifier = Modifier.fillMaxWidth(),
-                        minLines = 3
+                        minLines = 3,
+                        visualTransformation = RecipeTagVisualTransformation(mealIngredients, primaryColor, primaryContainer)
                     )
 
                     Text(
-                        "Tipp: Tippe direkt [\"Linktext\"@Zutat#MengeEinheit] ein.",
+                        "Tipp: Klicke oben auf eine Zutat, um Menge und Link direkt an der Textposition einzufügen.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.outline
                     )
                 }
 
-                if (autocompleteContext.type == AutocompleteType.INGREDIENT) {
-                    val query = autocompleteContext.query
-                    val filteredIngs = remember(query, mealIngredients) {
-                        if (query.isBlank()) mealIngredients
-                        else mealIngredients.filter { it.name.contains(query, ignoreCase = true) }
-                    }
-
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Text(
-                                "Zutat wählen (@${query}):",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            if (filteredIngs.isEmpty()) {
-                                Text("Keine Zutat gefunden", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                            } else {
-                                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    filteredIngs.forEach { ing ->
-                                        SuggestionChip(
-                                            onClick = {
-                                                val text = descriptionFieldValue.text
-                                                val atIdx = autocompleteContext.atIndex
-
-                                                val beforeAt = text.substring(0, atIdx + 1)
-                                                val afterAt = text.substring(atIdx + 1)
-
-                                                val ingRef = "${ing.name}|${ing.id}"
-
-                                                val hashIdxInAfter = afterAt.indexOf("#")
-                                                val newText: String
-                                                val newCursorPos: Int
-
-                                                if (hashIdxInAfter != -1) {
-                                                    val textAfterHash = afterAt.substring(hashIdxInAfter + 1)
-                                                    newText = beforeAt + ingRef + "#" + textAfterHash
-                                                    newCursorPos = beforeAt.length + ingRef.length + 1
-                                                } else {
-                                                    val closingBracketIdx = afterAt.indexOf("]")
-                                                    val textAfterTag = if (closingBracketIdx != -1) afterAt.substring(closingBracketIdx) else "]"
-                                                    newText = beforeAt + ingRef + "#" + textAfterTag
-                                                    newCursorPos = beforeAt.length + ingRef.length + 1
-                                                }
-
-                                                descriptionFieldValue = TextFieldValue(
-                                                    text = newText,
-                                                    selection = TextRange(newCursorPos)
-                                                )
-                                            },
-                                            label = { Text("${ing.name} (${ing.displayAmount()})") },
-                                            icon = { Icon(Icons.Default.RestaurantMenu, null, modifier = Modifier.size(16.dp)) }
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if (autocompleteContext.type == AutocompleteType.UNIT) {
-                    val selectedIngRef = autocompleteContext.selectedIngRef ?: ""
-                    val targetIng = remember(selectedIngRef, mealIngredients) {
-                        val refId = selectedIngRef.substringAfter("|").toLongOrNull() ?: 0L
-                        if (refId > 0) mealIngredients.find { it.id == refId }
-                        else mealIngredients.find { it.name.equals(selectedIngRef, ignoreCase = true) }
-                    }
-                    val targetFood = remember(targetIng, foods) {
-                        targetIng?.let { ing -> foods.find { it.id == ing.foodItemId || it.matchesIngredient(ing) } }
-                    }
-                    val unitOptions = remember(targetIng, targetFood) {
-                        if (targetIng != null) getUnitOptionsForIngredient(targetIng, targetFood)
-                        else emptyList()
-                    }
-
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(8.dp)) {
-                            Text(
-                                "Einheit / Stückmenge wählen (#):",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                unitOptions.forEach { option ->
-                                    SuggestionChip(
-                                        onClick = {
-                                            val text = descriptionFieldValue.text
-                                            val hashIdx = autocompleteContext.hashIndex
-
-                                            val beforeHash = text.substring(0, hashIdx + 1)
-                                            val afterHash = text.substring(hashIdx + 1)
-
-                                            val closingBracketIdx = afterHash.indexOf("]")
-                                            val contentInsideHashAndBracket = if (closingBracketIdx != -1) afterHash.substring(0, closingBracketIdx) else afterHash
-                                            val textAfterBracket = if (closingBracketIdx != -1) afterHash.substring(closingBracketIdx + 1) else ""
-
-                                            val digits = contentInsideHashAndBracket.takeWhile { it.isDigit() || it == '.' || it == ',' }
-                                            val amtStr = if (digits.isNotBlank()) digits else ""
-
-                                            val unitTag = "${amtStr}${option.unitKey}]"
-                                            val trailingSpace = if (textAfterBracket.startsWith(" ")) "" else " "
-
-                                            val newText = beforeHash + unitTag + textAfterBracket + trailingSpace
-                                            val newCursorPos = beforeHash.length + unitTag.length + trailingSpace.length
-
-                                            descriptionFieldValue = TextFieldValue(
-                                                text = newText,
-                                                selection = TextRange(newCursorPos)
-                                            )
-                                        },
-                                        label = { Text(option.label) }
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
+                // Live Preview
                 if (parsedLinks.isNotEmpty()) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Column(modifier = Modifier.padding(10.dp)) {
+                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("Vorschau der Anleitung:", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
-                            Spacer(Modifier.height(2.dp))
                             Text(
                                 text = renderRecipeDescription(descriptionFieldValue.text, mealIngredients, foods),
                                 style = MaterialTheme.typography.bodyMedium
@@ -2079,8 +2418,9 @@ fun SingleStepEditDialog(
                     }
                 }
 
+                // Linked ingredients Chips Summary
                 if (parsedLinks.isNotEmpty()) {
-                    Text("Verlinkte Zutaten im Text:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Text("Verlinkte Zutaten in diesem Schritt:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -2112,11 +2452,10 @@ fun SingleStepEditDialog(
                     }
                 }
 
-
-
+                // Ingredients Usage Summary in Meal
                 if (mealIngredients.isNotEmpty()) {
                     HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                    Text("Übersicht aller Zutaten in dieser Mahlzeit:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text("Verlinkungs-Fortschritt in der Mahlzeit:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
 
                     mealIngredients.forEach { ing ->
                         val linkedStepIng = computedStepIngredients.find { it.ingredientId == ing.id }
@@ -2135,7 +2474,7 @@ fun SingleStepEditDialog(
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "In Schritt: ${linkedGrams.round0()}g / Mahlzeit: ${ing.displayAmount()}",
+                                    text = "In Schritt: ${linkedGrams.round0()}g / Gesamt: ${ing.displayAmount()}",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = if (isFullyLinked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
                                 )
@@ -2328,6 +2667,7 @@ fun CookingModeDialog(
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 modifier = Modifier.padding(vertical = 4.dp)
                                             )
+                                            StepIngredientChipsRow(step.description, meal.ingredients, foods, scaleFactor = scaleFactor)
                                         }
                                     }
                                 }
@@ -2382,6 +2722,7 @@ fun CookingModeDialog(
                                             text = renderRecipeDescription(step.description, meal.ingredients, foods, scaleFactor = scaleFactor),
                                             style = MaterialTheme.typography.bodyLarge
                                         )
+                                        StepIngredientChipsRow(step.description, meal.ingredients, foods, scaleFactor = scaleFactor)
                                     }
                                 }
                             }

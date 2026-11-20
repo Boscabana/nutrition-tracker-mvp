@@ -79,6 +79,97 @@ class FirestoreRepository {
             .await()
     }
 
+    // --- Household Chat & Feed ---
+    fun getHouseholdFeed(householdId: String): Flow<List<HouseholdChatMessage>> = callbackFlow {
+        val subscription = db.collection("households")
+            .document(householdId)
+            .collection("feed")
+            .orderBy("timestamp", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("Firestore", "Error listening to household feed", error)
+                    close(error)
+                    return@addSnapshotListener
+                }
+                launch(Dispatchers.Default) {
+                    val messages = snapshot?.documents?.mapNotNull { doc ->
+                        doc.toObject(HouseholdChatMessage::class.java)?.copy(id = doc.id)
+                    } ?: emptyList()
+                    trySend(messages)
+                }
+            }
+        awaitClose { subscription.remove() }
+    }
+
+    suspend fun sendHouseholdChatMessage(householdId: String, message: HouseholdChatMessage) {
+        val docRef = if (message.id.isNotBlank()) {
+            db.collection("households").document(householdId).collection("feed").document(message.id)
+        } else {
+            db.collection("households").document(householdId).collection("feed").document()
+        }
+        val finalMsg = message.copy(id = docRef.id)
+        docRef.set(finalMsg).await()
+    }
+
+    suspend fun deleteHouseholdChatMessage(householdId: String, messageId: String) {
+        db.collection("households")
+            .document(householdId)
+            .collection("feed")
+            .document(messageId)
+            .delete()
+            .await()
+    }
+
+    // --- Global Community Posts & Feed ---
+    fun getCommunityPosts(): Flow<List<CommunityPost>> = callbackFlow {
+        val subscription = db.collection("community_posts")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .limit(100)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.e("Firestore", "Error listening to community posts", error)
+                    close(error)
+                    return@addSnapshotListener
+                }
+                launch(Dispatchers.Default) {
+                    val posts = snapshot?.documents?.mapNotNull { doc ->
+                        doc.toObject(CommunityPost::class.java)?.copy(id = doc.id)
+                    } ?: emptyList()
+                    trySend(posts)
+                }
+            }
+        awaitClose { subscription.remove() }
+    }
+
+    suspend fun publishCommunityPost(post: CommunityPost) {
+        val docRef = if (post.id.isNotBlank()) {
+            db.collection("community_posts").document(post.id)
+        } else {
+            db.collection("community_posts").document()
+        }
+        val finalPost = post.copy(id = docRef.id)
+        docRef.set(finalPost).await()
+    }
+
+    suspend fun toggleLikeCommunityPost(postId: String, uid: String) {
+        val docRef = db.collection("community_posts").document(postId)
+        db.runTransaction { transaction ->
+            val snapshot = transaction.get(docRef)
+            val post = snapshot.toObject(CommunityPost::class.java) ?: return@runTransaction
+            val liked = post.likedByUids.contains(uid)
+            val newLikedBy = if (liked) post.likedByUids - uid else post.likedByUids + uid
+            val newCount = newLikedBy.size
+            transaction.update(docRef, "likedByUids", newLikedBy, "likesCount", newCount)
+        }.await()
+    }
+
+    suspend fun deleteCommunityPost(postId: String) {
+        db.collection("community_posts")
+            .document(postId)
+            .delete()
+            .await()
+    }
+
 
     fun getShoppingList(householdId: String): Flow<List<ShoppingItem>> = callbackFlow {
         val subscription = db.collection("households")

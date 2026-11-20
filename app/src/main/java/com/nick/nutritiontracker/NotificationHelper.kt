@@ -14,11 +14,12 @@ object NotificationHelper {
 
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val name = "Erinnerungen"
-            val descriptionText = "Benachrichtigungen für Mahlzeiten-Erinnerungen"
-            val importance = NotificationManager.IMPORTANCE_DEFAULT
+            val name = "Haushalt & Erinnerungen"
+            val descriptionText = "Benachrichtigungen für den Haushalt, Einkaufsliste und Mahlzeiten"
+            val importance = NotificationManager.IMPORTANCE_HIGH
             val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
                 description = descriptionText
+                enableVibration(true)
             }
             val notificationManager: NotificationManager =
                 context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -51,6 +52,16 @@ object NotificationHelper {
             2001,
             "Neue Nachricht",
             "$senderName hat dir $typeLabel gesendet!"
+        )
+    }
+
+    fun showHouseholdPushNotification(context: Context, title: String, text: String) {
+        val notifId = (System.currentTimeMillis() % 10000).toInt() + 3000
+        showNotification(
+            context,
+            notifId,
+            title,
+            text
         )
     }
 
