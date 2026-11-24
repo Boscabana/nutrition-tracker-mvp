@@ -200,6 +200,41 @@ class GeminiService(private val config: ConfigManager) {
         }
     }
 
+    suspend fun estimatePortionWeights(foodName: String, portionNames: List<String>, preferredModel: String? = null): GeminiResult<Map<String, Double>> {
+        return executeWithFallback(preferredModel) { modelToUse ->
+            val model = getModel(modelToUse)
+            val prompt = """
+                You are a nutrition expert. 
+                I have a food item named '$foodName'.
+                I want to know the average weight in grams for the following portion descriptions: ${portionNames.joinToString(", ")}.
+                
+                IMPORTANT RULES:
+                1. Provide ONLY a valid JSON object.
+                2. The keys in the JSON object must be EXACTLY the requested portion names.
+                3. The values must be ABSOLUTE numbers in grams.
+                4. DO NOT use ranges. Use an average/typical value, e.g. 120.0.
+                
+                Return ONLY a valid JSON object in the following format:
+                {
+                  "${portionNames.firstOrNull() ?: "Portion"}": 0.0
+                }
+            """.trimIndent()
+
+            val response = model.generateContent(prompt)
+            val responseText = response.text ?: ""
+            val cleanJson = extractJson(responseText)
+            if (cleanJson.isBlank()) {
+                GeminiResult(null, response.usageMetadata)
+            } else {
+                val jsonObject = json.parseToJsonElement(cleanJson).asJsonObject()
+                val weightMap = jsonObject.entries.associate { (k, v) ->
+                    k to (v.toString().replace("\"", "").toDoubleOrNull() ?: 0.0)
+                }
+                GeminiResult(weightMap, response.usageMetadata)
+            }
+        }
+    }
+
     suspend fun estimateGenericFood(foodName: String, categories: List<String>, isBrandSearch: Boolean = false, preferredModel: String? = null): GeminiResult<AiGenericFoodResult> {
         return executeWithFallback(preferredModel) { modelToUse ->
             val model = getModel(modelToUse)

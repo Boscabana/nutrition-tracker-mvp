@@ -1173,6 +1173,38 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     var isAnalyzingGenericFood by mutableStateOf(false)
     var aiGenericFoodError by mutableStateOf<String?>(null)
 
+    suspend fun estimatePortionWeights(foodName: String, portionNames: List<String>): Map<String, Double>? {
+        isAnalyzingGenericFood = true
+        aiGenericFoodError = null
+        return try {
+            val result = geminiService.estimatePortionWeights(foodName, portionNames)
+            
+            // Log usage
+            val user = firebaseManager.currentUser.value
+            if (user != null && result.usage != null) {
+                val usageMap = mapOf(
+                    "feature" to "portion_estimation",
+                    "model" to configManager.geminiModelName,
+                    "promptTokens" to (result.usage?.promptTokenCount ?: 0),
+                    "candidatesTokens" to (result.usage?.candidatesTokenCount ?: 0),
+                    "totalTokens" to (result.usage?.totalTokenCount ?: 0)
+                )
+                firestoreRepository.logAiUsage(user.uid, usageMap)
+            }
+            
+            if (result.data == null) {
+                aiGenericFoodError = "Keine Schätzung möglich."
+            }
+            result.data
+        } catch (e: Exception) {
+            Log.e("NutritionViewModel", "AI portion estimation failed", e)
+            aiGenericFoodError = "Fehler: ${e.localizedMessage}"
+            null
+        } finally {
+            isAnalyzingGenericFood = false
+        }
+    }
+
     suspend fun estimateGenericMacros(name: String, isBrandSearch: Boolean = false): AiGenericFoodResult? {
         isAnalyzingGenericFood = true
         aiGenericFoodError = null

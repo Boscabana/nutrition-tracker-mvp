@@ -7,11 +7,14 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -44,6 +47,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.PopupProperties
 import androidx.health.connect.client.HealthConnectClient
@@ -3302,14 +3306,155 @@ fun FoodEditDialog(
                     Spacer(Modifier.height(8.dp))
                 }
 
-                Text(if (isGeneric) "Allgemeine Portionen (z.B. Stück, Teller)" else "Zusätzliche Portionen", fontWeight = FontWeight.Bold)
-                portions.forEachIndexed { index, p ->
+                Text(if (isGeneric) "Allgemeine Portionen (z.B. Stück, Scheibe, mittelgroß)" else "Zusätzliche Portionen", fontWeight = FontWeight.Bold)
+                
+                if (isPremium) {
+                    var aiPortionInput by remember { mutableStateOf("") }
+                    val scope = rememberCoroutineScope()
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        AutoSelectTextField(p.name, { p.name = it }, label = { Text("Name") }, modifier = Modifier.weight(1f))
-                        AutoSelectTextField(p.grams, { p.grams = it }, label = { Text(baseUnit) }, modifier = Modifier.weight(0.6f))
-                        IconButton(onClick = { portions.removeAt(index) }) { Icon(Icons.Default.Delete, null, tint = Color.Red) }
+                        OutlinedTextField(
+                            value = aiPortionInput,
+                            onValueChange = { aiPortionInput = it },
+                            label = { Text("Portion per KI (z.B. mittelgroß)") },
+                            supportingText = { Text("Mehrere mit '/' trennen (z.B. S/M/L)") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = {
+                                scope.launch {
+                                    val inputNames = aiPortionInput.ifBlank { "mittelgroß" }
+                                    val portionNamesList = inputNames.split("/").map { it.trim() }.filter { it.isNotEmpty() }
+                                    if (portionNamesList.isNotEmpty()) {
+                                        val results = vm.estimatePortionWeights(name, portionNamesList)
+                                        if (results != null) {
+                                            results.forEach { (pName, pWeight) ->
+                                                if (pWeight > 0) {
+                                                    portions.add(PortionInputState(pName, pWeight.roundString()))
+                                                }
+                                            }
+                                            aiPortionInput = ""
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = name.isNotBlank() && !vm.isAnalyzingGenericFood,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(
+                                    if (name.isNotBlank()) MaterialTheme.colorScheme.primaryContainer else Color.LightGray.copy(alpha = 0.3f),
+                                    RoundedCornerShape(8.dp)
+                                )
+                        ) {
+                            if (vm.isAnalyzingGenericFood && aiPortionInput.isNotBlank()) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            } else {
+                                Icon(Icons.Default.AutoAwesome, "KI Portion", tint = if (name.isNotBlank()) MaterialTheme.colorScheme.primary else Color.Gray)
+                            }
+                        }
                     }
                 }
+
+                val density = LocalDensity.current
+                var draggedIndex by remember { mutableStateOf<Int?>(null) }
+                val dragOffsetAnim = remember { Animatable(0f) }
+                val rowHeightPx = with(density) { 68.dp.toPx() }
+                val scope = rememberCoroutineScope()
+                
+                // Calculate target index dynamically during drag
+                val targetIndex = draggedIndex?.let {
+                    (it + (dragOffsetAnim.value / rowHeightPx).roundToInt()).coerceIn(0, portions.size - 1)
+                }
+                
+                portions.forEachIndexed { index, p ->
+                    key(p) {
+                        val isDragged = draggedIndex == index
+                        
+                        val targetOffsetY = when {
+                            draggedIndex != null && targetIndex != null && !isDragged -> {
+                                if (draggedIndex!! < targetIndex && index in (draggedIndex!! + 1)..targetIndex) {
+                                    -rowHeightPx
+                                } else if (draggedIndex!! > targetIndex && index in targetIndex until draggedIndex!!) {
+                                    rowHeightPx
+                                } else {
+                                    0f
+                                }
+                            }
+                            else -> 0f
+                        }
+                        
+                        val animatedOffsetY by animateFloatAsState(
+                            targetValue = targetOffsetY, 
+                            animationSpec = if (draggedIndex == null) snap() else spring(),
+                            label = "drag_offset"
+                        )
+                        
+                        val finalOffsetY = if (isDragged) dragOffsetAnim.value else animatedOffsetY
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically, 
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier
+                                .graphicsLayer {
+                                    translationY = finalOffsetY
+                                    shadowElevation = if (isDragged) 8.dp.toPx() else 0f
+                                }
+                                .background(if (isDragged) MaterialTheme.colorScheme.surfaceVariant else Color.Transparent)
+                        ) {
+                            Icon(
+                                Icons.Default.DragHandle,
+                                contentDescription = "Verschieben",
+                                tint = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier
+                                    .padding(horizontal = 4.dp)
+                                    .size(32.dp)
+                                    .pointerInput(p) {
+                                        detectVerticalDragGestures(
+                                            onDragStart = { 
+                                                draggedIndex = portions.indexOf(p).takeIf { it >= 0 }
+                                                scope.launch { dragOffsetAnim.snapTo(0f) }
+                                            },
+                                            onDragEnd = { 
+                                                scope.launch {
+                                                    val currentIdx = portions.indexOf(p)
+                                                    if (currentIdx != -1) {
+                                                        val steps = (dragOffsetAnim.value / rowHeightPx).roundToInt()
+                                                        val tIndex = (currentIdx + steps).coerceIn(0, portions.size - 1)
+                                                        
+                                                        // Animate perfectly into the hole
+                                                        dragOffsetAnim.animateTo((tIndex - currentIdx) * rowHeightPx)
+                                                        
+                                                        if (tIndex != currentIdx) {
+                                                            val temp = portions.removeAt(currentIdx)
+                                                            portions.add(tIndex, temp)
+                                                        }
+                                                    }
+                                                    draggedIndex = null
+                                                    dragOffsetAnim.snapTo(0f)
+                                                }
+                                            },
+                                            onDragCancel = { 
+                                                scope.launch {
+                                                    dragOffsetAnim.animateTo(0f)
+                                                    draggedIndex = null
+                                                    dragOffsetAnim.snapTo(0f)
+                                                }
+                                            },
+                                            onVerticalDrag = { change, dragAmount ->
+                                                change.consume()
+                                                scope.launch {
+                                                    dragOffsetAnim.snapTo(dragOffsetAnim.value + dragAmount)
+                                                }
+                                            }
+                                        )
+                                    }
+                            )
+                            AutoSelectTextField(p.name, { p.name = it }, label = { Text("Name") }, modifier = Modifier.weight(1f))
+                            AutoSelectTextField(p.grams, { p.grams = it }, label = { Text(baseUnit) }, modifier = Modifier.weight(0.6f))
+                            IconButton(onClick = { portions.removeAt(index) }) { Icon(Icons.Default.Delete, null, tint = Color.Red) }
+                        }
+                    }
+                }
+                
                 TextButton(onClick = { portions.add(PortionInputState("", "")) }) {
                     Icon(Icons.Default.Add, null)
                     Spacer(Modifier.width(4.dp))
