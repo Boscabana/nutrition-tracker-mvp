@@ -68,6 +68,15 @@ class MainActivity : FragmentActivity() {
     private fun handleIntent(intent: Intent?) {
         if (intent?.action == "com.nick.nutritiontracker.ACTION_QUICK_SCAN") {
             nutritionVm.triggerScan(isQuickScan = true)
+            intent.action = null
+        } else if (intent?.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
+            if (sharedText != null) {
+                nutritionVm.handleSharedText(sharedText)
+            }
+            // Verhindern, dass der Intent bei Bildschirmdrehung (Re-Create) nochmal gefeuert wird
+            intent.action = null
+            intent.removeExtra(Intent.EXTRA_TEXT)
         }
     }
 

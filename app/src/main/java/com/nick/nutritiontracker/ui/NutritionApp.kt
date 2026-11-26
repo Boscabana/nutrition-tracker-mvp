@@ -7,7 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
+ import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -288,6 +288,46 @@ private fun MainApp(vm: NutritionViewModel, profileVm: ProfileViewModel, userPro
                 }) { Text("Abbrechen") }
             }
         )
+    }
+
+    if (vm.activeUrlRecipeImport != null) {
+        MealEditDialog(
+            meal = vm.activeUrlRecipeImport,
+            vm = vm,
+            onDismiss = { vm.activeUrlRecipeImport = null },
+            onSave = { name, ingredients, servings, tags, imageUrl, steps ->
+                val newMeal = MealEntity(
+                    id = System.currentTimeMillis(),
+                    name = name,
+                    servings = servings,
+                    tags = tags,
+                    imageUrl = imageUrl,
+                    recipeSteps = steps,
+                    ingredients = ingredients
+                )
+                vm.addMealToPool(newMeal, servings)
+                vm.activeUrlRecipeImport = null
+                // TODO: Toast or SnackBar that recipe was saved!
+            }
+        )
+    }
+
+    if (vm.isAnalyzingUrlRecipe) {
+        Dialog(onDismissRequest = { /* Don't dismiss */ }) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    CircularProgressIndicator()
+                    Text("Rezept wird von KI analysiert...", style = MaterialTheme.typography.bodyLarge)
+                }
+            }
+        }
     }
 
     if (vm.pendingAskToCapture != null) {
@@ -3008,6 +3048,7 @@ fun FoodItemRow(
 fun FoodEditDialog(
     food: FoodItemEntity?,
     vm: NutritionViewModel,
+    initialAiPortionInput: String = "",
     onDismiss: () -> Unit,
     onSave: (FoodItemEntity) -> Unit
 ) {
@@ -3309,7 +3350,7 @@ fun FoodEditDialog(
                 Text(if (isGeneric) "Allgemeine Portionen (z.B. Stück, Scheibe, mittelgroß)" else "Zusätzliche Portionen", fontWeight = FontWeight.Bold)
                 
                 if (isPremium) {
-                    var aiPortionInput by remember { mutableStateOf("") }
+                    var aiPortionInput by remember { mutableStateOf(initialAiPortionInput) }
                     val scope = rememberCoroutineScope()
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedTextField(

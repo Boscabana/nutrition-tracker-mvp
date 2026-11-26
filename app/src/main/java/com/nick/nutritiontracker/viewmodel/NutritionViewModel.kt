@@ -117,6 +117,9 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
     var foodSearchQuery by mutableStateOf("")
     var selectedFoodCategory by mutableStateOf<String?>(null)
     var pendingRecipeImport by mutableStateOf<RecipeData?>(null)
+    var activeUrlRecipeImport by mutableStateOf<MealEntity?>(null)
+    var isAnalyzingUrlRecipe by mutableStateOf(false)
+    
     var isShoppingListAggregated by mutableStateOf(value = false)
     var showPantryInShoppingList by mutableStateOf(value = false)
     var shoppingListSortByCategory by mutableStateOf(prefs.getBoolean("shopping_sort_category", true))
@@ -1166,6 +1169,60 @@ class NutritionViewModel(application: Application) : AndroidViewModel(applicatio
                 aiErrorMessage = "Fehler: ${e.localizedMessage}"
             } finally {
                 isAnalyzingImage = false
+            }
+        }
+    }
+
+    fun handleSharedText(sharedText: String) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            isAnalyzingUrlRecipe = true
+            try {
+                // If it's a URL, we could fetch it, but Gemini 1.5/2.5 can often process URLs if grounded, 
+                // OR we can just pass the raw text/URL directly to Gemini because Gemini handles URLs/text well natively.
+                // Let's first try basic URL fetching if it starts with http, to give Gemini the raw HTML text (stripped).
+                var textToProcess = sharedText
+                if (sharedText.contains("http")) {
+                    try {
+                        val urlStr = sharedText.substring(sharedText.indexOf("http")).split("\\s".toRegex())[0]
+                        val url = java.net.URL(urlStr)
+                        val connection = url.openConnection() as java.net.HttpURLConnection
+                        connection.useCaches = false
+                        connection.connectTimeout = 5000
+                        connection.readTimeout = 5000
+                        val html = connection.inputStream.bufferedReader().use { it.readText() }
+                        // Very rough strip of script/style and html tags to save tokens
+                        val stripped = html.replace(Regex("<script.*?>.*?</script>", RegexOption.DOT_MATCHES_ALL), "")
+                                           .replace(Regex("<style.*?>.*?</style>", RegexOption.DOT_MATCHES_ALL), "")
+                                           .replace(Regex("<[^>]+>"), " ")
+                                           .replace(Regex("\\s+"), " ")
+                        textToProcess = "URL: $urlStr\n\nContent:\n${stripped.take(15000)}" // limit to avoid massive token usage
+                    } catch (e: Exception) {
+                        Log.e("NutritionViewModel", "Could not fetch URL natively, passing raw URL to Gemini", e)
+                    }
+                }
+                
+                val result = geminiService.extractRecipeFromText(textToProcess)
+                
+                // Log usage
+                val user = firebaseManager.currentUser.value
+                if (user != null && result.usage != null) {
+                    val usageMap = mapOf(
+                        "feature" to "recipe_extraction",
+                        "model" to configManager.geminiModelName,
+                        "promptTokens" to (result.usage?.promptTokenCount ?: 0),
+                        "candidatesTokens" to (result.usage?.candidatesTokenCount ?: 0),
+                        "totalTokens" to (result.usage?.totalTokenCount ?: 0)
+                    )
+                    firestoreRepository.logAiUsage(user.uid, usageMap)
+                }
+                
+                if (result.data != null) {
+                    activeUrlRecipeImport = result.data
+                }
+            } catch (e: Exception) {
+                Log.e("NutritionViewModel", "Recipe extraction failed", e)
+            } finally {
+                isAnalyzingUrlRecipe = false
             }
         }
     }

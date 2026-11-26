@@ -307,6 +307,71 @@ class GeminiService(private val config: ConfigManager) {
             "Sonstiges"
         }
     }
+    suspend fun extractRecipeFromText(text: String, preferredModel: String? = null): GeminiResult<MealEntity> {
+        return executeWithFallback(preferredModel) { modelToUse ->
+            val model = getModel(modelToUse)
+            val prompt = """
+                You are an expert recipe extractor. I will provide you with text from a webpage or a recipe description.
+                Extract the recipe title and all ingredients with their amounts and units.
+                
+                IMPORTANT RULES:
+                1. Provide ONLY a valid JSON object.
+                2. Use the exact structure below. 
+                3. "name" should be the title of the recipe.
+                4. "servings" should be the number of portions the recipe makes (default to 1.0 if unknown).
+                5. Each item in "ingredients" must have "name" (the ingredient, e.g. "Tomaten"), "amount" (a number, e.g. 2.0), and "unit" (e.g. "Stück", "g", "ml", "EL", "TL"). 
+                6. Translate ingredient names to German.
+                7. If the text does not contain a recipe, return {"error": "No recipe found"}.
+                
+                Format:
+                {
+                  "name": "Recipe Title",
+                  "servings": 2.0,
+                  "ingredients": [
+                    { "name": "Zwiebel", "amount": 1.0, "unit": "Stück" },
+                    { "name": "Milch", "amount": 250.0, "unit": "ml" }
+                  ]
+                }
+                
+                Text to analyze:
+                $text
+            """.trimIndent()
+
+            val response = model.generateContent(prompt)
+            val cleanJson = extractJson(response.text ?: "")
+            if (cleanJson.isBlank() || cleanJson.contains("\"error\"")) {
+                GeminiResult(null, response.usageMetadata)
+            } else {
+                val jsonObject = json.parseToJsonElement(cleanJson).asJsonObject()
+                
+                val mealName = jsonObject["name"].asString()
+                val servings = jsonObject["servings"]?.toString()?.toDoubleOrNull() ?: 1.0
+                
+                val ingredientsArray = jsonObject["ingredients"]?.let {
+                    if (it is kotlinx.serialization.json.JsonArray) it else null
+                } ?: kotlinx.serialization.json.JsonArray(emptyList())
+
+                val parsedIngredients = ingredientsArray.mapIndexed { index, item ->
+                    val obj = item.asJsonObject()
+                    MealIngredientEntity(
+                        id = System.currentTimeMillis() + index, // WICHTIG: Einzigartige ID, damit LazyColumn nicht crasht/dedupliziert
+                        foodItemId = 0, // Unresolved
+                        name = obj["name"].asString(),
+                        amount = obj["amount"]?.toString()?.toDoubleOrNull() ?: 1.0,
+                        unitLabel = obj["unit"].asString().takeIf { it.isNotBlank() } ?: "Stück"
+                    )
+                }
+
+                val meal = MealEntity(
+                    name = mealName.ifBlank { "Importiertes Rezept" },
+                    servings = servings,
+                    ingredients = parsedIngredients
+                )
+                
+                GeminiResult(meal, response.usageMetadata)
+            }
+        }
+    }
 }
 
 private fun kotlinx.serialization.json.JsonElement.asJsonObject() = this as? kotlinx.serialization.json.JsonObject ?: kotlinx.serialization.json.JsonObject(emptyMap())
